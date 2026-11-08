@@ -1,0 +1,454 @@
+import { get, set, del } from 'idb-keyval';
+import {
+  Post,
+  Book,
+  Photo,
+  MediaItem,
+  CloudFile,
+  MailMessage,
+  Product,
+  Order,
+  ChatMessage,
+  SystemSettings,
+  EmailSettings,
+  PaymentSettings,
+  WebDavConfig,
+  User,
+} from '../types';
+
+export const STORAGE_KEYS = {
+  CURRENT_USER: 'fox3_current_user',
+  USERS: 'fox3_users',
+  POSTS: 'fox3_posts',
+  BOOKS: 'fox3_books',
+  PHOTOS: 'fox3_photos',
+  MEDIA: 'fox3_media',
+  FILES: 'fox3_files',
+  MAILS: 'fox3_mails',
+  PRODUCTS: 'fox3_products',
+  ORDERS: 'fox3_orders',
+  CHAT_MESSAGES: 'fox3_chat_messages',
+  SYSTEM_SETTINGS: 'fox3_system_settings',
+  EMAIL_SETTINGS: 'fox3_email_settings',
+  PAYMENT_SETTINGS: 'fox3_payment_settings',
+  WEBDAV_CONFIG: 'fox3_webdav_config',
+  WEBDAV_FILES: 'fox3_webdav_files',
+};
+
+// Safe LocalStorage Reader / Writer
+export const loadLocalStorage = <T>(key: string, defaultValue: T): T => {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return defaultValue;
+    return JSON.parse(raw);
+  } catch (e) {
+    console.warn(`[fox3 Storage] Failed reading ${key} from localStorage:`, e);
+    return defaultValue;
+  }
+};
+
+export const saveLocalStorage = <T>(key: string, value: T): void => {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch (e) {
+    console.error(`[fox3 Storage] Failed saving ${key} to localStorage:`, e);
+  }
+};
+
+// IndexedDB robust file storage (for images/videos/books of any size without quota errors)
+export const saveFileToIndexedDB = async (fileKey: string, blob: Blob | string): Promise<string> => {
+  try {
+    await set(fileKey, blob);
+    return fileKey;
+  } catch (err) {
+    console.warn('[fox3 IDB] IndexedDB save error, using object URL fallback', err);
+    return typeof blob === 'string' ? blob : URL.createObjectURL(blob);
+  }
+};
+
+export const getFileFromIndexedDB = async (fileKey: string): Promise<Blob | string | null> => {
+  try {
+    const val = await get(fileKey);
+    return val || null;
+  } catch (err) {
+    return null;
+  }
+};
+
+// Default initial data for fresh deployment
+export const DEFAULT_SETTINGS: SystemSettings = {
+  siteName: 'fox3 博客',
+  themeColor: '#f43f5e', // Rose
+  customPaletteBg: '#f8fafc',
+  fullBackgroundUrl: '',
+  avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=300&q=80',
+  heroIntroImage: 'https://images.unsplash.com/photo-1517849845537-4d257902454a?auto=format&fit=crop&w=1200&q=80',
+  heroBadge: '✨ 数字化知识库 & 个人空间',
+  heroTitle: '探索数字世界与全栈极简之美',
+  heroSubtitle: '融合 Cloudflare D1 + R2 + 邮件中枢与 WebDAV 容灾备份的下一代现代化博客系统',
+  hideNonBlogForGuests: false,
+  emailRegistrationOnly: true,
+  allowRegistration: true,
+  totalCapacityBytes: 10 * 1024 * 1024 * 1024, // 10 GB
+  usedCapacityBytes: 0, // Starts at zero as requested
+};
+
+export const DEFAULT_ADMIN: User = {
+  id: 'user_fox_admin',
+  username: 'fox',
+  email: 'service@whitefox.blog',
+  role: 'admin',
+  createdAt: Date.now(),
+  avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=300&q=80',
+  status: 'active',
+};
+
+export const DEFAULT_POSTS: Post[] = [
+  {
+    id: 'post-1',
+    title: 'fox3 架构设计：基于 Cloudflare D1 与 R2 的无服务器全能博客平台',
+    summary: '深度解析 fox3 的底层存储模型与高可用设计：如何利用 Cloudflare D1 驱动海量结构化文章与交互，以及 R2 构建零流出费用的全球多媒体知识库。',
+    content: `# fox3 架构设计：基于 Cloudflare D1 与 R2 的高可用全能博客平台
+
+欢迎使用 **fox3**！这是一个专为追求极速响应、优雅设计与高可用容灾的现代工程师打造的数字化空间。
+
+## 核心架构原则
+
+1. **D1 结构化数据驱动**：文章、评论、分类、标签与元数据完全依托 Cloudflare D1 SQLite 分布式数据库。
+2. **R2 零出口费用存储**：多媒体、电子书、附件与相册文件依托 Cloudflare R2 对象存储，支持全网 CDN 加速。
+3. **容错保障机制**：系统具备客户端与云端双模自适应。即使在未绑定 D1/R2 的演示环境，亦能无缝回退至本地存储，保障零故障运行！
+4. **坚果云 / WebDAV 全量热备**：一键将全站数据热备至私有坚果云网盘，规避任何服务器运营与不可抗力风险。
+
+---
+*本文由系统自动生成，可在管理员后台随时编辑或删除。*`,
+    category: '技术架构',
+    tags: ['Cloudflare', 'D1', 'R2', 'fox3'],
+    cover: 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=1200&q=80',
+    author: 'fox',
+    views: 1280,
+    likes: 88,
+    isBookmarked: false,
+    createdAt: Date.now() - 86400000 * 3,
+    updatedAt: Date.now() - 86400000 * 3,
+  },
+  {
+    id: 'post-2',
+    title: '从零部署 fox3：Cloudflare Pages 一键拉取与快速绑定全攻略',
+    summary: '本文详细介绍如何在 Cloudflare Pages 绑定 GitHub/GitLab 仓库实现全自动 CI/CD 构建，并在控制台无缝绑定 D1 数据库与 R2 存储桶。',
+    content: `# Cloudflare Pages 部署指引
+
+通过 Cloudflare 部署 fox3 是最简单也是最推荐的方式：
+
+1. 打开 Cloudflare Dashboard -> **Workers & Pages** -> **Create application** -> **Pages**。
+2. 选择 **Connect to Git** 并关联您的本仓库。
+3. 构建配置：
+   - 框架预设：\`Vite\`
+   - 构建命令：\`npm run build\`
+   - 构建输出目录：\`dist\`
+4. 部署成功后，在 **Settings** -> **Functions** -> **D1 / R2 / KV Bindings** 进行绑定即可。`,
+    category: '部署指南',
+    tags: ['部署', 'Cloudflare Pages', '指南'],
+    cover: 'https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?auto=format&fit=crop&w=1200&q=80',
+    author: 'fox',
+    views: 960,
+    likes: 64,
+    isBookmarked: true,
+    createdAt: Date.now() - 86400000 * 2,
+    updatedAt: Date.now() - 86400000 * 2,
+  },
+  {
+    id: 'post-3',
+    title: '全站多通道邮件中枢与 WebDAV 自动灾备实践',
+    summary: '深入探究内置邮件通知验证码、Cloudflare Email Routing 路由保存以及坚果云网盘备份恢复的技术实现。',
+    content: `# 邮件与备份容灾体系
+
+邮件区支持：
+- 第三方 API（Resend, SendGrid）与 SMTP 配置保存；
+- 注册邮箱验证码自动生成与智能回复；
+- Cloudflare Email Routing 无缝转发与后台实时回信；
+- 3,000 封智能阈值风控提醒。
+
+备份区支持：
+- 坚果云 (NutStore) WebDAV 直连验证；
+- 全景可视化文件列表与一键灾难恢复。`,
+    category: '系统运维',
+    tags: ['邮件', 'WebDAV', '坚果云', '容灾'],
+    cover: 'https://images.unsplash.com/photo-1550751827-4bd374c3f58b?auto=format&fit=crop&w=1200&q=80',
+    author: 'fox',
+    views: 742,
+    likes: 49,
+    isBookmarked: false,
+    createdAt: Date.now() - 86400000 * 1,
+    updatedAt: Date.now() - 86400000 * 1,
+  }
+];
+
+export const DEFAULT_BOOKS: Book[] = [
+  {
+    id: 'book-1',
+    title: '黑客与画家 (Hackers & Painters)',
+    author: 'Paul Graham',
+    format: 'EPUB',
+    cover: 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?auto=format&fit=crop&w=400&q=80',
+    description: '硅谷创业之父保罗·格雷厄姆的文集，探讨黑客精神、财富创造与程序语言设计。',
+    fileSize: 2450000,
+    fileUrl: '#',
+    content: `第一章 为什么书呆子不受欢迎\n\n如果你在读高中，或者不久前刚高中毕业，你可能会觉得生活里最重要的事情就是受欢迎程度……\n黑客是真正的创造者，就像画家、作曲家或建筑师。他们用计算机编程语言作为画布与颜料，把心中的构想一步步具象化。\n\n伟大的软件往往由极具审美与独立思考能力的人编写完成。`,
+    progress: 35,
+    createdAt: Date.now() - 86400000 * 5,
+    updatedAt: Date.now() - 86400000 * 5,
+  },
+  {
+    id: 'book-2',
+    title: '设计心理学 (The Design of Everyday Things)',
+    author: '唐·诺曼 (Don Norman)',
+    format: 'PDF',
+    cover: 'https://images.unsplash.com/photo-1512820790803-83ca734da794?auto=format&fit=crop&w=400&q=80',
+    description: '日常用品的设计哲学，如何通过示能与意符减少人机交互中的摩擦。',
+    fileSize: 8400000,
+    fileUrl: '#',
+    content: `好的设计其实很难被注意到，因为它们顺应人的直觉，工作得如此自然，以至于我们根本不需要思考。\n糟糕的设计却无处不在，例如推拉门没有明确的把手方向指示，让无数人陷入尴尬。\n\n示能（Affordance）与意符（Signifier）构成了所有优秀设计的基石。`,
+    progress: 60,
+    createdAt: Date.now() - 86400000 * 4,
+    updatedAt: Date.now() - 86400000 * 4,
+  },
+  {
+    id: 'book-3',
+    title: '瓦尔登湖 (Walden)',
+    author: '亨利·戴维·梭罗',
+    format: 'TXT',
+    cover: 'https://images.unsplash.com/photo-1544947950-fa07a98d237f?auto=format&fit=crop&w=400&q=80',
+    description: '在瓦尔登湖畔独居两年的思考，关于极简生活、自然与内心的沉淀。',
+    fileSize: 620000,
+    fileUrl: '#',
+    content: `我步入丛林，因为我希望生活得有意义，我希望深入生活，吸取生活中的所有精华，把非生活的一切都消灭殆尽，免得到我临死的时候，才发现自己根本没有生活过。`,
+    progress: 15,
+    createdAt: Date.now() - 86400000 * 3,
+    updatedAt: Date.now() - 86400000 * 3,
+  }
+];
+
+export const DEFAULT_PHOTOS: Photo[] = [
+  {
+    id: 'photo-1',
+    title: '阿尔卑斯的晨光',
+    category: '风光摄影',
+    url: 'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=crop&w=1200&q=80',
+    description: '清晨第一缕阳光洒落在雪峰之上',
+    createdAt: Date.now() - 86400000 * 6,
+    updatedAt: Date.now() - 86400000 * 6,
+  },
+  {
+    id: 'photo-2',
+    title: '赛博朋克雨夜街头',
+    category: '城市街头',
+    url: 'https://images.unsplash.com/photo-1508739773434-c26b3d09e071?auto=format&fit=crop&w=1200&q=80',
+    description: '霓虹倒影在湿润的沥青路面',
+    createdAt: Date.now() - 86400000 * 5,
+    updatedAt: Date.now() - 86400000 * 5,
+  },
+  {
+    id: 'photo-3',
+    title: '极地深处的光芒',
+    category: '自然奇观',
+    url: 'https://images.unsplash.com/photo-1517411032315-54ef2cb783bb?auto=format&fit=crop&w=1200&q=80',
+    description: '漫天舞动的绿色极光与宁静夜空',
+    createdAt: Date.now() - 86400000 * 4,
+    updatedAt: Date.now() - 86400000 * 4,
+  }
+];
+
+export const DEFAULT_MEDIA: MediaItem[] = [
+  {
+    id: 'media-1',
+    type: 'audio',
+    title: 'Horizon of Dawn (晨曦地平线)',
+    artist: 'WhiteFox Acoustic Ensemble',
+    src: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
+    duration: '06:12',
+    cover: 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?auto=format&fit=crop&w=400&q=80',
+    createdAt: Date.now() - 86400000 * 2,
+    updatedAt: Date.now() - 86400000 * 2,
+  },
+  {
+    id: 'media-2',
+    type: 'video',
+    title: '极地自然纪录短片 (Big Buck Bunny Demo)',
+    artist: 'Open Source Media Lab',
+    src: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+    duration: '09:56',
+    cover: 'https://images.unsplash.com/photo-1470240731273-7821a6eeb6bd?auto=format&fit=crop&w=800&q=80',
+    createdAt: Date.now() - 86400000 * 1,
+    updatedAt: Date.now() - 86400000 * 1,
+  }
+];
+
+export const DEFAULT_MAILS: MailMessage[] = [
+  {
+    id: 'mail-1',
+    folder: 'inbox',
+    sender: 'user@example.com',
+    recipient: 'service@whitefox.blog',
+    subject: '关于 fox3 博客与坚果云 WebDAV 同步的体验咨询',
+    body: '博主您好！非常喜欢您的博客架构，请问坚果云的 WebDAV 是否支持自动定时灾备？期待回复！',
+    date: '2025-05-20 14:32:00',
+    read: true,
+    isStarred: true,
+    createdAt: Date.now() - 86400000 * 3,
+    updatedAt: Date.now() - 86400000 * 3,
+  },
+  {
+    id: 'mail-2',
+    folder: 'inbox',
+    sender: 'newuser@163.com',
+    recipient: 'service@whitefox.blog',
+    subject: 'fox3 博客注册验证码通知',
+    body: '欢迎加入 fox3 博客社区！您的动态身份验证码为：【668822】。有效期 10 分钟，请妥善保管。',
+    date: '2025-05-20 16:10:00',
+    read: false,
+    isStarred: false,
+    isCodeVerify: true,
+    code: '668822',
+    createdAt: Date.now() - 86400000 * 2,
+    updatedAt: Date.now() - 86400000 * 2,
+  },
+  {
+    id: 'mail-3',
+    folder: 'sent',
+    sender: 'service@whitefox.blog',
+    recipient: 'user@example.com',
+    subject: 'Re: 关于 fox3 博客与坚果云 WebDAV 同步的体验咨询',
+    body: '您好，fox3 在后台设置中配置好坚果云 WebDAV 后，支持随时一键全站结构化数据备份，并可在历史备份库中随时回滚恢复！',
+    date: '2025-05-20 17:05:00',
+    read: true,
+    isStarred: false,
+    createdAt: Date.now() - 86400000 * 2,
+    updatedAt: Date.now() - 86400000 * 2,
+  }
+];
+
+export const DEFAULT_PRODUCTS: Product[] = [
+  {
+    id: 'prod-1',
+    name: 'fox3 深度定制全栈部署极速交付包',
+    description: '包含 Cloudflare D1/R2/KV 自动化绑定脚本、独立域名配置咨询以及全站备份恢复方案实施指导。',
+    price: 99.00,
+    images: [
+      'https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?auto=format&fit=crop&w=800&q=80',
+      'https://images.unsplash.com/photo-1550751827-4bd374c3f58b?auto=format&fit=crop&w=800&q=80',
+      'https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=800&q=80'
+    ],
+    category: '数字化产品',
+    stock: 99,
+    tags: ['全栈', 'Cloudflare', '咨询'],
+    showcaseId: 'showcase-main',
+    createdAt: Date.now() - 86400000 * 3,
+    updatedAt: Date.now() - 86400000 * 3,
+  },
+  {
+    id: 'prod-2',
+    name: '极简机械键盘定制键帽套装 (白狐限定版)',
+    description: 'PBT 热升华工艺，人体工学校正高度，附送白狐专属定制个性键帽与拔键器。',
+    price: 199.00,
+    images: [
+      'https://images.unsplash.com/photo-1587829741301-dc798b83add3?auto=format&fit=crop&w=800&q=80',
+      'https://images.unsplash.com/photo-1595225476474-87563907a212?auto=format&fit=crop&w=800&q=80'
+    ],
+    category: '实体周边',
+    stock: 25,
+    tags: ['数码周边', '定制', '现货'],
+    showcaseId: 'showcase-hardware',
+    createdAt: Date.now() - 86400000 * 2,
+    updatedAt: Date.now() - 86400000 * 2,
+  }
+];
+
+export const DEFAULT_ORDERS: Order[] = [
+  {
+    id: 'ord-1001',
+    productId: 'prod-1',
+    productName: 'fox3 深度定制全栈部署极速交付包',
+    productImage: 'https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?auto=format&fit=crop&w=800&q=80',
+    quantity: 1,
+    totalPrice: 99.00,
+    customerName: '李先生',
+    customerEmail: 'customer@163.com',
+    customerPhone: '13800138000',
+    customerAddress: '广东省深圳市南山区高新南九道软件产业基地 4 栋',
+    paymentMethod: 'wechat',
+    status: 'paid',
+    createdAt: Date.now() - 86400000 * 1,
+  },
+  {
+    id: 'ord-1002',
+    productId: 'prod-2',
+    productName: '极简机械键盘定制键帽套装 (白狐限定版)',
+    productImage: 'https://images.unsplash.com/photo-1587829741301-dc798b83add3?auto=format&fit=crop&w=800&q=80',
+    quantity: 2,
+    totalPrice: 398.00,
+    customerName: '王女士',
+    customerEmail: 'wang@outlook.com',
+    customerPhone: '13911223344',
+    customerAddress: '上海市浦东新区张江高科技园区碧波路 88 号',
+    paymentMethod: 'alipay',
+    status: 'unpaid',
+    createdAt: Date.now() - 3600000 * 5,
+  }
+];
+
+export const DEFAULT_PAYMENT_SETTINGS: PaymentSettings = {
+  paypal: {
+    enabled: true,
+    clientId: 'paypal_client_id_demo_888',
+    secret: '********',
+    mode: 'sandbox',
+  },
+  worldfirst: {
+    enabled: true,
+    partnerId: 'wf_partner_9988',
+    privateKey: '********',
+  },
+  wechatPay: {
+    enabled: true,
+    appId: 'wx8888888888888888',
+    mchId: '1600000000',
+    apiKey: '********',
+  },
+  alipay: {
+    enabled: true,
+    appId: '2021000000000000',
+    privateKey: '********',
+    alipayPublicKey: '********',
+  }
+};
+
+export const DEFAULT_EMAIL_SETTINGS: EmailSettings = {
+  enabled: true,
+  provider: 'resend',
+  apiKey: 're_fox3_demo_key_********',
+  apiEndpoint: 'https://api.resend.com/emails',
+  smtpHost: 'smtp.whitefox.blog',
+  smtpPort: 465,
+  smtpUser: 'service@whitefox.blog',
+  smtpPass: '********',
+  senderEmail: 'service@whitefox.blog',
+  autoReplyEnabled: true,
+  rateLimitEnabled: true,
+  maxDailyEmails: 3000,
+  cfEmailRouting: {
+    enabled: true,
+    routingAddress: 'contact@whitefox.blog',
+    forwardTo: 'admin@whitefox.blog',
+    webhookUrl: '/api/mail/webhook',
+  }
+};
+
+export const DEFAULT_WEBDAV_CONFIG: WebDavConfig = {
+  enabled: true,
+  provider: 'nutstore',
+  serverUrl: 'https://dav.jianguoyun.com/dav/',
+  username: 'fox_backup@jianguoyun.com',
+  password: '********',
+  backupPath: '/fox3_backup/',
+  lastBackupTime: Date.now() - 86400000 * 2,
+};
