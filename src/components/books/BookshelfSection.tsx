@@ -168,24 +168,55 @@ export const BookshelfSection: React.FC = () => {
     }
   };
 
-  const handleDownload = (book: Book, e: React.MouseEvent) => {
+  const handleDownload = async (book: Book, e: React.MouseEvent) => {
     e.stopPropagation();
     startTransfer('download', `${book.title}.${book.format.toLowerCase()}`);
     let p = 25;
     const interval = setInterval(() => {
       p += 35;
-      if (p >= 100) {
-        clearInterval(interval);
-        finishTransfer();
-        // File download trigger
-        const link = document.createElement('a');
-        link.href = book.fileUrl || '#';
-        link.download = `${book.title}.${book.format.toLowerCase()}`;
-        link.click();
-      } else {
-        updateTransferPercent(p);
+      if (p >= 90) clearInterval(interval);
+      else updateTransferPercent(p);
+    }, 100);
+
+    try {
+      let downloadUrl = book.fileUrl;
+      // If fileUrl is not available or is an empty/blob URL that expired, synthesize from IndexedDB or content
+      if (!downloadUrl || downloadUrl === '#' || downloadUrl === '') {
+        const blob = new Blob([book.content || ''], { type: 'text/plain;charset=utf-8' });
+        downloadUrl = URL.createObjectURL(blob);
       }
-    }, 120);
+
+      // If it points to an indexedDB key in fileUrl, attempt extraction
+      if (book.fileUrl && book.fileUrl.startsWith('idb_file_')) {
+        const storedBlob = await getFileFromIndexedDB(book.fileUrl);
+        if (storedBlob instanceof Blob) {
+          downloadUrl = URL.createObjectURL(storedBlob);
+        } else if (typeof storedBlob === 'string') {
+          downloadUrl = storedBlob;
+        }
+      }
+
+      clearInterval(interval);
+      finishTransfer();
+
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = `${book.title}.${book.format.toLowerCase()}`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch {
+      clearInterval(interval);
+      finishTransfer();
+      const blob = new Blob([book.content || ''], { type: 'text/plain;charset=utf-8' });
+      const fallbackUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = fallbackUrl;
+      link.download = `${book.title}.${book.format.toLowerCase()}`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
   };
 
   // Full Screen Mobile / Desktop Reader Modal

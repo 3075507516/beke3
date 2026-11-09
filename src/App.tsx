@@ -25,6 +25,7 @@ const MainLayout: React.FC = () => {
   const [isAuthOpen, setIsAuthOpen] = useState<boolean>(false);
 
   const isAdmin = currentUser?.role === 'admin';
+  const isGuestRestricted = !currentUser && systemSettings.hideNonBlogForGuests;
 
   // Sync dark class on root html
   useEffect(() => {
@@ -133,23 +134,53 @@ const MainLayout: React.FC = () => {
         </footer>
       </div>
 
-      {/* Floating Bottom Quick Action Buttons (respecting bottomButtonsEnabled setting) */}
+      {/* Floating Bottom Quick Section Selector Bar (matching top quick jump tabs) */}
       {systemSettings.bottomButtonsEnabled !== false && (
-        <div className="fixed bottom-6 left-6 z-40 flex items-center gap-2">
-          <button
-            onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-            title="回到顶部"
-            className="p-3 bg-white/90 dark:bg-slate-800/90 text-slate-700 dark:text-slate-200 rounded-full shadow-lg border border-slate-200/80 dark:border-slate-700 backdrop-blur-md hover:scale-110 hover:text-sky-500 transition"
-          >
-            <ArrowUp className="w-5 h-5" />
-          </button>
-          <button
-            onClick={() => setCurrentTab('guide')}
-            title="全平台部署指引"
-            className="p-3 bg-white/90 dark:bg-slate-800/90 text-slate-700 dark:text-slate-200 rounded-full shadow-lg border border-slate-200/80 dark:border-slate-700 backdrop-blur-md hover:scale-110 hover:text-sky-500 transition"
-          >
-            <Compass className="w-5 h-5" />
-          </button>
+        <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-40 max-w-xl w-[92%] sm:w-auto">
+          <div className="flex items-center gap-1.5 p-1.5 rounded-2xl bg-white/90 dark:bg-slate-900/90 backdrop-blur-xl border border-slate-200/80 dark:border-slate-800 shadow-2xl overflow-x-auto no-scrollbar">
+            <button
+              onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+              title="回到顶部"
+              className="p-2 rounded-xl text-slate-500 hover:text-sky-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition shrink-0"
+            >
+              <ArrowUp className="w-4 h-4" />
+            </button>
+            <div className="w-[1px] h-5 bg-slate-200 dark:bg-slate-700 mx-0.5 shrink-0" />
+            {[
+              { id: 'blog', label: t('nav.blog') },
+              { id: 'bookmarks', label: t('nav.bookmarks') },
+              ...(!isGuestRestricted ? [
+                { id: 'books', label: t('nav.books') },
+                { id: 'gallery', label: t('nav.gallery') },
+                { id: 'media', label: t('nav.media') },
+                { id: 'shop', label: t('nav.shop') },
+              ] : []),
+              ...(isAdmin ? [
+                { id: 'backup', label: t('nav.backup') },
+                { id: 'mail', label: t('nav.mail') },
+                { id: 'settings', label: t('nav.settings') },
+              ] : []),
+              { id: 'guide', label: t('nav.guide') },
+            ].map(sec => {
+              const isActive = currentTab === sec.id;
+              return (
+                <button
+                  key={`bottom-sec-${sec.id}`}
+                  onClick={() => {
+                    setCurrentTab(sec.id);
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
+                    isActive
+                      ? 'bg-sky-500 text-white shadow-sm'
+                      : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  {sec.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
 

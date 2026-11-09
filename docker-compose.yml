@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  fox3:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: fox3-blog
+    restart: always
+    ports:
+      - "8080:80"
+    environment:
+      - NODE_ENV=production

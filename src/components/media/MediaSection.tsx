@@ -96,7 +96,9 @@ export const MediaSection: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const isVideo = file.type.startsWith('video') || file.name.endsWith('.mp4');
+    const videoExtensions = ['.mp4', '.webm', '.mov', '.mkv', '.m4v', '.avi', '.ogv'];
+    const isVideo = file.type.startsWith('video/') ||
+      videoExtensions.some(ext => file.name.toLowerCase().endsWith(ext));
     const uploaded = await uploadFile(file);
 
     const newItem: MediaItem = {
@@ -450,7 +452,7 @@ export const MediaSection: React.FC = () => {
               type="file"
               ref={fileInputRef}
               onChange={handleMediaFileUpload}
-              accept="audio/*,video/*"
+              accept="audio/*,video/*,.mp4,.webm,.mov,.mkv,.m4v,.avi,.mp3,.wav,.ogg,.aac,.flac"
               className="hidden"
             />
 

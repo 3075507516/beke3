@@ -240,9 +240,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const refreshChannelStatus = useCallback(async (): Promise<boolean> => {
     try {
       const res = await fetch('/api/status', { method: 'GET', headers: { 'Accept': 'application/json' } });
-      if (res.ok) {
+      const contentType = res.headers.get('content-type') || '';
+      // Only treat as connected if response is real JSON and channelOnline is true
+      if (res.ok && contentType.includes('application/json')) {
         const data = await res.json();
-        const isOk = Boolean(data && data.success && data.channelOnline);
+        const isOk = Boolean(data && data.success && data.channelOnline === true);
         setChannelConnected(isOk);
         return isOk;
       }

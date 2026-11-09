@@ -86,6 +86,18 @@ export const GuideSection: React.FC = () => {
           <Server className="w-4 h-4" />
           <span>阿里云 ESA / ECS 部署与 OSS 存储绑定</span>
         </button>
+
+        <button
+          onClick={() => setActivePlatform('others' as any)}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-xs font-bold transition whitespace-nowrap ${
+            (activePlatform as string) === 'others'
+              ? 'bg-rose-500 text-white shadow-md shadow-rose-500/20'
+              : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800 hover:bg-slate-50'
+          }`}
+        >
+          <Server className="w-4 h-4" />
+          <span>Vercel / Docker / VPS / 1Panel 极速部署</span>
+        </button>
       </div>
 
       {/* TAB CONTENT: Cloudflare Pages Git Pull Deploy */}
@@ -349,6 +361,84 @@ export const GuideSection: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* TAB CONTENT: Vercel, Docker, VPS, 1Panel */}
+      {(activePlatform as string) === 'others' && (
+        <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl p-6 md:p-8 space-y-6">
+          <div className="space-y-2">
+            <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+              <Server className="w-5 h-5 text-emerald-500" />
+              <span>Vercel / Docker / VPS 独立服务器 / 1Panel 面板一键部署指南</span>
+            </h3>
+            <p className="text-xs text-slate-500">
+              项目自带 <code>vercel.json</code>、<code>Dockerfile</code>、<code>docker-compose.yml</code> 与 <code>nginx.conf</code>，全平台无缝兼容。
+            </p>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/70 dark:border-slate-700 space-y-3">
+            <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200">
+              1. Vercel 一键拉取部署
+            </h4>
+            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+              在 Vercel 导入 Git 仓库，Framework Preset 选择 <b>Vite</b>，根目录留空，构建命令 <code>npm run build</code>，输出目录 <code>dist</code>，仓库内已包含 <code>vercel.json</code> 自动处理单页 SPA 路由。
+            </p>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/70 dark:border-slate-700 space-y-3">
+            <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200">
+              2. Docker & docker-compose 一键启动
+            </h4>
+            <div className="p-3 bg-slate-950 text-slate-200 rounded-xl text-xs font-mono space-y-1">
+              <p># 克隆仓库并启动容器</p>
+              <p>git clone &lt;repo-url&gt; && cd fox3</p>
+              <p>docker-compose up -d --build</p>
+              <p># 访问 http://&lt;你的IP&gt;:8080 即可直接使用！</p>
+            </div>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/70 dark:border-slate-700 space-y-3">
+            <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200">
+              3. 1Panel 面板极速部署说明
+            </h4>
+            <ol className="text-xs text-slate-600 dark:text-slate-300 space-y-1.5 list-decimal list-inside leading-relaxed pl-1">
+              <li>在 1Panel 面板中选择 <b>网站</b> -&gt; <b>创建网站</b> -&gt; <b>静态网站</b> 或 <b>反向代理</b>。</li>
+              <li>将项目打包出的 <code>dist/</code> 静态文件上传至站点根目录，或使用 1Panel 的 <b>容器编排</b> 粘贴仓库自带的 <code>docker-compose.yml</code>。</li>
+              <li>在站点配置中开启 HTTPS，一键完成部署。</li>
+            </ol>
+          </div>
+        </div>
+      )}
+
+      {/* Commercial (Shop) & Mail Usage Guides */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4">
+        {/* Shop Guide */}
+        <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl p-6 space-y-4 shadow-sm">
+          <div className="flex items-center gap-2 text-rose-500 font-bold text-sm">
+            <Layers className="w-5 h-5" />
+            <span>商业区 (商品与全渠道支付网关) 使用说明</span>
+          </div>
+          <div className="space-y-2 text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+            <p><b>1. 展台与商品管理：</b>管理员可在商品区创建多个展示区（数字文创、定制硬件、云服务等），每个商品支持上传和删除多张图片并自动轮播。</p>
+            <p><b>2. 订单提交与信息收集：</b>用户下单时需选择购买数量，并必须填写<b>联系人姓名、电话、邮箱与详细收件地址</b>。提交后订单状态分为“待支付”和“已支付”，支持库存自动扣减与优惠券抵扣（如 FOX3）。</p>
+            <p><b>3. 支付网关预留接口：</b>仅管理员可见支付设置，支持 <b>PayPal、万里汇 (WorldFirst)、微信支付、支付宝、Stripe、USDT 与银联</b>。可填入各渠道的商户号、API Key 或收款二维码。</p>
+            <p><b>4. 展台实时咨询窗口：</b>用户点击“商品展台聊天”即可呼出对话框，向站长进行售前与售后咨询，管理员可在后台与用户实时沟通。</p>
+          </div>
+        </div>
+
+        {/* Mail Guide */}
+        <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl p-6 space-y-4 shadow-sm">
+          <div className="flex items-center gap-2 text-indigo-500 font-bold text-sm">
+            <Key className="w-5 h-5" />
+            <span>邮箱区 (邮件中枢与 Cloudflare Routing) 使用说明</span>
+          </div>
+          <div className="space-y-2 text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+            <p><b>1. 第三方邮件 API 保存：</b>支持 Resend、SendGrid、Mailgun、Amazon SES、Brevo、Postmark 及专用企业 SMTP 服务器配置，一键点击“保存邮箱配置”持久化。</p>
+            <p><b>2. 验证码自动回复：</b>开启“注册验证码自动应答回复”后，系统将在接收到注册邮件请求时秒级生成 6 位安全验证码并自动回信。</p>
+            <p><b>3. 收信与 Cloudflare Routing：</b>支持 Cloudflare Email Routing 边缘路由地址和管理员私人转发邮箱设定，预留 Webhook 和 IMAP 轮询接口。</p>
+            <p><b>4. 额度风控与信件管理：</b>内置单日 3,000 封发信限制开关；当总信件数达 3,000 封时将自动触发橙色醒目预警。管理员可进行站内写信、回复、批量移入回收站和彻底删除。</p>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };

@@ -101,7 +101,7 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   const cycleLocale = () => {
-    const list: Locale[] = ['zh-CN', 'zh-TW', 'en-US'];
+    const list: Locale[] = ['zh-CN', 'zh-TW', 'en-US', 'ko-KR', 'ar-SA', 'hi-IN'];
     const nextIdx = (list.indexOf(locale) + 1) % list.length;
     setLocale(list[nextIdx]);
   };
@@ -186,7 +186,17 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <Globe className="w-3.5 h-3.5" />
               <span className="text-[10px] uppercase font-mono">
-                {locale === 'zh-CN' ? '简' : locale === 'zh-TW' ? '繁' : 'EN'}
+                {locale === 'zh-CN'
+                  ? '简'
+                  : locale === 'zh-TW'
+                    ? '繁'
+                    : locale === 'en-US'
+                      ? 'EN'
+                      : locale === 'ko-KR'
+                        ? '한국어'
+                        : locale === 'ar-SA'
+                          ? 'العربية'
+                          : 'हिन्दी'}
               </span>
             </button>
 

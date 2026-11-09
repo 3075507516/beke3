@@ -32,6 +32,7 @@ export const SettingsSection: React.FC = () => {
     deviceMode,
     setDeviceMode,
     uploadFile,
+    t,
     syncState,
     triggerManualSync,
   } = useApp();
@@ -186,13 +187,13 @@ export const SettingsSection: React.FC = () => {
             {/* 1. 自定义网站名称 */}
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                1. 自定义网站名称
+                1. {t('settings.siteName')}
               </label>
               <input
                 type="text"
                 value={systemSettings.siteName}
                 onChange={e => updateSystemSettings({ siteName: e.target.value })}
-                placeholder="例如: fox3 博客"
+                placeholder="fox3"
                 className="w-full max-w-md px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500"
               />
             </div>
@@ -200,7 +201,7 @@ export const SettingsSection: React.FC = () => {
             {/* 2. 主题调色按键 (一键快速配色) */}
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                2. 主题调色按键 (一键快速配色)
+                2. {t('settings.themeColor')}
               </label>
               <div className="flex flex-wrap gap-2.5">
                 {themePresets.map(preset => (
@@ -232,7 +233,7 @@ export const SettingsSection: React.FC = () => {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                    3. 自定义全局主色调 (Hex)
+                    3. {t('settings.bgColor')} (主色调)
                   </label>
                   <div className="flex items-center gap-2">
                     <input
@@ -252,7 +253,7 @@ export const SettingsSection: React.FC = () => {
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                    自定义背景底色板
+                    {t('settings.bgColor')} (背景底色)
                   </label>
                   <div className="flex items-center gap-2">
                     <input
@@ -313,7 +314,7 @@ export const SettingsSection: React.FC = () => {
             {/* 4. 自定义头像 */}
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                4. 自定义站长头像 (本地图片上传即时生效)
+                4. {t('settings.avatar')} (本地图片上传即时生效)
               </label>
               <div className="flex items-center gap-3">
                 <div className="w-14 h-14 rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-700 shrink-0">
@@ -350,7 +351,7 @@ export const SettingsSection: React.FC = () => {
             {/* 5. 全站背景照片 */}
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                5. 全站背景照片 (本地图片上传设定)
+                5. {t('settings.siteBg')} (本地图片上传设定)
               </label>
               <div className="flex items-center gap-3">
                 <button
@@ -388,7 +389,7 @@ export const SettingsSection: React.FC = () => {
             {/* 6. 首页介绍区照片 */}
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                6. 首页介绍区照片 (全景大背景设定)
+                6. {t('settings.heroBg')} (全景大背景设定)
               </label>
               <div className="flex items-center gap-3">
                 <div className="w-16 h-12 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 shrink-0">

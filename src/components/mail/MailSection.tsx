@@ -332,6 +332,24 @@ export const MailSection: React.FC = () => {
               </div>
             </div>
           </div>
+
+          {/* Explicit Save Configuration Button */}
+          <div className="flex items-center justify-between pt-4 border-t border-slate-100 dark:border-slate-800">
+            <span className="text-xs text-slate-400">
+              设置修改后将即时加密存储于本地并尝试同步至云端 D1 / KV 配置库
+            </span>
+            <button
+              onClick={() => {
+                updateEmailSettings(emailSettings);
+                alert('邮箱设置已成功保存并同步！');
+                setShowConfig(false);
+              }}
+              className="flex items-center gap-1.5 px-5 py-2 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white text-xs font-semibold rounded-xl shadow-md transition"
+            >
+              <CheckCircle className="w-4 h-4" />
+              <span>保存邮箱配置</span>
+            </button>
+          </div>
         </div>
       )}
 
