@@ -63,7 +63,7 @@ const MainLayout: React.FC = () => {
   // Container styling based on deviceMode (responsive vs mobile simulation)
   const getContainerClasses = () => {
     if (deviceMode === 'mobile') {
-      return 'max-w-md mx-auto my-6 shadow-2xl rounded-[40px] overflow-hidden border-[10px] border-slate-800 bg-white dark:bg-slate-900 min-h-[844px]';
+      return 'max-w-[420px] mx-auto my-4 px-3 sm:px-4 py-4 shadow-2xl rounded-[36px] overflow-hidden border-[8px] border-slate-900 bg-white dark:bg-slate-900 min-h-[844px] transition-all duration-300';
     }
     return 'max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6';
   };
@@ -72,30 +72,30 @@ const MainLayout: React.FC = () => {
     <div
       className={`min-h-screen transition-colors duration-300 relative flex flex-col justify-between ${
         isRetro
-          ? 'bg-[#f0e7d5] text-[#2b2118] selection:bg-[#e28b3c] selection:text-white'
+          ? 'bg-[#ffffff] text-slate-800 selection:bg-sky-500 selection:text-white'
           : ''
       }`}
       style={{
         backgroundColor: isRetro
-          ? '#f2e9d8'
+          ? '#ffffff'
           : systemSettings.customPaletteBg || (darkMode ? '#020617' : '#f8fafc'),
-        backgroundImage: systemSettings.fullBackgroundUrl
-          ? `url(${systemSettings.fullBackgroundUrl})`
-          : isRetro
-            ? 'radial-gradient(#d3c4a8 1px, transparent 1px)'
+        backgroundImage: isRetro
+          ? undefined
+          : systemSettings.fullBackgroundUrl
+            ? `url(${systemSettings.fullBackgroundUrl})`
             : undefined,
-        backgroundSize: systemSettings.fullBackgroundUrl ? 'cover' : isRetro ? '20px 20px' : undefined,
+        backgroundSize: systemSettings.fullBackgroundUrl && !isRetro ? 'cover' : undefined,
         backgroundPosition: 'center',
         backgroundAttachment: 'fixed',
       }}
     >
-      {/* Global Background overlay if custom background photo is provided */}
-      {systemSettings.fullBackgroundUrl && (
+      {/* Global Background overlay if custom background photo is provided and not in isolated retro mode */}
+      {!isRetro && systemSettings.fullBackgroundUrl && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-[1px] pointer-events-none z-0" />
       )}
 
       <div className="relative z-10 flex flex-col flex-1">
-        {/* Navigation Header */}
+        {/* Navigation Header: in retro mode, only show if user wants or keep separate */}
         <Header
           currentTab={currentTab}
           setCurrentTab={setCurrentTab}
@@ -104,7 +104,7 @@ const MainLayout: React.FC = () => {
           setDarkMode={setDarkMode}
         />
 
-        {/* Retro Header Banner & Quick Launcher if in retro mode */}
+        {/* Retro Control Deck: strictly visible ONLY in retro mode, cleanly isolated */}
         {isRetro && (
           <RetroControlPanel currentTab={currentTab} onSelectTab={setCurrentTab} />
         )}

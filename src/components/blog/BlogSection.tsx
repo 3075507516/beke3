@@ -130,8 +130,26 @@ export const BlogSection: React.FC = () => {
     }
   };
 
+  const canDeletePost = (post: Post) => {
+    if (!currentUser) return false;
+    if (currentUser.role === 'admin') return true;
+    return post.author === currentUser.username;
+  };
+
+  const canEditPost = (post: Post) => {
+    if (!currentUser) return false;
+    if (currentUser.role === 'admin') return true;
+    return post.author === currentUser.username;
+  };
+
   const handleDelete = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
+    const postToDelete = posts.find(p => p.id === id);
+    if (!postToDelete) return;
+    if (!canDeletePost(postToDelete)) {
+      alert('权限不足：注册用户仅能删除自己发布的博文！');
+      return;
+    }
     if (window.confirm('确认删除这篇文章吗？')) {
       setPosts(prev => prev.filter(p => p.id !== id));
       if (activePost?.id === id) setActivePost(null);
@@ -362,14 +380,14 @@ export const BlogSection: React.FC = () => {
             </button>
           </div>
 
-          {currentUser?.role === 'admin' && (
+          {currentUser && (
             <button
               onClick={() => {
                 setEditingPost({
                   title: '',
                   summary: '',
                   content: '',
-                  category: '技术架构',
+                  category: '生活随想',
                   tags: ['fox3'],
                   cover: 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=1200&q=80',
                   author: currentUser.username,
@@ -379,7 +397,7 @@ export const BlogSection: React.FC = () => {
               className="flex items-center gap-1.5 px-3.5 py-2 bg-sky-500 hover:bg-sky-600 text-white text-xs font-semibold rounded-xl shadow-md transition whitespace-nowrap"
             >
               <PlusCircle className="w-4 h-4" />
-              <span>写新博文</span>
+              <span>{currentUser.role === 'admin' ? '写新博文' : '发布我的博文'}</span>
             </button>
           )}
         </div>
@@ -588,27 +606,27 @@ export const BlogSection: React.FC = () => {
                 </div>
 
                 <div className="flex items-center gap-2">
-                  {currentUser?.role === 'admin' && (
-                    <>
-                      <button
-                        onClick={e => {
-                          e.stopPropagation();
-                          setEditingPost(post);
-                          setIsEditing(true);
-                        }}
-                        title="编辑文章"
-                        className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 hover:text-sky-500"
-                      >
-                        <Edit3 className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        onClick={e => handleDelete(post.id, e)}
-                        title="删除文章"
-                        className="p-1.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950 text-slate-500 hover:text-rose-600"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </>
+                  {canEditPost(post) && (
+                    <button
+                      onClick={e => {
+                        e.stopPropagation();
+                        setEditingPost(post);
+                        setIsEditing(true);
+                      }}
+                      title="编辑文章"
+                      className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 hover:text-sky-500"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                  {canDeletePost(post) && (
+                    <button
+                      onClick={e => handleDelete(post.id, e)}
+                      title="删除文章"
+                      className="p-1.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950 text-slate-500 hover:text-rose-600"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
                   )}
                   <span className="text-sky-500 font-medium group-hover:translate-x-1 transition-transform inline-flex items-center">
                     阅读 <ChevronRight className="w-3.5 h-3.5" />

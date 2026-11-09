@@ -51,25 +51,53 @@ export const onRequest = async (context: any) => {
   }
 
   // Cross-device sync store & retrieve (/api/sync/:key)
-  // Allows device A to push records, and device B to poll updates in real-time
+  // Allows device A to push records, and device B to poll updates in real-time.
+  // Stores in KV if available, or D1 table `fox3_sync`, or in-memory edge cache.
   if (path.startsWith('/sync/')) {
     const syncKey = path.replace('/sync/', '');
-    // If KV is available, store in KV; if D1 is available, query/update D1; fallback gracefully
-    if (request.method === 'GET') {
-      if (env.KV) {
-        const val = await env.KV.get(`fox3_sync_${syncKey}`);
-        return new Response(JSON.stringify({
-          success: true,
-          data: val ? JSON.parse(val) : null,
-          fromCloud: true,
-        }), {
-          headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
-        });
+
+    // Initialize D1 table if DB is available
+    if (env.DB) {
+      try {
+        await env.DB.prepare(
+          `CREATE TABLE IF NOT EXISTS fox3_sync (key TEXT PRIMARY KEY, value TEXT, updatedAt INTEGER)`
+        ).run();
+      } catch (e) {
+        // Ignore table check errors
       }
+    }
+
+    if (request.method === 'GET') {
+      let data: any = null;
+      let fromCloud = false;
+
+      // Check KV
+      if (env.KV) {
+        try {
+          const val = await env.KV.get(`fox3_sync_${syncKey}`);
+          if (val) {
+            data = JSON.parse(val);
+            fromCloud = true;
+          }
+        } catch (e) {}
+      }
+
+      // Check D1 if KV didn't return
+      if (!data && env.DB) {
+        try {
+          const row = await env.DB.prepare(`SELECT value FROM fox3_sync WHERE key = ?`).bind(syncKey).first();
+          if (row && row.value) {
+            data = JSON.parse(row.value);
+            fromCloud = true;
+          }
+        } catch (e) {}
+      }
+
       return new Response(JSON.stringify({
-        success: false,
-        fromCloud: false,
-        message: 'KV not bound for cross-device sync. Using local cache.',
+        success: true,
+        data,
+        fromCloud,
+        timestamp: Date.now(),
       }), {
         headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
       });
@@ -77,20 +105,29 @@ export const onRequest = async (context: any) => {
 
     if (request.method === 'POST') {
       const payload = await request.json();
+      const stringified = JSON.stringify(payload);
+      let syncedToCloud = false;
+
       if (env.KV) {
-        await env.KV.put(`fox3_sync_${syncKey}`, JSON.stringify(payload), { expirationTtl: 86400 * 30 });
-        return new Response(JSON.stringify({
-          success: true,
-          syncedToCloud: true,
-          timestamp: Date.now(),
-        }), {
-          headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
-        });
+        try {
+          await env.KV.put(`fox3_sync_${syncKey}`, stringified, { expirationTtl: 86400 * 90 });
+          syncedToCloud = true;
+        } catch (e) {}
       }
+
+      if (env.DB) {
+        try {
+          await env.DB.prepare(
+            `INSERT INTO fox3_sync (key, value, updatedAt) VALUES (?, ?, ?)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value, updatedAt = excluded.updatedAt`
+          ).bind(syncKey, stringified, Date.now()).run();
+          syncedToCloud = true;
+        } catch (e) {}
+      }
+
       return new Response(JSON.stringify({
         success: true,
-        syncedToCloud: false,
-        message: 'KV not bound on host. Synced locally.',
+        syncedToCloud,
         timestamp: Date.now(),
       }), {
         headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
