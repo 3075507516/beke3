@@ -27,6 +27,133 @@ import {
   X,
 } from 'lucide-react';
 
+/**
+ * Renders Markdown-like text into React elements, supporting:
+ * - Markdown images: ![alt](url) -> rendered as responsive <img> with captions
+ * - Headings: #, ##, ###
+ * - Blockquotes: > quote
+ * - Unordered lists: - item, * item
+ * - Standard paragraphs with bolding (**text**)
+ */
+const renderMarkdownContent = (content: string) => {
+  if (!content) return null;
+
+  const lines = content.split('\n');
+  const elements: React.ReactNode[] = [];
+  let paragraphBuffer: string[] = [];
+
+  const flushParagraph = (key: string) => {
+    if (paragraphBuffer.length === 0) return;
+    const text = paragraphBuffer.join('\n').trim();
+    paragraphBuffer = [];
+    if (!text) return;
+
+    elements.push(
+      <p key={key} className="text-slate-700 dark:text-slate-300 leading-relaxed font-sans whitespace-pre-line">
+        {renderInlineFormatting(text)}
+      </p>
+    );
+  };
+
+  const renderInlineFormatting = (text: string) => {
+    const parts = text.split(/(\**.*?\**)/g);
+    return parts.map((part, i) => {
+      if (part.startsWith('**') && part.endsWith('**')) {
+        return <strong key={i} className="font-semibold text-slate-900 dark:text-slate-100">{part.slice(2, -2)}</strong>;
+      }
+      return part;
+    });
+  };
+
+  lines.forEach((line, index) => {
+    const trimmed = line.trim();
+
+    const imgMatch = trimmed.match(/^!\[(.*?)\]\((.*?)\)$/);
+    if (imgMatch) {
+      flushParagraph(`para-${index}`);
+      const alt = imgMatch[1] || 'Blog illustration';
+      const src = imgMatch[2];
+      elements.push(
+        <figure key={`img-${index}`} className="my-6 space-y-2">
+          <div className="rounded-2xl overflow-hidden border border-slate-200/80 dark:border-slate-800 shadow-sm max-h-[520px] bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
+            <SafeImage
+              src={src}
+              alt={alt}
+              className="w-full h-auto max-h-[520px] object-contain hover:scale-[1.01] transition-transform duration-300"
+            />
+          </div>
+          {alt && (
+            <figcaption className="text-center text-xs text-slate-500 dark:text-slate-400 italic">
+              {alt}
+            </figcaption>
+          )}
+        </figure>
+      );
+      return;
+    }
+
+    if (trimmed.startsWith('### ')) {
+      flushParagraph(`para-${index}`);
+      elements.push(
+        <h3 key={`h3-${index}`} className="text-lg md:text-xl font-bold font-serif-sc text-slate-900 dark:text-slate-100 mt-6 mb-2">
+          {trimmed.slice(4)}
+        </h3>
+      );
+      return;
+    }
+    if (trimmed.startsWith('## ')) {
+      flushParagraph(`para-${index}`);
+      elements.push(
+        <h2 key={`h2-${index}`} className="text-xl md:text-2xl font-bold font-serif-sc text-slate-900 dark:text-slate-100 mt-8 mb-3 border-b pb-2 border-slate-200 dark:border-slate-800">
+          {trimmed.slice(3)}
+        </h2>
+      );
+      return;
+    }
+    if (trimmed.startsWith('# ')) {
+      flushParagraph(`para-${index}`);
+      elements.push(
+        <h1 key={`h1-${index}`} className="text-2xl md:text-3xl font-bold font-serif-sc text-slate-900 dark:text-slate-100 mt-8 mb-4">
+          {trimmed.slice(2)}
+        </h1>
+      );
+      return;
+    }
+
+    if (trimmed.startsWith('> ')) {
+      flushParagraph(`para-${index}`);
+      elements.push(
+        <blockquote key={`quote-${index}`} className="border-l-4 border-sky-500 pl-4 py-1 my-3 text-slate-600 dark:text-slate-400 italic bg-sky-50/50 dark:bg-sky-950/20 rounded-r-xl">
+          {trimmed.slice(2)}
+        </blockquote>
+      );
+      return;
+    }
+
+    if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+      flushParagraph(`para-${index}`);
+      elements.push(
+        <div key={`li-${index}`} className="flex items-start gap-2 ml-4 my-1 text-slate-700 dark:text-slate-300">
+          <span className="w-1.5 h-1.5 rounded-full bg-sky-500 mt-2 shrink-0" />
+          <span>{renderInlineFormatting(trimmed.slice(2))}</span>
+        </div>
+      );
+      return;
+    }
+
+    if (!trimmed) {
+      flushParagraph(`para-${index}`);
+      return;
+    }
+
+    paragraphBuffer.push(line);
+  });
+
+  flushParagraph('para-final');
+  return elements;
+};
+
+
 export const BlogSection: React.FC = () => {
   const { posts, setPosts, photos, currentUser, uploadFile, viewModes, setViewMode, systemSettings, deviceMode } = useApp();
   const [showGalleryPicker, setShowGalleryPicker] = useState(false);
@@ -291,8 +418,8 @@ export const BlogSection: React.FC = () => {
             />
           </div>
 
-          <div className="prose dark:prose-invert max-w-none text-slate-700 dark:text-slate-300 leading-relaxed font-sans space-y-4 whitespace-pre-wrap">
-            {activePost.content}
+          <div className="prose dark:prose-invert max-w-none text-slate-700 dark:text-slate-300 leading-relaxed font-sans space-y-4">
+            {renderMarkdownContent(activePost.content)}
           </div>
         </article>
       </div>
