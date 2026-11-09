@@ -2,11 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
 import { Header } from './components/layout/Header';
 import { HeroIntro } from './components/blog/HeroIntro';
+import { MinimalistBlogSection } from './components/minimalist/MinimalistBlogSection';
 import { BlogSection } from './components/blog/BlogSection';
+import { BookmarksSection } from './components/bookmarks/BookmarksSection';
 import { BookshelfSection } from './components/books/BookshelfSection';
 import { GallerySection } from './components/gallery/GallerySection';
 import { MediaSection } from './components/media/MediaSection';
-import { NetDriveSection } from './components/drive/NetDriveSection';
 import { MailSection } from './components/mail/MailSection';
 import { ShopSection } from './components/shop/ShopSection';
 import { WebDavBackupSection } from './components/backup/WebDavBackupSection';
@@ -44,7 +45,7 @@ const MainLayout: React.FC = () => {
     if (
       !currentUser &&
       systemSettings.hideNonBlogForGuests &&
-      ['books', 'gallery', 'media', 'drive', 'shop'].includes(currentTab)
+      ['books', 'gallery', 'media', 'shop', 'backup'].includes(currentTab)
     ) {
       setCurrentTab('blog');
     }
@@ -74,7 +75,7 @@ const MainLayout: React.FC = () => {
         backgroundAttachment: 'fixed',
       }}
     >
-      {/* Global Background overlay to guarantee readable text contrast */}
+      {/* Global Background overlay */}
       {systemSettings.fullBackgroundUrl && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-[1px] pointer-events-none z-0" />
       )}
@@ -91,16 +92,18 @@ const MainLayout: React.FC = () => {
 
         {/* Main Content Area */}
         <main className={`flex-1 ${getContainerClasses()}`}>
-          {/* Hero Section shown on blog */}
+          {/* Hero Section shown on standard blog */}
           {currentTab === 'blog' && <HeroIntro />}
 
           {/* Tab Views */}
+          {currentTab === 'minimalist' && <MinimalistBlogSection />}
           {currentTab === 'blog' && <BlogSection />}
+          {currentTab === 'bookmarks' && <BookmarksSection />}
           {currentTab === 'books' && <BookshelfSection />}
           {currentTab === 'gallery' && <GallerySection />}
           {currentTab === 'media' && <MediaSection />}
-          {currentTab === 'drive' && <NetDriveSection />}
           {currentTab === 'shop' && <ShopSection />}
+          {currentTab === 'backup' && <WebDavBackupSection />}
           {currentTab === 'mail' && <MailSection />}
           {currentTab === 'settings' && (
             <div className="space-y-6">
@@ -122,7 +125,7 @@ const MainLayout: React.FC = () => {
               <span>•</span>
               <button
                 onClick={() => setCurrentTab('guide')}
-                className="hover:text-rose-500 transition underline"
+                className="hover:text-sky-500 transition underline"
               >
                 全平台部署指引
               </button>

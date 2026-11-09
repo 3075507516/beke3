@@ -1,10 +1,9 @@
-import { get, set, del } from 'idb-keyval';
+import { get, set } from 'idb-keyval';
 import {
   Post,
   Book,
   Photo,
   MediaItem,
-  CloudFile,
   MailMessage,
   Product,
   Order,
@@ -13,6 +12,7 @@ import {
   EmailSettings,
   PaymentSettings,
   WebDavConfig,
+  WebDavBackupItem,
   User,
 } from '../types';
 
@@ -23,7 +23,6 @@ export const STORAGE_KEYS = {
   BOOKS: 'fox3_books',
   PHOTOS: 'fox3_photos',
   MEDIA: 'fox3_media',
-  FILES: 'fox3_files',
   MAILS: 'fox3_mails',
   PRODUCTS: 'fox3_products',
   ORDERS: 'fox3_orders',
@@ -32,7 +31,8 @@ export const STORAGE_KEYS = {
   EMAIL_SETTINGS: 'fox3_email_settings',
   PAYMENT_SETTINGS: 'fox3_payment_settings',
   WEBDAV_CONFIG: 'fox3_webdav_config',
-  WEBDAV_FILES: 'fox3_webdav_files',
+  WEBDAV_BACKUPS: 'fox3_webdav_backups',
+  VIEW_MODES: 'fox3_view_modes',
 };
 
 // Safe LocalStorage Reader / Writer
@@ -55,7 +55,7 @@ export const saveLocalStorage = <T>(key: string, value: T): void => {
   }
 };
 
-// IndexedDB robust file storage (for images/videos/books of any size without quota errors)
+// IndexedDB robust file storage
 export const saveFileToIndexedDB = async (fileKey: string, blob: Blob | string): Promise<string> => {
   try {
     await set(fileKey, blob);
@@ -78,19 +78,27 @@ export const getFileFromIndexedDB = async (fileKey: string): Promise<Blob | stri
 // Default initial data for fresh deployment
 export const DEFAULT_SETTINGS: SystemSettings = {
   siteName: 'fox3 博客',
-  themeColor: '#f43f5e', // Rose
+  themeColor: '#0ea5e9', // Sky blue modern accent
   customPaletteBg: '#f8fafc',
   fullBackgroundUrl: '',
-  avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=300&q=80',
-  heroIntroImage: 'https://images.unsplash.com/photo-1517849845537-4d257902454a?auto=format&fit=crop&w=1200&q=80',
-  heroBadge: '✨ 数字化知识库 & 个人空间',
+  avatarUrl: '/images/hero-default.jpg',
+  heroIntroImage: '/images/hero-default.jpg', // User uploaded panoramic hero
+  heroBadge: '✨ 数字化极速智库 & 全栈现代博客',
   heroTitle: '探索数字世界与全栈极简之美',
-  heroSubtitle: '融合 Cloudflare D1 + R2 + 邮件中枢与 WebDAV 容灾备份的下一代现代化博客系统',
+  heroSubtitle: '融合 Cloudflare D1/R2/KV 与 坚果云 WebDAV 容灾备份的下一代多终端响应式博客平台',
+  transparentCards: false,
   hideNonBlogForGuests: false,
   emailRegistrationOnly: true,
   allowRegistration: true,
   totalCapacityBytes: 10 * 1024 * 1024 * 1024, // 10 GB
-  usedCapacityBytes: 0, // Starts at zero as requested
+  usedCapacityBytes: 0, // Default starts at zero as requested
+  storageConfig: {
+    databaseType: 'd1',
+    bucketType: 'r2',
+    kvType: 'cf_kv',
+  },
+  autoSync: true,
+  syncIntervalSeconds: 30,
 };
 
 export const DEFAULT_ADMIN: User = {
@@ -99,7 +107,7 @@ export const DEFAULT_ADMIN: User = {
   email: 'service@whitefox.blog',
   role: 'admin',
   createdAt: Date.now(),
-  avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=300&q=80',
+  avatar: '/images/hero-default.jpg',
   status: 'active',
 };
 
@@ -116,7 +124,7 @@ export const DEFAULT_POSTS: Post[] = [
 
 1. **D1 结构化数据驱动**：文章、评论、分类、标签与元数据完全依托 Cloudflare D1 SQLite 分布式数据库。
 2. **R2 零出口费用存储**：多媒体、电子书、附件与相册文件依托 Cloudflare R2 对象存储，支持全网 CDN 加速。
-3. **容错保障机制**：系统具备客户端与云端双模自适应。即使在未绑定 D1/R2 的演示环境，亦能无缝回退至本地存储，保障零故障运行！
+3. **前端直连容错机制**：系统具备客户端与云端双模自适应。即使在未绑定 D1/R2 的环境，前端亦能无缝直连运行！
 4. **坚果云 / WebDAV 全量热备**：一键将全站数据热备至私有坚果云网盘，规避任何服务器运营与不可抗力风险。
 
 ---
@@ -192,8 +200,8 @@ export const DEFAULT_BOOKS: Book[] = [
     cover: 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?auto=format&fit=crop&w=400&q=80',
     description: '硅谷创业之父保罗·格雷厄姆的文集，探讨黑客精神、财富创造与程序语言设计。',
     fileSize: 2450000,
-    fileUrl: '#',
-    content: `第一章 为什么书呆子不受欢迎\n\n如果你在读高中，或者不久前刚高中毕业，你可能会觉得生活里最重要的事情就是受欢迎程度……\n黑客是真正的创造者，就像画家、作曲家或建筑师。他们用计算机编程语言作为画布与颜料，把心中的构想一步步具象化。\n\n伟大的软件往往由极具审美与独立思考能力的人编写完成。`,
+    fileUrl: '/books/hackers-and-painters.epub',
+    content: `第一章 为什么书呆子不受欢迎\n\n如果你在读高中，或者不久前刚高中毕业，你可能会觉得生活里最重要的事情就是受欢迎程度……\n\n黑客是真正的创造者，就像画家、作曲家或建筑师。他们用计算机编程语言作为画布与颜料，把心中的构想一步步具象化。\n\n伟大的软件往往由极具审美与独立思考能力的人编写完成。\n\n第二章 黑客与画家\n\n黑客与画家有极大的相似之处。两者都是创造者，试图创造出美丽而有价值的事物。他们必须动手实践，必须从空白画布开始，一笔一笔地将想象转变为现实。`,
     progress: 35,
     createdAt: Date.now() - 86400000 * 5,
     updatedAt: Date.now() - 86400000 * 5,
@@ -206,8 +214,8 @@ export const DEFAULT_BOOKS: Book[] = [
     cover: 'https://images.unsplash.com/photo-1512820790803-83ca734da794?auto=format&fit=crop&w=400&q=80',
     description: '日常用品的设计哲学，如何通过示能与意符减少人机交互中的摩擦。',
     fileSize: 8400000,
-    fileUrl: '#',
-    content: `好的设计其实很难被注意到，因为它们顺应人的直觉，工作得如此自然，以至于我们根本不需要思考。\n糟糕的设计却无处不在，例如推拉门没有明确的把手方向指示，让无数人陷入尴尬。\n\n示能（Affordance）与意符（Signifier）构成了所有优秀设计的基石。`,
+    fileUrl: '/books/design-of-everyday-things.pdf',
+    content: `第一章 日用品中的精神病学\n\n好的设计其实很难被注意到，因为它们顺应人的直觉，工作得如此自然，以至于我们根本不需要思考。\n\n糟糕的设计却无处不在，例如推拉门没有明确的把手方向指示，让无数人陷入尴尬。\n\n示能（Affordance）与意符（Signifier）构成了所有优秀设计的基石。在设计数字系统或实体工具时，设计师的职责就是清晰地呈现意图与操作反馈。`,
     progress: 60,
     createdAt: Date.now() - 86400000 * 4,
     updatedAt: Date.now() - 86400000 * 4,
@@ -220,8 +228,8 @@ export const DEFAULT_BOOKS: Book[] = [
     cover: 'https://images.unsplash.com/photo-1544947950-fa07a98d237f?auto=format&fit=crop&w=400&q=80',
     description: '在瓦尔登湖畔独居两年的思考，关于极简生活、自然与内心的沉淀。',
     fileSize: 620000,
-    fileUrl: '#',
-    content: `我步入丛林，因为我希望生活得有意义，我希望深入生活，吸取生活中的所有精华，把非生活的一切都消灭殆尽，免得到我临死的时候，才发现自己根本没有生活过。`,
+    fileUrl: '/books/walden.txt',
+    content: `我步入丛林，因为我希望生活得有意义，我希望深入生活，吸取生活中的所有精华，把非生活的一切都消灭殆尽，免得到我临死的时候，才发现自己根本没有生活过。\n\n大多数人都生活在平静的绝望中。所谓听天由命，不过是无可奈何的习惯。我们应该简化生活，简化我们的日程与欲望，让灵魂在纯粹中苏醒。`,
     progress: 15,
     createdAt: Date.now() - 86400000 * 3,
     updatedAt: Date.now() - 86400000 * 3,
@@ -377,6 +385,8 @@ export const DEFAULT_ORDERS: Order[] = [
     customerAddress: '广东省深圳市南山区高新南九道软件产业基地 4 栋',
     paymentMethod: 'wechat',
     status: 'paid',
+    trackingNumber: 'SF1029384756',
+    carrier: '顺丰速运',
     createdAt: Date.now() - 86400000 * 1,
   },
   {
@@ -419,6 +429,21 @@ export const DEFAULT_PAYMENT_SETTINGS: PaymentSettings = {
     appId: '2021000000000000',
     privateKey: '********',
     alipayPublicKey: '********',
+  },
+  stripe: {
+    enabled: true,
+    publishableKey: 'pk_test_fox3_demo_key',
+    secretKey: '********',
+  },
+  usdt: {
+    enabled: true,
+    network: 'TRC20',
+    walletAddress: 'TYDzsXDvGhnqkdRmWK992xJpQyJKeS1K8q',
+  },
+  unionpay: {
+    enabled: true,
+    merId: '777290058110048',
+    secureKey: '********',
   }
 };
 
@@ -452,3 +477,30 @@ export const DEFAULT_WEBDAV_CONFIG: WebDavConfig = {
   backupPath: '/fox3_backup/',
   lastBackupTime: Date.now() - 86400000 * 2,
 };
+
+export const DEFAULT_WEBDAV_BACKUPS: WebDavBackupItem[] = [
+  {
+    id: 'bak-1',
+    name: 'fox3_full_backup_20250520.json',
+    size: 4890000,
+    updatedAt: Date.now() - 86400000 * 2,
+    type: 'full',
+    path: '/fox3_backup/fox3_full_backup_20250520.json',
+  },
+  {
+    id: 'bak-2',
+    name: 'fox3_posts_backup_20250521.json',
+    size: 125000,
+    updatedAt: Date.now() - 86400000 * 1,
+    type: 'posts',
+    path: '/fox3_backup/fox3_posts_backup_20250521.json',
+  },
+  {
+    id: 'bak-3',
+    name: 'fox3_books_backup_20250521.json',
+    size: 2650000,
+    updatedAt: Date.now() - 86400000 * 1,
+    type: 'books',
+    path: '/fox3_backup/fox3_books_backup_20250521.json',
+  }
+];

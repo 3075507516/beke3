@@ -36,7 +36,7 @@ export interface Book {
   description: string;
   fileSize: number;
   fileUrl: string;
-  content?: string; // Text content if previewable
+  content?: string; // Text content for in-browser reading
   progress?: number;
   createdAt: number;
   updatedAt: number;
@@ -70,18 +70,6 @@ export interface MediaItem {
   deleted?: boolean;
 }
 
-export interface CloudFile {
-  id: string;
-  name: string;
-  size: number;
-  type: string;
-  url: string;
-  folder: string;
-  provider: 'r2' | 'd1' | 'local' | 'webdav';
-  createdAt: number;
-  updatedAt: number;
-}
-
 export interface MailMessage {
   id: string;
   folder: 'inbox' | 'sent' | 'trash';
@@ -113,6 +101,8 @@ export interface Product {
   updatedAt: number;
 }
 
+export type OrderStatus = 'unpaid' | 'paid' | 'shipped' | 'completed' | 'refunded';
+
 export interface Order {
   id: string;
   productId: string;
@@ -124,9 +114,12 @@ export interface Order {
   customerEmail: string;
   customerPhone: string;
   customerAddress: string;
-  paymentMethod: 'paypal' | 'worldfirst' | 'wechat' | 'alipay' | 'pending';
-  status: 'paid' | 'unpaid' | 'shipped' | 'completed' | 'cancelled';
+  paymentMethod: 'paypal' | 'worldfirst' | 'wechat' | 'alipay' | 'stripe' | 'usdt' | 'unionpay' | 'pending';
+  status: OrderStatus;
+  trackingNumber?: string;
+  carrier?: string;
   createdAt: number;
+  updatedAt?: number;
 }
 
 export interface ChatMessage {
@@ -136,6 +129,15 @@ export interface ChatMessage {
   userEmail?: string;
   message: string;
   createdAt: number;
+}
+
+export interface WebDavBackupItem {
+  id: string;
+  name: string;
+  size: number;
+  updatedAt: number;
+  type: 'full' | 'posts' | 'books' | 'media' | 'settings';
+  path: string;
 }
 
 export interface WebDavConfig {
@@ -169,21 +171,40 @@ export interface EmailSettings {
   };
 }
 
+export interface StorageConfig {
+  databaseType: 'd1' | 'supabase' | 'rest' | 'local';
+  databaseUrl?: string;
+  databaseKey?: string;
+  bucketType: 'r2' | 's3' | 'cos' | 'oss' | 'webdav' | 'local';
+  bucketEndpoint?: string;
+  bucketName?: string;
+  bucketAccessKey?: string;
+  bucketSecretKey?: string;
+  bucketPublicUrl?: string;
+  kvType: 'cf_kv' | 'local' | 'redis';
+  kvEndpoint?: string;
+  kvToken?: string;
+}
+
 export interface SystemSettings {
   siteName: string;
   themeColor: string;
   customPaletteBg?: string;
   fullBackgroundUrl?: string;
   avatarUrl?: string;
-  heroIntroImage?: string;
+  heroIntroImage?: string; // Panoramic single hero background image
   heroBadge?: string;
   heroTitle?: string;
   heroSubtitle?: string;
+  transparentCards: boolean; // Semi-transparent glass card showing site background
   hideNonBlogForGuests: boolean;
   emailRegistrationOnly: boolean;
   allowRegistration: boolean;
   totalCapacityBytes: number;
   usedCapacityBytes: number;
+  storageConfig: StorageConfig;
+  autoSync: boolean;
+  syncIntervalSeconds: number;
 }
 
 export interface PaymentSettings {
@@ -210,4 +231,21 @@ export interface PaymentSettings {
     privateKey: string;
     alipayPublicKey: string;
   };
+  stripe: {
+    enabled: boolean;
+    publishableKey: string;
+    secretKey: string;
+  };
+  usdt: {
+    enabled: boolean;
+    network: 'TRC20' | 'ERC20';
+    walletAddress: string;
+  };
+  unionpay: {
+    enabled: boolean;
+    merId: string;
+    secureKey: string;
+  };
 }
+
+export type ViewMode = 'big' | 'medium' | 'small' | 'original';

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
-import { Post } from '../../types';
+import { Post, ViewMode } from '../../types';
 import { SafeImage } from '../common/SafeImage';
 import {
   Search,
@@ -9,20 +9,30 @@ import {
   Eye,
   Heart,
   Bookmark,
-  Share2,
   PlusCircle,
   Edit3,
   Trash2,
-  Check,
   ChevronRight,
   ArrowLeft,
+  LayoutGrid,
+  Grid3X3,
+  List,
+  Columns,
+  CheckSquare,
+  Square,
+  Download,
+  Upload,
 } from 'lucide-react';
 
 export const BlogSection: React.FC = () => {
-  const { posts, setPosts, currentUser, uploadFile } = useApp();
+  const { posts, setPosts, currentUser, uploadFile, viewModes, setViewMode, systemSettings } = useApp();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [activePost, setActivePost] = useState<Post | null>(null);
+
+  // Batch selections
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const currentViewMode: ViewMode = viewModes['blog'] || 'original';
 
   // Editor modal state
   const [isEditing, setIsEditing] = useState(false);
@@ -46,6 +56,59 @@ export const BlogSection: React.FC = () => {
       post.tags.some(t => t.toLowerCase().includes(searchQuery.toLowerCase()));
     return matchesCat && matchesQuery && !post.deleted;
   });
+
+  const handleToggleSelect = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedIds(prev =>
+      prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
+    );
+  };
+
+  const handleSelectAll = () => {
+    if (selectedIds.length === filteredPosts.length) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(filteredPosts.map(p => p.id));
+    }
+  };
+
+  const handleBatchDelete = () => {
+    if (selectedIds.length === 0) return;
+    if (window.confirm(`确认批量删除选中的 ${selectedIds.length} 篇文章吗？`)) {
+      setPosts(prev => prev.filter(p => !selectedIds.includes(p.id)));
+      setSelectedIds([]);
+    }
+  };
+
+  const handleBatchDownload = () => {
+    if (selectedIds.length === 0) return;
+    const exportPosts = posts.filter(p => selectedIds.includes(p.id));
+    const blob = new Blob([JSON.stringify(exportPosts, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `fox3_posts_export_${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleBatchUploadJson = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const imported = JSON.parse(event.target?.result as string);
+        if (Array.isArray(imported)) {
+          setPosts(prev => [...imported, ...prev]);
+          alert(`成功批量导入 ${imported.length} 篇文章！`);
+        }
+      } catch {
+        alert('导入的 JSON 格式不符合规范！');
+      }
+    };
+    reader.readAsText(file);
+  };
 
   const handleLike = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -80,7 +143,6 @@ export const BlogSection: React.FC = () => {
     if (!editingPost.title || !editingPost.content) return;
 
     if (editingPost.id) {
-      // Update
       setPosts(prev =>
         prev.map(p =>
           p.id === editingPost.id
@@ -96,7 +158,6 @@ export const BlogSection: React.FC = () => {
         setActivePost({ ...activePost, ...editingPost } as Post);
       }
     } else {
-      // Create new
       const newP: Post = {
         id: `post-${Date.now()}`,
         title: editingPost.title || '无标题文章',
@@ -131,17 +192,20 @@ export const BlogSection: React.FC = () => {
       <div className="space-y-6 animate-in fade-in">
         <button
           onClick={() => setActivePost(null)}
-          className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 hover:text-rose-600 dark:hover:text-rose-400 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl transition shadow-sm"
+          className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 hover:text-sky-600 dark:hover:text-sky-400 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl transition shadow-sm"
         >
           <ArrowLeft className="w-4 h-4" />
           <span>返回博文列表</span>
         </button>
 
-        <article className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl p-6 md:p-10 shadow-sm">
-          {/* Article Header */}
+        <article className={`p-6 md:p-10 rounded-3xl border shadow-sm ${
+          systemSettings.transparentCards
+            ? 'bg-white/75 dark:bg-slate-900/75 backdrop-blur-md border-white/20'
+            : 'bg-white dark:bg-slate-900 border-slate-200/80 dark:border-slate-800'
+        }`}>
           <div className="space-y-4 mb-8 pb-6 border-b border-slate-100 dark:border-slate-800">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="px-3 py-1 bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 rounded-full text-xs font-semibold">
+              <span className="px-3 py-1 bg-sky-50 dark:bg-sky-950/40 text-sky-600 dark:text-sky-400 rounded-full text-xs font-semibold">
                 {activePost.category}
               </span>
               {activePost.tags.map(tag => (
@@ -187,17 +251,16 @@ export const BlogSection: React.FC = () => {
                   onClick={e => handleBookmark(activePost.id, e)}
                   className={`p-1.5 rounded-lg border transition ${
                     activePost.isBookmarked
-                      ? 'bg-rose-50 border-rose-200 text-rose-600 dark:bg-rose-950 dark:border-rose-900 dark:text-rose-400'
+                      ? 'bg-amber-50 border-amber-200 text-amber-600 dark:bg-amber-950 dark:border-amber-900 dark:text-amber-400'
                       : 'border-slate-200 dark:border-slate-800 text-slate-400'
                   }`}
                 >
-                  <Bookmark className="w-4 h-4" />
+                  <Bookmark className={`w-4 h-4 ${activePost.isBookmarked ? 'fill-amber-500' : ''}`} />
                 </button>
               </div>
             </div>
           </div>
 
-          {/* Article Cover */}
           <div className="w-full h-72 md:h-96 rounded-2xl overflow-hidden mb-8 shadow-sm">
             <SafeImage
               src={activePost.cover}
@@ -206,7 +269,6 @@ export const BlogSection: React.FC = () => {
             />
           </div>
 
-          {/* Article Body */}
           <div className="prose dark:prose-invert max-w-none text-slate-700 dark:text-slate-300 leading-relaxed font-sans space-y-4 whitespace-pre-wrap">
             {activePost.content}
           </div>
@@ -215,11 +277,29 @@ export const BlogSection: React.FC = () => {
     );
   }
 
+  // Determine grid container class based on view mode
+  const getLayoutClass = () => {
+    switch (currentViewMode) {
+      case 'big':
+        return 'grid grid-cols-1 gap-8';
+      case 'medium':
+        return 'grid grid-cols-1 md:grid-cols-2 gap-6';
+      case 'small':
+        return 'space-y-3';
+      case 'original':
+      default:
+        return 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6';
+    }
+  };
+
   return (
     <div className="space-y-6">
-      {/* Search, Filter Bar and Post Creation */}
-      <div className="flex flex-col md:flex-row items-center justify-between gap-4 bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-sm">
-        {/* Search Input */}
+      {/* Search, Filter Bar and View Mode Switcher */}
+      <div className={`p-4 rounded-3xl border shadow-sm flex flex-col md:flex-row items-center justify-between gap-4 ${
+        systemSettings.transparentCards
+          ? 'bg-white/70 dark:bg-slate-900/70 backdrop-blur-md border-white/20'
+          : 'bg-white dark:bg-slate-900 border-slate-200/80 dark:border-slate-800'
+      }`}>
         <div className="relative w-full md:w-80">
           <Search className="absolute left-3.5 top-3 w-4 h-4 text-slate-400" />
           <input
@@ -227,7 +307,7 @@ export const BlogSection: React.FC = () => {
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
             placeholder="搜索文章、标签或关键词..."
-            className="w-full pl-10 pr-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500 text-slate-800 dark:text-slate-100"
+            className="w-full pl-10 pr-4 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 text-slate-800 dark:text-slate-100"
           />
         </div>
 
@@ -239,7 +319,7 @@ export const BlogSection: React.FC = () => {
               onClick={() => setSelectedCategory(cat)}
               className={`px-3 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition ${
                 selectedCategory === cat
-                  ? 'bg-rose-500 text-white shadow-sm'
+                  ? 'bg-sky-500 text-white shadow-sm'
                   : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
               }`}
             >
@@ -248,126 +328,296 @@ export const BlogSection: React.FC = () => {
           ))}
         </div>
 
-        {/* Admin New Post Button */}
-        {currentUser?.role === 'admin' && (
-          <button
-            onClick={() => {
-              setEditingPost({
-                title: '',
-                summary: '',
-                content: '',
-                category: '技术架构',
-                tags: ['fox3'],
-                cover: 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=1200&q=80',
-                author: currentUser.username,
-              });
-              setIsEditing(true);
-            }}
-            className="flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-rose-500 to-pink-600 hover:from-rose-600 hover:to-pink-700 text-white text-xs font-semibold rounded-xl shadow-md transition whitespace-nowrap shrink-0"
-          >
-            <PlusCircle className="w-4 h-4" />
-            <span>发布新博文</span>
-          </button>
-        )}
+        {/* View Mode & Actions */}
+        <div className="flex items-center gap-2 shrink-0">
+          {/* View Mode Switcher */}
+          <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200 dark:border-slate-700">
+            <button
+              onClick={() => setViewMode('blog', 'big')}
+              title="大图模式"
+              className={`p-1.5 rounded-lg transition ${currentViewMode === 'big' ? 'bg-white dark:bg-slate-700 text-sky-500 shadow-xs' : 'text-slate-400'}`}
+            >
+              <Columns className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={() => setViewMode('blog', 'medium')}
+              title="中图网格"
+              className={`p-1.5 rounded-lg transition ${currentViewMode === 'medium' ? 'bg-white dark:bg-slate-700 text-sky-500 shadow-xs' : 'text-slate-400'}`}
+            >
+              <Grid3X3 className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={() => setViewMode('blog', 'small')}
+              title="小图详情列表"
+              className={`p-1.5 rounded-lg transition ${currentViewMode === 'small' ? 'bg-white dark:bg-slate-700 text-sky-500 shadow-xs' : 'text-slate-400'}`}
+            >
+              <List className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={() => setViewMode('blog', 'original')}
+              title="原三列布局"
+              className={`p-1.5 rounded-lg transition ${currentViewMode === 'original' ? 'bg-white dark:bg-slate-700 text-sky-500 shadow-xs' : 'text-slate-400'}`}
+            >
+              <LayoutGrid className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          {currentUser?.role === 'admin' && (
+            <button
+              onClick={() => {
+                setEditingPost({
+                  title: '',
+                  summary: '',
+                  content: '',
+                  category: '技术架构',
+                  tags: ['fox3'],
+                  cover: 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=1200&q=80',
+                  author: currentUser.username,
+                });
+                setIsEditing(true);
+              }}
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-sky-500 hover:bg-sky-600 text-white text-xs font-semibold rounded-xl shadow-md transition whitespace-nowrap"
+            >
+              <PlusCircle className="w-4 h-4" />
+              <span>写新博文</span>
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Posts Grid List */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {filteredPosts.map(post => (
-          <div
-            key={post.id}
-            onClick={() => {
-              // Increase view count
-              setPosts(prev =>
-                prev.map(p => (p.id === post.id ? { ...p, views: p.views + 1 } : p))
-              );
-              setActivePost({ ...post, views: post.views + 1 });
-            }}
-            className="group cursor-pointer bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl overflow-hidden shadow-sm hover:shadow-xl transition-all duration-300 flex flex-col justify-between"
-          >
-            <div>
-              {/* Cover Image */}
-              <div className="relative w-full h-48 overflow-hidden">
-                <SafeImage
-                  src={post.cover}
-                  alt={post.title}
-                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-                />
-                <span className="absolute top-3 left-3 px-2.5 py-1 bg-black/60 backdrop-blur-md text-white text-[11px] font-medium rounded-lg">
-                  {post.category}
-                </span>
-              </div>
+      {/* Batch Operations Bar */}
+      {currentUser?.role === 'admin' && (
+        <div className={`p-3 rounded-2xl border flex flex-wrap items-center justify-between gap-3 text-xs ${
+          systemSettings.transparentCards
+            ? 'bg-white/60 dark:bg-slate-900/60 backdrop-blur-md border-white/20'
+            : 'bg-white dark:bg-slate-900 border-slate-200/80 dark:border-slate-800'
+        }`}>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleSelectAll}
+              className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300 font-medium hover:text-sky-500"
+            >
+              {selectedIds.length === filteredPosts.length && filteredPosts.length > 0 ? (
+                <CheckSquare className="w-4 h-4 text-sky-500" />
+              ) : (
+                <Square className="w-4 h-4 text-slate-400" />
+              )}
+              <span>全选 ({selectedIds.length}/{filteredPosts.length})</span>
+            </button>
 
-              {/* Text Info */}
-              <div className="p-5 space-y-2">
-                <div className="flex items-center gap-1.5 text-xs text-slate-400">
-                  <Clock className="w-3.5 h-3.5" />
-                  <span>
-                    {new Date(post.createdAt).toLocaleDateString('zh-CN', {
-                      month: 'short',
-                      day: 'numeric',
-                    })}
-                  </span>
-                  <span>•</span>
-                  <span>{post.author}</span>
+            {selectedIds.length > 0 && (
+              <>
+                <button
+                  onClick={handleBatchDelete}
+                  className="flex items-center gap-1 text-rose-500 hover:text-rose-600 font-medium"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>批量删除 ({selectedIds.length})</span>
+                </button>
+                <button
+                  onClick={handleBatchDownload}
+                  className="flex items-center gap-1 text-sky-600 dark:text-sky-400 font-medium"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>批量导出所选</span>
+                </button>
+              </>
+            )}
+          </div>
+
+          <label className="flex items-center gap-1 text-slate-500 hover:text-sky-500 cursor-pointer">
+            <Upload className="w-3.5 h-3.5" />
+            <span>批量导入博文 (JSON)</span>
+            <input type="file" accept=".json" onChange={handleBatchUploadJson} className="hidden" />
+          </label>
+        </div>
+      )}
+
+      {/* Posts List rendering with active ViewMode */}
+      <div className={getLayoutClass()}>
+        {filteredPosts.map(post => {
+          const isSelected = selectedIds.includes(post.id);
+
+          // Small Detail List Layout
+          if (currentViewMode === 'small') {
+            return (
+              <div
+                key={post.id}
+                onClick={() => {
+                  setPosts(prev =>
+                    prev.map(p => (p.id === post.id ? { ...p, views: p.views + 1 } : p))
+                  );
+                  setActivePost({ ...post, views: post.views + 1 });
+                }}
+                className={`group p-3 sm:p-4 rounded-2xl border shadow-sm flex items-center justify-between gap-4 cursor-pointer transition hover:shadow-md ${
+                  isSelected ? 'ring-2 ring-sky-500' : ''
+                } ${
+                  systemSettings.transparentCards
+                    ? 'bg-white/70 dark:bg-slate-900/70 backdrop-blur-md border-white/20'
+                    : 'bg-white dark:bg-slate-900 border-slate-200/80 dark:border-slate-800'
+                }`}
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  {currentUser?.role === 'admin' && (
+                    <button
+                      onClick={e => handleToggleSelect(post.id, e)}
+                      className="p-1 text-slate-400 hover:text-sky-500 shrink-0"
+                    >
+                      {isSelected ? (
+                        <CheckSquare className="w-4 h-4 text-sky-500" />
+                      ) : (
+                        <Square className="w-4 h-4" />
+                      )}
+                    </button>
+                  )}
+                  <div className="w-16 h-12 rounded-xl overflow-hidden shrink-0">
+                    <SafeImage src={post.cover} alt={post.title} className="w-full h-full object-cover" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-sky-50 dark:bg-sky-950/40 text-sky-600 dark:text-sky-400">
+                        {post.category}
+                      </span>
+                      <h4 className="text-sm font-bold text-slate-800 dark:text-slate-100 truncate group-hover:text-sky-500 transition">
+                        {post.title}
+                      </h4>
+                    </div>
+                    <p className="text-xs text-slate-400 truncate mt-0.5">{post.summary}</p>
+                  </div>
                 </div>
 
-                <h3 className="text-base font-bold font-serif-sc text-slate-800 dark:text-slate-100 group-hover:text-rose-500 transition line-clamp-2">
-                  {post.title}
-                </h3>
+                <div className="flex items-center gap-4 shrink-0 text-xs text-slate-400">
+                  <span className="hidden sm:inline font-mono">{new Date(post.createdAt).toLocaleDateString()}</span>
+                  <button
+                    onClick={e => handleBookmark(post.id, e)}
+                    className="p-1 hover:text-amber-500"
+                  >
+                    <Bookmark className={`w-3.5 h-3.5 ${post.isBookmarked ? 'fill-amber-500 text-amber-500' : ''}`} />
+                  </button>
+                  <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                </div>
+              </div>
+            );
+          }
 
-                <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2 leading-relaxed">
-                  {post.summary}
-                </p>
+          // Big, Medium, or Original Card Layout
+          return (
+            <div
+              key={post.id}
+              onClick={() => {
+                setPosts(prev =>
+                  prev.map(p => (p.id === post.id ? { ...p, views: p.views + 1 } : p))
+                );
+                setActivePost({ ...post, views: post.views + 1 });
+              }}
+              className={`group cursor-pointer rounded-3xl overflow-hidden border shadow-sm hover:shadow-xl transition-all duration-300 flex flex-col justify-between ${
+                isSelected ? 'ring-2 ring-sky-500' : ''
+              } ${
+                systemSettings.transparentCards
+                  ? 'bg-white/70 dark:bg-slate-900/70 backdrop-blur-md border-white/20'
+                  : 'bg-white dark:bg-slate-900 border-slate-200/80 dark:border-slate-800'
+              }`}
+            >
+              <div>
+                <div className={`relative w-full overflow-hidden ${currentViewMode === 'big' ? 'h-72 sm:h-96' : 'h-48'}`}>
+                  <SafeImage
+                    src={post.cover}
+                    alt={post.title}
+                    className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                  />
+                  <span className="absolute top-3 left-3 px-2.5 py-1 bg-black/60 backdrop-blur-md text-white text-[11px] font-medium rounded-lg">
+                    {post.category}
+                  </span>
+
+                  {currentUser?.role === 'admin' && (
+                    <button
+                      onClick={e => handleToggleSelect(post.id, e)}
+                      className="absolute top-3 right-3 p-1.5 rounded-lg bg-black/60 backdrop-blur-md text-white hover:text-sky-400"
+                    >
+                      {isSelected ? (
+                        <CheckSquare className="w-4 h-4 text-sky-400" />
+                      ) : (
+                        <Square className="w-4 h-4" />
+                      )}
+                    </button>
+                  )}
+                </div>
+
+                <div className="p-5 space-y-2">
+                  <div className="flex items-center gap-1.5 text-xs text-slate-400">
+                    <Clock className="w-3.5 h-3.5" />
+                    <span>
+                      {new Date(post.createdAt).toLocaleDateString('zh-CN', {
+                        month: 'short',
+                        day: 'numeric',
+                      })}
+                    </span>
+                    <span>•</span>
+                    <span>{post.author}</span>
+                  </div>
+
+                  <h3 className="text-base font-bold font-serif-sc text-slate-800 dark:text-slate-100 group-hover:text-sky-500 transition line-clamp-2">
+                    {post.title}
+                  </h3>
+
+                  <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2 leading-relaxed">
+                    {post.summary}
+                  </p>
+                </div>
+              </div>
+
+              <div className="px-5 pb-5 pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs text-slate-400">
+                <div className="flex items-center gap-3">
+                  <span className="flex items-center gap-1">
+                    <Eye className="w-3.5 h-3.5" />
+                    {post.views}
+                  </span>
+                  <button
+                    onClick={e => handleLike(post.id, e)}
+                    className="flex items-center gap-1 hover:text-rose-500 transition"
+                  >
+                    <Heart className="w-3.5 h-3.5" />
+                    {post.likes}
+                  </button>
+                  <button
+                    onClick={e => handleBookmark(post.id, e)}
+                    className={`hover:text-amber-500 transition ${post.isBookmarked ? 'text-amber-500' : ''}`}
+                  >
+                    <Bookmark className={`w-3.5 h-3.5 ${post.isBookmarked ? 'fill-amber-500' : ''}`} />
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  {currentUser?.role === 'admin' && (
+                    <>
+                      <button
+                        onClick={e => {
+                          e.stopPropagation();
+                          setEditingPost(post);
+                          setIsEditing(true);
+                        }}
+                        title="编辑文章"
+                        className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 hover:text-sky-500"
+                      >
+                        <Edit3 className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={e => handleDelete(post.id, e)}
+                        title="删除文章"
+                        className="p-1.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950 text-slate-500 hover:text-rose-600"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </>
+                  )}
+                  <span className="text-sky-500 font-medium group-hover:translate-x-1 transition-transform inline-flex items-center">
+                    阅读 <ChevronRight className="w-3.5 h-3.5" />
+                  </span>
+                </div>
               </div>
             </div>
-
-            {/* Footer Metrics & Actions */}
-            <div className="px-5 pb-5 pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs text-slate-400">
-              <div className="flex items-center gap-3">
-                <span className="flex items-center gap-1">
-                  <Eye className="w-3.5 h-3.5" />
-                  {post.views}
-                </span>
-                <button
-                  onClick={e => handleLike(post.id, e)}
-                  className="flex items-center gap-1 hover:text-rose-500 transition"
-                >
-                  <Heart className="w-3.5 h-3.5" />
-                  {post.likes}
-                </button>
-              </div>
-
-              <div className="flex items-center gap-2">
-                {currentUser?.role === 'admin' && (
-                  <>
-                    <button
-                      onClick={e => {
-                        e.stopPropagation();
-                        setEditingPost(post);
-                        setIsEditing(true);
-                      }}
-                      title="编辑文章"
-                      className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 hover:text-rose-500"
-                    >
-                      <Edit3 className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      onClick={e => handleDelete(post.id, e)}
-                      title="删除文章"
-                      className="p-1.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950 text-slate-500 hover:text-rose-600"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </>
-                )}
-                <span className="text-rose-500 font-medium group-hover:translate-x-1 transition-transform inline-flex items-center">
-                  阅读 <ChevronRight className="w-3.5 h-3.5" />
-                </span>
-              </div>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* Article Editor Modal */}
@@ -388,7 +638,7 @@ export const BlogSection: React.FC = () => {
                   value={editingPost.title || ''}
                   onChange={e => setEditingPost({ ...editingPost, title: e.target.value })}
                   placeholder="例如：fox3 部署指南与性能调优"
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500 text-slate-800 dark:text-slate-100"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 text-slate-800 dark:text-slate-100"
                   required
                 />
               </div>
@@ -403,7 +653,7 @@ export const BlogSection: React.FC = () => {
                     value={editingPost.category || ''}
                     onChange={e => setEditingPost({ ...editingPost, category: e.target.value })}
                     placeholder="技术架构 / 部署指南 / 随想"
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500 text-slate-800 dark:text-slate-100"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 text-slate-800 dark:text-slate-100"
                   />
                 </div>
 
@@ -421,12 +671,11 @@ export const BlogSection: React.FC = () => {
                       })
                     }
                     placeholder="Cloudflare, D1, R2"
-                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500 text-slate-800 dark:text-slate-100"
+                    className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 text-slate-800 dark:text-slate-100"
                   />
                 </div>
               </div>
 
-              {/* Cover Image Uploader */}
               <div>
                 <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
                   文章封面图片
@@ -467,7 +716,7 @@ export const BlogSection: React.FC = () => {
                   value={editingPost.summary || ''}
                   onChange={e => setEditingPost({ ...editingPost, summary: e.target.value })}
                   placeholder="展示在列表中的核心一句话概括"
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500 text-slate-800 dark:text-slate-100"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 text-slate-800 dark:text-slate-100"
                 />
               </div>
 
@@ -480,7 +729,7 @@ export const BlogSection: React.FC = () => {
                   value={editingPost.content || ''}
                   onChange={e => setEditingPost({ ...editingPost, content: e.target.value })}
                   placeholder="在这里输入文章 Markdown 格式正文..."
-                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500 font-mono text-slate-800 dark:text-slate-100"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 font-mono text-slate-800 dark:text-slate-100"
                   required
                 />
               </div>
@@ -495,7 +744,7 @@ export const BlogSection: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 bg-gradient-to-r from-rose-500 to-pink-600 hover:from-rose-600 hover:to-pink-700 text-white text-xs font-semibold rounded-xl shadow-md transition"
+                  className="px-5 py-2 bg-sky-500 hover:bg-sky-600 text-white text-xs font-semibold rounded-xl shadow-md transition"
                 >
                   保存文章
                 </button>
