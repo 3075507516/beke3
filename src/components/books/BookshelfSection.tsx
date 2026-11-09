@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
 import { Book, ViewMode } from '../../types';
 import { SafeImage } from '../common/SafeImage';
+import JSZip from 'jszip';
 import { parseEpubFile } from '../../utils/epubReader';
 import { getFileFromIndexedDB } from '../../utils/storage';
 import {
@@ -174,16 +175,44 @@ export const BookshelfSection: React.FC = () => {
     }
   };
 
-  const handleBatchDownload = () => {
+  const handleBatchDownload = async () => {
     if (selectedIds.length === 0) return;
     const exportBooks = books.filter(b => selectedIds.includes(b.id));
-    const blob = new Blob([JSON.stringify(exportBooks, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `fox3_books_export_${Date.now()}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+    startTransfer('download', `books_batch_${exportBooks.length}.zip`);
+
+    const zip = new JSZip();
+    for (let i = 0; i < exportBooks.length; i++) {
+      const book = exportBooks[i];
+      const ext = (book.format || 'txt').toLowerCase();
+      const filename = `${book.title}.${ext}`;
+      try {
+        let fileData: Blob | string = book.fileUrl;
+        if (book.fileUrl && book.fileUrl.startsWith('idb_file_')) {
+          const stored = await getFileFromIndexedDB(book.fileUrl);
+          if (stored) fileData = stored;
+        }
+
+        if (fileData instanceof Blob) {
+          zip.file(filename, fileData);
+        } else if (typeof fileData === 'string' && (fileData.startsWith('data:') || fileData.startsWith('http'))) {
+          const res = await fetch(fileData);
+          const b = await res.blob();
+          zip.file(filename, b);
+        } else {
+          zip.file(filename, book.content || `fox3 电子书: ${book.title}`);
+        }
+      } catch {
+        zip.file(filename, book.content || `fox3 电子书: ${book.title}`);
+      }
+      updateTransferPercent(Math.round(((i + 1) / exportBooks.length) * 100));
+    }
+
+    const content = await zip.generateAsync({ type: 'blob' });
+    finishTransfer();
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(content);
+    link.download = `fox3_books_batch_${Date.now()}.zip`;
+    link.click();
   };
 
   const handleDeleteBook = (id: string, e: React.MouseEvent) => {

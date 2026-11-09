@@ -191,32 +191,46 @@ export const WebDavBackupSection: React.FC = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
           <div>
-            <label className="block text-xs font-medium text-slate-500 mb-1">WebDAV 服务地址 (坚果云默认)</label>
+            <label className="block text-xs font-medium text-slate-500 mb-1">WebDAV 服务地址 (Host)</label>
             <input
               type="text"
               value={formConfig.serverUrl}
+              placeholder="https://dav.jianguoyun.com/dav/"
               onChange={e => setFormConfig({ ...formConfig, serverUrl: e.target.value })}
               className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 font-mono"
             />
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-slate-500 mb-1">坚果云账号 (邮箱)</label>
+            <label className="block text-xs font-medium text-slate-500 mb-1">服务端口 (Port，默认 443)</label>
+            <input
+              type="text"
+              value={formConfig.port ?? 443}
+              placeholder="443"
+              onChange={e => setFormConfig({ ...formConfig, port: e.target.value })}
+              className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 font-mono"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">坚果云账号 (User)</label>
             <input
               type="text"
               value={formConfig.username}
+              placeholder="user@example.com"
               onChange={e => setFormConfig({ ...formConfig, username: e.target.value })}
               className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100"
             />
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-slate-500 mb-1">坚果云专用应用密码</label>
+            <label className="block text-xs font-medium text-slate-500 mb-1">坚果云应用密码 (Password)</label>
             <input
               type="password"
               value={formConfig.password}
+              placeholder="输入第三方应用授权密码"
               onChange={e => setFormConfig({ ...formConfig, password: e.target.value })}
               className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100"
             />

@@ -144,6 +144,7 @@ export interface WebDavConfig {
   enabled: boolean;
   provider: 'nutstore' | 'generic'; // 坚果云或通用 WebDAV
   serverUrl: string;
+  port?: number | string; // 坚果云/WebDAV 端口（默认 443）
   username: string;
   password: string;
   backupPath: string;
