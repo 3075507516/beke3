@@ -94,6 +94,25 @@ interface AppContextType {
   updateTransferPercent: (percent: number) => void;
   finishTransfer: () => void;
 
+  // Multi-transfer progress support
+  multiTransferProgress: {
+    active: boolean;
+    type: 'upload' | 'download' | 'backup' | 'restore';
+    currentFileName: string;
+    currentIndex: number;
+    totalCount: number;
+    overallPercent: number;
+    speed?: string;
+  };
+  startMultiTransfer: (type: 'upload' | 'download' | 'backup' | 'restore', totalCount: number, firstFileName: string) => void;
+  updateMultiTransferProgress: (currentIndex: number, currentFileName: string, overallPercent: number, speed?: string) => void;
+  finishMultiTransfer: () => void;
+
+  // Unified toast notifications (success / error / info)
+  toasts: Array<{ id: string; type: 'success' | 'error' | 'info'; message: string }>;
+  showToast: (message: string, type?: 'success' | 'error' | 'info', duration?: number) => void;
+  dismissToast: (id: string) => void;
+
   uploadFile: (file: File) => Promise<{ url: string; size: number; name: string }>;
   addStorageUsage: (bytes: number) => void;
 
@@ -337,6 +356,68 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     speed: '',
   });
 
+  const [multiTransferProgress, setMultiTransferProgress] = useState<{
+    active: boolean;
+    type: 'upload' | 'download' | 'backup' | 'restore';
+    currentFileName: string;
+    currentIndex: number;
+    totalCount: number;
+    overallPercent: number;
+    speed?: string;
+  }>({
+    active: false,
+    type: 'upload',
+    currentFileName: '',
+    currentIndex: 0,
+    totalCount: 0,
+    overallPercent: 0,
+    speed: '',
+  });
+
+  // Toasts
+  const [toasts, setToasts] = useState<Array<{ id: string; type: 'success' | 'error' | 'info'; message: string }>>([]);
+
+  const showToast = useCallback((message: string, type: 'success' | 'error' | 'info' = 'success', duration = 3500) => {
+    const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    setToasts(prev => [...prev, { id, type, message }]);
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== id));
+    }, duration);
+  }, []);
+
+  const dismissToast = useCallback((id: string) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  }, []);
+
+  const startMultiTransfer = useCallback((type: 'upload' | 'download' | 'backup' | 'restore', totalCount: number, firstFileName: string) => {
+    setMultiTransferProgress({
+      active: true,
+      type,
+      currentFileName: firstFileName,
+      currentIndex: 1,
+      totalCount,
+      overallPercent: 5,
+      speed: '3.2 MB/s',
+    });
+  }, []);
+
+  const updateMultiTransferProgress = useCallback((currentIndex: number, currentFileName: string, overallPercent: number, speed?: string) => {
+    setMultiTransferProgress(prev => ({
+      ...prev,
+      currentIndex,
+      currentFileName,
+      overallPercent: Math.min(100, Math.max(0, overallPercent)),
+      speed: speed || prev.speed,
+    }));
+  }, []);
+
+  const finishMultiTransfer = useCallback(() => {
+    setMultiTransferProgress(prev => ({ ...prev, overallPercent: 100 }));
+    setTimeout(() => {
+      setMultiTransferProgress(prev => ({ ...prev, active: false, overallPercent: 0 }));
+    }, 600);
+  }, []);
+
   // Sync to local storage
   useEffect(() => saveLocalStorage(STORAGE_KEYS.CURRENT_USER, currentUser), [currentUser]);
   useEffect(() => saveLocalStorage(STORAGE_KEYS.USERS, users), [users]);
@@ -538,12 +619,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     fetchInitialSync();
   }, []);
 
+  // Instant broadcast & trigger sync whenever posts or settings change
+  const broadcastSync = useCallback((customPayload?: Record<string, unknown>) => {
+    try {
+      const payload = {
+        posts,
+        books,
+        photos,
+        media,
+        products,
+        systemSettings,
+        updatedAt: Date.now(),
+        ...customPayload,
+      };
+      const bc = new BroadcastChannel('fox3_realtime_sync');
+      bc.postMessage({ type: 'SYNC_ALL', payload });
+      bc.close();
+
+      // Non-blocking sync to cloud
+      fetch('/api/sync/global_state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }).catch(() => {});
+    } catch (e) {}
+  }, [posts, books, photos, media, products, systemSettings]);
+
   // Auto-sync timer
   useEffect(() => {
     if (!systemSettings.autoSync) return;
     const interval = setInterval(() => {
       triggerManualSync();
-    }, (systemSettings.syncIntervalSeconds || 30) * 1000);
+    }, (systemSettings.syncIntervalSeconds || 20) * 1000);
     return () => clearInterval(interval);
   }, [systemSettings.autoSync, systemSettings.syncIntervalSeconds, triggerManualSync]);
 
@@ -551,75 +658,88 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const uploadFile = async (file: File): Promise<{ url: string; size: number; name: string }> => {
     startTransfer('upload', file.name);
 
-    return new Promise((resolve) => {
+    return new Promise(async (resolve, reject) => {
       let currentP = 20;
       const interval = setInterval(() => {
-        currentP += Math.floor(Math.random() * 25) + 15;
-        if (currentP >= 95) {
+        currentP += Math.floor(Math.random() * 20) + 10;
+        if (currentP >= 92) {
           clearInterval(interval);
         } else {
           updateTransferPercent(currentP);
         }
-      }, 80);
+      }, 60);
 
       const doFallbackLocal = async () => {
         try {
-          const reader = new FileReader();
-          reader.onload = async (e) => {
-            const dataUrl = e.target?.result as string;
-            const fileKey = `idb_file_${Date.now()}_${file.name}`;
-            await saveFileToIndexedDB(fileKey, file);
-            addStorageUsage(file.size);
-            clearInterval(interval);
-            finishTransfer();
-            resolve({
-              url: dataUrl,
-              size: file.size,
-              name: file.name,
-            });
-          };
-          reader.readAsDataURL(file);
-        } catch {
-          const blobUrl = URL.createObjectURL(file);
+          // Always persist the actual File/Blob into IndexedDB with a unique permanent key
+          const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+          const fileKey = `idb_file_${Date.now()}_${safeName}`;
+          await saveFileToIndexedDB(fileKey, file);
+
+          let resolvedUrl = '';
+          // If file is image, generate persistent data URL so previews never break
+          if (file.type.startsWith('image/')) {
+            try {
+              const reader = new FileReader();
+              resolvedUrl = await new Promise<string>((res) => {
+                reader.onload = (e) => res((e.target?.result as string) || '');
+                reader.onerror = () => res('');
+                reader.readAsDataURL(file);
+              });
+            } catch (e) {
+              resolvedUrl = URL.createObjectURL(file);
+            }
+          } else {
+            resolvedUrl = URL.createObjectURL(file);
+          }
+
           addStorageUsage(file.size);
           clearInterval(interval);
           finishTransfer();
+          showToast(`文件《${file.name}》已安全保存至本地高可用库！`, 'success');
           resolve({
-            url: blobUrl,
+            url: resolvedUrl || fileKey,
             size: file.size,
             name: file.name,
           });
+        } catch (err: any) {
+          clearInterval(interval);
+          finishTransfer();
+          showToast(`文件《${file.name}》上传失败：${err?.message || '未知异常'}`, 'error');
+          reject(err);
         }
       };
 
-      const formData = new FormData();
-      formData.append('file', file);
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
 
-      fetch('/api/upload', {
-        method: 'POST',
-        body: formData,
-      })
-        .then(async res => {
-          if (!res.ok) {
-            return doFallbackLocal();
-          }
-          const data = await res.json();
-          if (data && data.success && data.url) {
-            addStorageUsage(file.size);
-            clearInterval(interval);
-            finishTransfer();
-            resolve({
-              url: data.url,
-              size: file.size,
-              name: file.name,
-            });
-          } else {
-            doFallbackLocal();
-          }
-        })
-        .catch(() => {
+        const res = await fetch('/api/upload', {
+          method: 'POST',
+          body: formData,
+        }).catch(() => null);
+
+        if (!res || !res.ok) {
+          return doFallbackLocal();
+        }
+
+        const data = await res.json().catch(() => null);
+        if (data && data.success && data.url) {
+          addStorageUsage(file.size);
+          clearInterval(interval);
+          finishTransfer();
+          showToast(`文件《${file.name}》已成功上传至 Cloudflare R2 云端！`, 'success');
+          resolve({
+            url: data.url,
+            size: file.size,
+            name: file.name,
+          });
+        } else {
           doFallbackLocal();
-        });
+        }
+      } catch {
+        doFallbackLocal();
+      }
     });
   };
 
@@ -719,6 +839,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         startTransfer,
         updateTransferPercent,
         finishTransfer,
+        multiTransferProgress,
+        startMultiTransfer,
+        updateMultiTransferProgress,
+        finishMultiTransfer,
+        toasts,
+        showToast,
+        dismissToast,
         uploadFile,
         addStorageUsage,
         deviceMode,

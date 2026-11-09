@@ -33,6 +33,9 @@ export const BookshelfSection: React.FC = () => {
     uploadFile,
     startTransfer,
     updateTransferPercent,
+    startMultiTransfer,
+    updateMultiTransferProgress,
+    finishMultiTransfer,
     finishTransfer,
     viewModes,
     setViewMode,
@@ -50,105 +53,105 @@ export const BookshelfSection: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleBookFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
 
-    try {
-      const ext = file.name.split('.').pop()?.toUpperCase() || 'TXT';
-      const format = ['EPUB', 'PDF', 'TXT', 'MOBI', 'AZW3'].includes(ext)
-        ? (ext as any)
-        : 'TXT';
+    const fileList = Array.from(files);
+    setIsUploading(true);
 
-      const uploaded = await uploadFile(file);
+    if (fileList.length > 1) {
+      startMultiTransfer('upload', fileList.length, fileList[0].name);
+    }
 
-      // Extract real text content for preview/reading
-      let textContent = '';
+    const coverOptions: Record<string, string> = {
+      EPUB: 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?auto=format&fit=crop&w=400&q=80',
+      PDF: 'https://images.unsplash.com/photo-1512820790803-83ca734da794?auto=format&fit=crop&w=400&q=80',
+      TXT: 'https://images.unsplash.com/photo-1497633762265-9d179a990aa6?auto=format&fit=crop&w=400&q=80',
+      MOBI: 'https://images.unsplash.com/photo-1506880018603-83d5b814b5a6?auto=format&fit=crop&w=400&q=80',
+      AZW3: 'https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?auto=format&fit=crop&w=400&q=80',
+      MD: 'https://images.unsplash.com/photo-1555066931-4365d14bab8c?auto=format&fit=crop&w=400&q=80',
+      DOCX: 'https://images.unsplash.com/photo-1455390582262-044cdead277a?auto=format&fit=crop&w=400&q=80',
+    };
 
-      if (format === 'EPUB') {
-        try {
-          const parsed = await parseEpubFile(file);
-          if (parsed.fullText && parsed.fullText.length > 50) {
-            textContent = parsed.fullText;
-          }
-        } catch (e) {
-          console.warn('Failed parsing epub:', e);
-        }
+    const newBooks: Book[] = [];
+
+    for (let i = 0; i < fileList.length; i++) {
+      const file = fileList[i];
+      if (fileList.length > 1) {
+        updateMultiTransferProgress(i + 1, file.name, Math.round(((i + 0.3) / fileList.length) * 100));
       }
 
-      if (!textContent && (file.type.includes('text') || ext === 'TXT')) {
-        try {
-          const text = await file.text();
-          if (text && text.trim().length > 0) {
-            textContent = text;
-          }
-        } catch (err) {
-          console.warn('Text reading failed:', err);
-        }
-      }
-
-      if (!textContent) {
-        textContent = `《${file.name.replace(/\.[^/.]+$/, '')}》\n\n文件格式: [${format}]  文件大小: ${(file.size / 1024 / 1024).toFixed(2)} MB\n上传者: ${currentUser?.username || 'fox'}\n\n【文件解析就绪】\n该电子书实体文件已安全上传至系统对象存储 (Cloudflare R2 / 本地 IndexedDB 实体持久库)。\n若为 PDF 格式，在线阅读模式将直接唤起高清 PDF 浏览器；若为 TXT/EPUB 格式，章节文字已解析呈现。您亦可随时点击“下载”获取原始二进制文件。`;
-      }
-
-      // Diverse stylish book covers based on format
-      const coverOptions: Record<string, string> = {
-        EPUB: 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?auto=format&fit=crop&w=400&q=80',
-        PDF: 'https://images.unsplash.com/photo-1512820790803-83ca734da794?auto=format&fit=crop&w=400&q=80',
-        TXT: 'https://images.unsplash.com/photo-1497633762265-9d179a990aa6?auto=format&fit=crop&w=400&q=80',
-        MOBI: 'https://images.unsplash.com/photo-1506880018603-83d5b814b5a6?auto=format&fit=crop&w=400&q=80',
-        AZW3: 'https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?auto=format&fit=crop&w=400&q=80',
-      };
-
-      const createdBook: Book = {
-        id: `book-${Date.now()}`,
-        title: file.name.replace(/\.[^/.]+$/, ''),
-        author: currentUser?.username || 'fox',
-        format,
-        cover: coverOptions[format] || coverOptions.EPUB,
-        description: `已成功载入电子书：${file.name}`,
-        fileSize: file.size,
-        fileUrl: uploaded?.url || '',
-        content: textContent,
-        progress: 0,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      };
-
-      setBooks(prev => [createdBook, ...prev]);
-      setIsUploading(false);
-      alert(`电子书《${createdBook.title}》上传解析成功！`);
-    } catch (err: any) {
-      console.error('Book upload error:', err);
-      // Fallback: even if upload fails or R2 rejects, save locally
       try {
         const ext = file.name.split('.').pop()?.toUpperCase() || 'TXT';
-        const fallbackFormat = ['EPUB', 'PDF', 'TXT', 'MOBI', 'AZW3'].includes(ext) ? (ext as any) : 'TXT';
-        const localBlobUrl = URL.createObjectURL(file);
-        const fallbackBook: Book = {
-          id: `book-${Date.now()}`,
+        const format = ['EPUB', 'PDF', 'TXT', 'MOBI', 'AZW3'].includes(ext)
+          ? (ext as any)
+          : 'TXT';
+
+        const uploaded = await uploadFile(file);
+
+        // Extract real text content for preview/reading
+        let textContent = '';
+
+        if (format === 'EPUB') {
+          try {
+            const parsed = await parseEpubFile(file);
+            if (parsed.fullText && parsed.fullText.length > 50) {
+              textContent = parsed.fullText;
+            }
+          } catch (e) {
+            console.warn('Failed parsing epub:', e);
+          }
+        }
+
+        if (!textContent && (file.type.includes('text') || ext === 'TXT' || ext === 'MD' || ext === 'JSON')) {
+          try {
+            const text = await file.text();
+            if (text && text.trim().length > 0) {
+              textContent = text;
+            }
+          } catch (err) {
+            console.warn('Text reading failed:', err);
+          }
+        }
+
+        if (!textContent) {
+          textContent = `《${file.name.replace(/\.[^/.]+$/, '')}》\n\n文件格式: [${format}]  文件大小: ${(file.size / 1024 / 1024).toFixed(2)} MB\n上传者: ${currentUser?.username || 'fox'}\n\n【文件解析就绪】\n该电子书实体文件已安全上传至系统对象存储 (Cloudflare R2 / 本地 IndexedDB 实体持久库)。\n若为 PDF 格式，在线阅读模式将直接唤起高清 PDF 浏览器；若为 TXT/EPUB 格式，章节文字已解析呈现。您亦可随时点击“下载”获取原始二进制文件。`;
+        }
+
+        const createdBook: Book = {
+          id: `book-${Date.now()}-${i}`,
           title: file.name.replace(/\.[^/.]+$/, ''),
           author: currentUser?.username || 'fox',
-          format: fallbackFormat,
-          cover: 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?auto=format&fit=crop&w=400&q=80',
-          description: `已载入本地电子书：${file.name}`,
+          format,
+          cover: coverOptions[format] || coverOptions.EPUB,
+          description: `已成功载入文档/书籍：${file.name}`,
           fileSize: file.size,
-          fileUrl: localBlobUrl,
-          content: `《${file.name}》\n文件大小: ${(file.size / 1024 / 1024).toFixed(2)} MB\n文件已在当前浏览器就绪，可随时阅读或点击下载获取原文件。`,
+          fileUrl: uploaded?.url || '',
+          content: textContent,
           progress: 0,
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
+          createdAt: Date.now() - i * 1000,
+          updatedAt: Date.now() - i * 1000,
         };
-        setBooks(prev => [fallbackBook, ...prev]);
-        setIsUploading(false);
-        alert(`电子书《${fallbackBook.title}》已成功在本地安全载入！`);
-      } catch (inner) {
-        alert(`上传解析失败: ${err?.message || '未知错误'}`);
+
+        newBooks.push(createdBook);
+        if (fileList.length > 1) {
+          updateMultiTransferProgress(i + 1, file.name, Math.round(((i + 1) / fileList.length) * 100));
+        }
+      } catch (err: any) {
+        console.error('File upload error for', file.name, err);
       }
-    } finally {
-      setIsUploading(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
+    }
+
+    if (newBooks.length > 0) {
+      setBooks(prev => [...newBooks, ...prev]);
+    }
+
+    if (fileList.length > 1) {
+      finishMultiTransfer();
+    }
+    setIsUploading(false);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
     }
   };
 
@@ -178,13 +181,15 @@ export const BookshelfSection: React.FC = () => {
   const handleBatchDownload = async () => {
     if (selectedIds.length === 0) return;
     const exportBooks = books.filter(b => selectedIds.includes(b.id));
-    startTransfer('download', `books_batch_${exportBooks.length}.zip`);
+    startMultiTransfer('download', exportBooks.length, exportBooks[0]?.title || '');
 
     const zip = new JSZip();
     for (let i = 0; i < exportBooks.length; i++) {
       const book = exportBooks[i];
       const ext = (book.format || 'txt').toLowerCase();
       const filename = `${book.title}.${ext}`;
+      updateMultiTransferProgress(i + 1, book.title, Math.round(((i + 0.5) / exportBooks.length) * 90));
+
       try {
         let fileData: Blob | string = book.fileUrl;
         if (book.fileUrl && book.fileUrl.startsWith('idb_file_')) {
@@ -204,11 +209,11 @@ export const BookshelfSection: React.FC = () => {
       } catch {
         zip.file(filename, book.content || `fox3 电子书: ${book.title}`);
       }
-      updateTransferPercent(Math.round(((i + 1) / exportBooks.length) * 100));
+      updateMultiTransferProgress(i + 1, book.title, Math.round(((i + 1) / exportBooks.length) * 95));
     }
 
     const content = await zip.generateAsync({ type: 'blob' });
-    finishTransfer();
+    finishMultiTransfer();
     const link = document.createElement('a');
     link.href = URL.createObjectURL(content);
     link.download = `fox3_books_batch_${Date.now()}.zip`;
@@ -341,23 +346,37 @@ export const BookshelfSection: React.FC = () => {
             </div>
           </div>
 
-          {/* Reader Scrollable Content / PDF viewer */}
+          {/* Reader Scrollable Content / PDF viewer / Direct Document Reader */}
           <div className="flex-1 overflow-y-auto p-4 sm:p-8 md:p-12 max-w-4xl mx-auto w-full h-full flex flex-col">
-            {readingBook.format === 'PDF' && readingBook.fileUrl && !readingBook.fileUrl.startsWith('data:') && !readingBook.fileUrl.startsWith('blob:') ? (
-              <div className="w-full h-full flex-1 min-h-[500px] flex flex-col">
+            {readingBook.format === 'PDF' && readingBook.fileUrl ? (
+              <div className="w-full h-full flex-1 min-h-[550px] flex flex-col rounded-xl overflow-hidden border border-stone-200 dark:border-stone-800 bg-white">
                 <iframe
                   src={`${readingBook.fileUrl}#toolbar=1`}
                   title={readingBook.title}
-                  className="w-full flex-1 rounded-xl border border-stone-200 dark:border-stone-800 bg-white"
+                  className="w-full flex-1 min-h-[550px] border-0"
                 />
               </div>
             ) : (
-              <div
-                style={{ fontSize: `${fontSize}px`, lineHeight: 1.85 }}
-                className="font-serif-sc space-y-6 text-stone-800 dark:text-stone-200 select-text whitespace-pre-wrap leading-relaxed py-4"
-              >
-                {readingBook.content ||
-                  `${readingBook.title}\n\n该书籍文件格式为 [${readingBook.format}]，已就绪可供下载或云端解析。在手机端或电脑端均支持全屏沉浸式无干扰阅读体验。`}
+              <div className="space-y-6">
+                {/* Header info card */}
+                <div className="p-4 rounded-xl bg-stone-50 dark:bg-stone-900 border border-stone-200/80 dark:border-stone-800 flex items-center justify-between text-xs text-stone-500">
+                  <div className="flex items-center gap-2">
+                    <FileText className="w-4 h-4 text-sky-500" />
+                    <span>正文格式: {readingBook.format}</span>
+                    <span>•</span>
+                    <span>总字符数: {(readingBook.content || '').length} 字</span>
+                  </div>
+                  <span>支持移动端自适应全屏阅览</span>
+                </div>
+
+                {/* Formatted Text Content */}
+                <div
+                  style={{ fontSize: `${fontSize}px`, lineHeight: 1.9 }}
+                  className="font-serif-sc text-stone-800 dark:text-stone-200 select-text whitespace-pre-wrap leading-relaxed py-2 font-normal"
+                >
+                  {readingBook.content ||
+                    `${readingBook.title}\n\n该书籍/文档文件格式为 [${readingBook.format}]，已就绪可供在线阅览。无论在手机端或电脑端均支持全屏沉浸式无干扰阅读体验。`}
+                </div>
               </div>
             )}
           </div>
@@ -654,8 +673,9 @@ export const BookshelfSection: React.FC = () => {
             <input
               type="file"
               ref={fileInputRef}
+              multiple
               onChange={handleBookFileUpload}
-              accept=".epub,.pdf,.txt,.mobi,.azw3"
+              accept=".epub,.pdf,.txt,.mobi,.azw3,.md,.json,.doc,.docx"
               className="hidden"
             />
 

@@ -195,7 +195,7 @@ export interface StorageConfig {
   kvToken?: string;
 }
 
-export type GlobalThemeMode = 'modern' | 'retro';
+export type GlobalThemeMode = 'modern' | 'retro' | 'nostalgic'; // modern, retro, nostalgic (Microsoft Windows 98/Classic)
 export type DeviceViewMode = 'responsive' | 'mobile';
 
 export interface SystemSettings {
@@ -264,3 +264,23 @@ export interface PaymentSettings {
 }
 
 export type ViewMode = 'big' | 'medium' | 'small' | 'original';
+
+export interface ToastNotification {
+  id: string;
+  type: 'success' | 'error' | 'info';
+  message: string;
+  duration?: number;
+}
+
+export interface MultiTransferProgress {
+  active: boolean;
+  type: 'upload' | 'download' | 'backup' | 'restore';
+  currentFileName: string;
+  currentIndex: number;
+  totalCount: number;
+  overallPercent: number;
+  itemPercent: number;
+  speed?: string;
+  totalBytes?: number;
+  transferredBytes?: number;
+}

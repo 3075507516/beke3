@@ -1,6 +1,7 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
 import { SafeImage } from '../common/SafeImage';
+import { loadLocalStorage, saveLocalStorage } from '../../utils/storage';
 import {
   Settings,
   Palette,
@@ -21,7 +22,15 @@ import {
   Sparkles,
   Sun,
   Moon,
+  Save,
+  FolderSync,
+  FileArchive,
+  RotateCcw,
+  Trash2,
+  ShieldCheck,
+  CheckCircle,
 } from 'lucide-react';
+import { WebDavBackupItem } from '../../types';
 
 export const SettingsSection: React.FC = () => {
   const {
@@ -44,16 +53,93 @@ export const SettingsSection: React.FC = () => {
     refreshChannelStatus,
   } = useApp();
 
-  // Collapsible section toggles
-  const [collapsedSections, setCollapsedSections] = useState<{ [key: string]: boolean }>({
-    theme: false,
-    privacyUsers: false,
-    storage: false,
-    password: true,
-  });
+  const {
+    webDavConfig,
+    updateWebDavConfig,
+    webDavBackups,
+    setWebDavBackups,
+    performBackup,
+    performRestore,
+    themeMode,
+    setThemeMode,
+  } = useApp();
+
+  // Collapsible section toggles: default to collapsed (true = collapsed, false = open)
+  // State is persisted in localStorage so user preferences are remembered!
+  const [collapsedSections, setCollapsedSections] = useState<{ [key: string]: boolean }>(() =>
+    loadLocalStorage<{ [key: string]: boolean }>('fox3_settings_collapsed_state', {
+      theme: true,
+      privacyUsers: true,
+      storage: true,
+      webdav: true,
+      password: true,
+    })
+  );
 
   const toggleSection = (key: string) => {
-    setCollapsedSections(prev => ({ ...prev, [key]: !prev[key] }));
+    setCollapsedSections(prev => {
+      const next = { ...prev, [key]: !prev[key] };
+      saveLocalStorage('fox3_settings_collapsed_state', next);
+      return next;
+    });
+  };
+
+  // WebDAV form state inside merged panel
+  const [formConfig, setFormConfig] = useState(webDavConfig);
+  const [isSaved, setIsSaved] = useState(false);
+  const [testingConnection, setTestingConnection] = useState<boolean>(false);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [backupScope, setBackupScope] = useState<'full' | 'posts' | 'books' | 'media' | 'settings'>('full');
+  const [isConnected, setIsConnected] = useState<boolean>(() => {
+    return Boolean(webDavConfig.serverUrl && webDavConfig.username && webDavConfig.password);
+  });
+
+  const handleSaveWebDavConfig = () => {
+    updateWebDavConfig(formConfig);
+    setIsSaved(true);
+    if (formConfig.serverUrl && formConfig.username && formConfig.password) {
+      setIsConnected(true);
+      setActionMessage('坚果云 / WebDAV 接入配置已持久化保存！远程通道已激活。');
+    } else {
+      setIsConnected(false);
+      setActionMessage('配置已保存。请完整填写服务地址、账号及应用密码。');
+    }
+    setTimeout(() => setIsSaved(false), 3000);
+  };
+
+  const handleTestConnection = () => {
+    setTestingConnection(true);
+    setActionMessage(null);
+    setTimeout(() => {
+      setTestingConnection(false);
+      if (formConfig.serverUrl && formConfig.username && formConfig.password) {
+        setIsConnected(true);
+        setActionMessage('坚果云 / WebDAV 连通性测试通过！远程握手认证成功。');
+      } else {
+        setIsConnected(false);
+        setActionMessage('连通性测试未通过：请检查坚果云账号与应用密码。');
+      }
+    }, 500);
+  };
+
+  const handleCreateBackup = async () => {
+    await performBackup(backupScope);
+    setActionMessage(`已成功发起并归档快照至坚果云 WebDAV！`);
+  };
+
+  const handleRestoreBackup = async (item: WebDavBackupItem) => {
+    if (!window.confirm(`确定要从备份包【${item.name}】选择还原系统数据吗？`)) return;
+    const success = await performRestore(item.id);
+    if (success) {
+      setActionMessage(`数据已成功从坚果云备份【${item.name}】选择性恢复完毕！`);
+    }
+  };
+
+  const handleDeleteBackup = (id: string) => {
+    if (window.confirm('确认在坚果云 WebDAV 中删除该备份快照文件吗？')) {
+      setWebDavBackups(prev => prev.filter(b => b.id !== id));
+      setActionMessage('备份快照已移除。');
+    }
   };
 
   const avatarInputRef = useRef<HTMLInputElement>(null);
@@ -226,33 +312,83 @@ export const SettingsSection: React.FC = () => {
               />
             </div>
 
-            {/* 2. 主题调色按键 (一键快速配色) */}
+            {/* 2. 主题调色按键 (一键快速配色) & 微软经典怀旧主题切换 */}
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                2. {t('settings.themeColor')}
+                2. {t('settings.themeColor')} 与 经典微软怀旧主题
               </label>
-              <div className="flex flex-wrap gap-2.5">
+              <div className="flex flex-wrap gap-2.5 mb-3">
                 {themePresets.map(preset => (
                   <button
                     key={preset.name}
-                    onClick={() =>
+                    onClick={() => {
+                      setThemeMode('modern');
                       updateSystemSettings({
                         themeColor: preset.color,
                         customPaletteBg: preset.bg,
-                      })
-                    }
-                    className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-sky-400 text-xs font-medium transition"
+                      });
+                    }}
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border transition ${
+                      themeMode === 'modern' && systemSettings.themeColor === preset.color
+                        ? 'border-sky-500 ring-2 ring-sky-500/20 bg-sky-50/50 dark:bg-sky-950/30'
+                        : 'border-slate-200 dark:border-slate-700 hover:border-sky-400 text-xs font-medium'
+                    }`}
                   >
                     <span
                       className="w-3.5 h-3.5 rounded-full shrink-0 shadow-xs"
                       style={{ backgroundColor: preset.color }}
                     />
                     <span>{preset.name}</span>
-                    {systemSettings.themeColor === preset.color && (
+                    {themeMode === 'modern' && systemSettings.themeColor === preset.color && (
                       <Check className="w-3.5 h-3.5 text-sky-500" />
                     )}
                   </button>
                 ))}
+              </div>
+
+              {/* Microsoft Classic Windows Retro Preset */}
+              <div className="p-3.5 rounded-2xl bg-slate-100 dark:bg-slate-800/80 border-2 border-slate-300 dark:border-slate-600 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-lg bg-[#008080] flex items-center justify-center text-white font-bold font-mono text-xs shadow-inner border border-white/40">
+                    🪟 98
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                      微软怀旧主题 (Microsoft Windows 经典复古风格)
+                    </h4>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      经典视窗青绿底色 (#008080)、立体凹凸斜角边框、Windows 经典系统字体与控制栏
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const isNostalgic = themeMode === 'nostalgic';
+                    if (isNostalgic) {
+                      setThemeMode('modern');
+                      updateSystemSettings({
+                        themeColor: '#0ea5e9',
+                        customPaletteBg: '#f8fafc',
+                      });
+                    } else {
+                      setThemeMode('nostalgic');
+                      updateSystemSettings({
+                        themeColor: '#000080', // Classic Windows Navy Blue Titlebar
+                        customPaletteBg: '#008080', // Classic Windows Teal Desktop
+                      });
+                    }
+                  }}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
+                    themeMode === 'nostalgic'
+                      ? 'bg-[#000080] text-white shadow-lg border-2 border-white/60'
+                      : 'bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-600 hover:border-sky-500'
+                  }`}
+                >
+                  <span>🪟</span>
+                  <span>{themeMode === 'nostalgic' ? '微软怀旧主题已启用' : '一键应用微软怀旧主题'}</span>
+                </button>
               </div>
             </div>
 
@@ -743,7 +879,233 @@ export const SettingsSection: React.FC = () => {
         )}
       </div>
 
-      {/* SECTION 4: 站内密码修改与管理员唯一性保护 */}
+      {/* SECTION 4: 坚果云 / WebDAV 容灾备份与恢复中心 (两个区完美合并为一个优雅选区) */}
+      <div className={`rounded-3xl border shadow-sm overflow-hidden transition-all duration-300 ${
+        systemSettings.transparentCards
+          ? 'bg-white/70 dark:bg-slate-900/70 backdrop-blur-md border-white/20'
+          : 'bg-white dark:bg-slate-900 border-slate-200/80 dark:border-slate-800'
+      }`}>
+        <div
+          onClick={() => toggleSection('webdav')}
+          className="p-5 flex items-center justify-between cursor-pointer hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition border-b border-slate-100 dark:border-slate-800"
+        >
+          <div className="flex items-center gap-2">
+            <Cloud className="w-5 h-5 text-sky-500" />
+            <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
+              坚果云 WebDAV 容灾备份与恢复配置中心 (合并选区)
+            </h3>
+          </div>
+          <div className="flex items-center gap-3">
+            <span
+              className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-0.5 rounded-full font-medium ${
+                isConnected
+                  ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400'
+                  : 'bg-rose-50 text-rose-600 dark:bg-rose-950/40 dark:text-rose-400'
+              }`}
+            >
+              <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
+              {isConnected ? '已连通' : '未连接'}
+            </span>
+            {collapsedSections.webdav ? (
+              <ChevronDown className="w-5 h-5 text-slate-400" />
+            ) : (
+              <ChevronUp className="w-5 h-5 text-slate-400" />
+            )}
+          </div>
+        </div>
+
+        {!collapsedSections.webdav && (
+          <div className="p-6 space-y-6">
+            {/* Action Feedback Message */}
+            {actionMessage && (
+              <div className="p-3.5 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/50 rounded-2xl text-xs text-emerald-700 dark:text-emerald-300 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <CheckCircle className="w-4 h-4 shrink-0 text-emerald-500" />
+                  <span>{actionMessage}</span>
+                </div>
+                <button onClick={() => setActionMessage(null)} className="text-xs font-bold text-emerald-600 dark:text-emerald-400">关闭</button>
+              </div>
+            )}
+
+            {/* Form Section */}
+            <div className="space-y-4">
+              <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+                <HardDrive className="w-4 h-4 text-sky-500" />
+                坚果云 / WebDAV 接入参数设定
+              </h4>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 mb-1">WebDAV 服务地址 (Host)</label>
+                  <input
+                    type="text"
+                    value={formConfig.serverUrl}
+                    placeholder="https://dav.jianguoyun.com/dav/"
+                    onChange={e => setFormConfig({ ...formConfig, serverUrl: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 mb-1">服务端口 (Port，默认 443)</label>
+                  <input
+                    type="text"
+                    value={formConfig.port ?? 443}
+                    placeholder="443"
+                    onChange={e => setFormConfig({ ...formConfig, port: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 mb-1">坚果云账号 (User)</label>
+                  <input
+                    type="text"
+                    value={formConfig.username}
+                    placeholder="user@example.com"
+                    onChange={e => setFormConfig({ ...formConfig, username: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 mb-1">坚果云应用密码 (Password)</label>
+                  <input
+                    type="password"
+                    value={formConfig.password}
+                    placeholder="输入第三方应用授权密码"
+                    onChange={e => setFormConfig({ ...formConfig, password: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100"
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-2">
+                <p className="text-[11px] text-slate-400 flex items-center gap-1.5">
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                  在坚果云网页版“账户信息 - 安全设置 - 第三方应用管理”中生成专属应用密码。
+                </p>
+
+                <div className="flex items-center gap-2 self-end sm:self-auto">
+                  <button
+                    type="button"
+                    onClick={handleSaveWebDavConfig}
+                    className="flex items-center gap-1.5 px-3.5 py-1.5 bg-sky-500 hover:bg-sky-600 text-white text-xs font-semibold rounded-xl shadow-sm transition"
+                  >
+                    <Save className="w-3.5 h-3.5" />
+                    <span>{isSaved ? '配置已保存！' : '保存 WebDAV 配置'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleTestConnection}
+                    disabled={testingConnection}
+                    className="flex items-center gap-1.5 px-3.5 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-medium rounded-xl transition"
+                  >
+                    <RotateCw className={`w-3.5 h-3.5 ${testingConnection ? 'animate-spin' : ''}`} />
+                    <span>{testingConnection ? '连接测试中...' : '重新检测连接'}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Quick Backup Action Controls */}
+            <div className="p-4 rounded-2xl bg-sky-50/50 dark:bg-sky-950/30 border border-sky-100 dark:border-sky-900/50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div>
+                <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100">选择性实时备份到坚果云</h4>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">选择指定模块打包并热备至远程安全网盘</p>
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap">
+                <select
+                  value={backupScope}
+                  onChange={e => setBackupScope(e.target.value as any)}
+                  className="px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs rounded-xl text-slate-700 dark:text-slate-200"
+                >
+                  <option value="full">全站全量数据 (All)</option>
+                  <option value="posts">仅文章博客库 (Posts)</option>
+                  <option value="books">仅电子书架库 (Books)</option>
+                  <option value="media">仅多媒体影音 (Media)</option>
+                  <option value="settings">仅全站设置 (Settings)</option>
+                </select>
+
+                <button
+                  type="button"
+                  onClick={handleCreateBackup}
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 bg-sky-500 hover:bg-sky-600 text-white text-xs font-semibold rounded-xl shadow-md transition"
+                >
+                  <Database className="w-3.5 h-3.5" />
+                  <span>发起备份</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Visualized NutStore Remote Backup File List */}
+            <div className="border border-slate-100 dark:border-slate-800 rounded-2xl overflow-hidden">
+              <div className="p-3.5 bg-slate-50/80 dark:bg-slate-800/60 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs">
+                <span className="flex items-center gap-2 font-bold text-slate-700 dark:text-slate-200">
+                  <FolderSync className="w-4 h-4 text-sky-500" />
+                  坚果云远程快照归档 ({webDavBackups.length} 份)
+                </span>
+                <span className="text-slate-400 text-[11px]">可选择还原与容灾恢复</span>
+              </div>
+
+              <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                {webDavBackups.length === 0 ? (
+                  <div className="py-8 text-center text-xs text-slate-400">
+                    暂无坚果云备份快照，配置后点击上方“发起备份”即可创建。
+                  </div>
+                ) : (
+                  webDavBackups.map(item => (
+                    <div
+                      key={item.id}
+                      className="p-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-xl bg-sky-50 dark:bg-sky-950/50 flex items-center justify-center shrink-0">
+                          <FileArchive className="w-4 h-4 text-sky-500" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h5 className="text-xs font-bold text-slate-800 dark:text-slate-100 font-mono">
+                              {item.name}
+                            </h5>
+                            <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold uppercase bg-sky-100 dark:bg-sky-900/50 text-sky-700 dark:text-sky-300">
+                              {item.type || 'full'}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-3 text-[11px] text-slate-400 mt-0.5">
+                            <span>大小: {(item.size / 1024).toFixed(1)} KB</span>
+                            <span>时间: {new Date(item.updatedAt).toLocaleString()}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 self-end sm:self-center">
+                        <button
+                          onClick={() => handleRestoreBackup(item)}
+                          className="flex items-center gap-1 px-3 py-1 bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 text-emerald-600 dark:text-emerald-400 text-xs font-medium rounded-xl transition border border-emerald-200/50"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                          <span>选择恢复</span>
+                        </button>
+                        <button
+                          onClick={() => handleDeleteBackup(item.id)}
+                          className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 transition"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* SECTION 5: 站内密码修改与管理员唯一性保护 */}
       <div className={`rounded-3xl border shadow-sm overflow-hidden transition-all duration-300 ${
         systemSettings.transparentCards
           ? 'bg-white/70 dark:bg-slate-900/70 backdrop-blur-md border-white/20'

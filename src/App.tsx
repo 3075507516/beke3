@@ -17,7 +17,7 @@ import { TransferProgressBar } from './components/common/TransferProgressBar';
 import { ArrowUp, Sparkles, Compass } from 'lucide-react';
 
 const MainLayout: React.FC = () => {
-  const { systemSettings, currentUser, deviceMode, darkMode, t } = useApp();
+  const { systemSettings, currentUser, deviceMode, darkMode, themeMode, t } = useApp();
   const [currentTab, setCurrentTab] = useState<string>('blog');
   const [isAuthOpen, setIsAuthOpen] = useState<boolean>(false);
 
@@ -52,9 +52,14 @@ const MainLayout: React.FC = () => {
 
   return (
     <div
-      className="min-h-screen transition-colors duration-300 relative flex flex-col justify-between"
+      className={`min-h-screen transition-colors duration-300 relative flex flex-col justify-between ${
+        themeMode === 'nostalgic' ? 'theme-nostalgic' : ''
+      }`}
       style={{
-        backgroundColor: systemSettings.customPaletteBg || (darkMode ? '#020617' : '#f8fafc'),
+        backgroundColor:
+          themeMode === 'nostalgic'
+            ? '#008080'
+            : systemSettings.customPaletteBg || (darkMode ? '#020617' : '#f8fafc'),
         backgroundImage: systemSettings.fullBackgroundUrl
           ? `url(${systemSettings.fullBackgroundUrl})`
           : undefined,
@@ -93,7 +98,6 @@ const MainLayout: React.FC = () => {
           {currentTab === 'settings' && isAdmin && (
             <div className="space-y-6">
               <SettingsSection />
-              <WebDavBackupSection />
             </div>
           )}
           {currentTab === 'guide' && <GuideSection />}

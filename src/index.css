@@ -44,6 +44,43 @@ body {
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
+/* Microsoft Windows Nostalgic/Classic Theme Styling */
+.theme-nostalgic {
+  font-family: 'Segoe UI', Tahoma, 'Microsoft YaHei', sans-serif !important;
+  background-color: #008080 !important;
+}
+
+.theme-nostalgic [class*="rounded-3xl"],
+.theme-nostalgic [class*="rounded-2xl"],
+.theme-nostalgic [class*="rounded-xl"],
+.theme-nostalgic [class*="rounded-lg"] {
+  border-radius: 2px !important;
+}
+
+.theme-nostalgic header {
+  border-bottom: 2px solid #ffffff !important;
+  box-shadow: inset 1px 1px #dfdfdf, 1px 1px #000000 !important;
+  background-color: #c0c0c0 !important;
+  color: #000000 !important;
+}
+
+.theme-nostalgic button:not([class*="bg-transparent"]) {
+  border-top: 2px solid #ffffff !important;
+  border-left: 2px solid #ffffff !important;
+  border-right: 2px solid #808080 !important;
+  border-bottom: 2px solid #808080 !important;
+  box-shadow: 1px 1px #000000 !important;
+  border-radius: 0px !important;
+}
+
+.theme-nostalgic button:active:not([class*="bg-transparent"]) {
+  border-top: 2px solid #808080 !important;
+  border-left: 2px solid #808080 !important;
+  border-right: 2px solid #ffffff !important;
+  border-bottom: 2px solid #ffffff !important;
+  box-shadow: inset 1px 1px #000000 !important;
+}
+
 /* Retro Classic Skeuomorphic Styles */
 body.retro-theme {
   background-color: #f2e9d8 !important;

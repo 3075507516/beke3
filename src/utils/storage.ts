@@ -59,21 +59,40 @@ export const saveLocalStorage = <T>(key: string, value: T): void => {
 // IndexedDB robust file storage
 export const saveFileToIndexedDB = async (fileKey: string, blob: Blob | string): Promise<string> => {
   try {
-    await set(fileKey, blob);
-    return fileKey;
+    if (typeof window !== 'undefined' && 'indexedDB' in window) {
+      await set(fileKey, blob);
+      return fileKey;
+    }
+    return typeof blob === 'string' ? blob : URL.createObjectURL(blob);
   } catch (err) {
-    console.warn('[fox3 IDB] IndexedDB save error, using object URL fallback', err);
+    console.warn('[fox3 IDB] IndexedDB save error, using fallback', err);
     return typeof blob === 'string' ? blob : URL.createObjectURL(blob);
   }
 };
 
 export const getFileFromIndexedDB = async (fileKey: string): Promise<Blob | string | null> => {
   try {
-    const val = await get(fileKey);
-    return val || null;
+    if (typeof window !== 'undefined' && 'indexedDB' in window) {
+      const val = await get(fileKey);
+      return val || null;
+    }
+    return null;
   } catch (err) {
     return null;
   }
+};
+
+// Convert indexedDB key or remote URL into a valid Blob or URL for reading/downloading
+export const resolveFileUrl = async (urlOrKey: string): Promise<string> => {
+  if (!urlOrKey) return '';
+  if (urlOrKey.startsWith('idb_file_')) {
+    const blob = await getFileFromIndexedDB(urlOrKey);
+    if (blob instanceof Blob) {
+      return URL.createObjectURL(blob);
+    }
+    if (typeof blob === 'string') return blob;
+  }
+  return urlOrKey;
 };
 
 // Default initial data for fresh deployment

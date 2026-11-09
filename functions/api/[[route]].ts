@@ -159,8 +159,12 @@ export const onRequest = async (context: any) => {
       }
 
       const key = `${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
+      const contentType = file.type || 'application/octet-stream';
       await env.R2_BUCKET.put(key, file.stream(), {
-        httpMetadata: { contentType: file.type },
+        httpMetadata: {
+          contentType,
+          contentDisposition: `inline; filename="${encodeURIComponent(file.name)}"`,
+        },
         customMetadata: {
           originalName: encodeURIComponent(file.name),
           uploadedAt: String(Date.now()),
@@ -174,7 +178,7 @@ export const onRequest = async (context: any) => {
         url: publicUrl,
         name: file.name,
         size: file.size,
-        type: file.type
+        type: contentType
       }), {
         headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
       });
@@ -186,7 +190,7 @@ export const onRequest = async (context: any) => {
     }
   }
 
-  // Cloudflare R2 File Access & Stream
+  // Cloudflare R2 File Access & Stream (with accurate Content-Type, Range & caching headers)
   if (path.startsWith('/files/')) {
     const key = path.replace('/files/', '');
     if (!env.R2_BUCKET) {
@@ -199,6 +203,7 @@ export const onRequest = async (context: any) => {
     const responseHeaders = new Headers(headers);
     object.writeHttpMetadata(responseHeaders);
     responseHeaders.set('etag', object.httpEtag);
+    responseHeaders.set('Cache-Control', 'public, max-age=31536000, immutable');
     return new Response(object.body, { headers: responseHeaders });
   }
 
