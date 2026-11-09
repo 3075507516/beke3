@@ -2,9 +2,9 @@
 // Routes: /api/*
 
 interface Env {
-  DB?: any;      // Cloudflare D1 Database binding
+  DB?: any;        // Cloudflare D1 Database binding
   R2_BUCKET?: any; // Cloudflare R2 Bucket binding
-  KV?: any;     // Cloudflare KV Namespace binding
+  KV?: any;        // Cloudflare KV Namespace binding
 }
 
 export const onRequest = async (context: any) => {
@@ -23,23 +23,82 @@ export const onRequest = async (context: any) => {
     return new Response(null, { headers });
   }
 
-  // Health check & bindings status
+  // Health check & genuine connectivity status indicator
+  // Displays online (channelOnline: true) ONLY when DB or R2_BUCKET is actually bound
   if (path === '/status' || path === '') {
+    const hasD1 = Boolean(env.DB);
+    const hasR2 = Boolean(env.R2_BUCKET);
+    const hasKV = Boolean(env.KV);
+    const channelOnline = hasD1 || hasR2;
+
     return new Response(JSON.stringify({
-      status: 'ok',
-      version: '3.0.0',
+      success: true,
+      status: channelOnline ? 'online' : 'offline',
+      channelOnline,
+      version: '3.8.0',
       cloudServices: {
-        d1: Boolean(env.DB),
-        r2: Boolean(env.R2_BUCKET),
-        kv: Boolean(env.KV),
+        d1: hasD1,
+        r2: hasR2,
+        kv: hasKV,
       },
+      message: channelOnline
+        ? 'Cloudflare D1/R2 服务通道已正常在线'
+        : '未检测到 D1/R2 绑定，当前运行在本地离线/本地存储模式',
       timestamp: Date.now(),
     }), {
       headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
     });
   }
 
-  // Cloudflare R2 Upload Handler
+  // Cross-device sync store & retrieve (/api/sync/:key)
+  // Allows device A to push records, and device B to poll updates in real-time
+  if (path.startsWith('/sync/')) {
+    const syncKey = path.replace('/sync/', '');
+    // If KV is available, store in KV; if D1 is available, query/update D1; fallback gracefully
+    if (request.method === 'GET') {
+      if (env.KV) {
+        const val = await env.KV.get(`fox3_sync_${syncKey}`);
+        return new Response(JSON.stringify({
+          success: true,
+          data: val ? JSON.parse(val) : null,
+          fromCloud: true,
+        }), {
+          headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
+        });
+      }
+      return new Response(JSON.stringify({
+        success: false,
+        fromCloud: false,
+        message: 'KV not bound for cross-device sync. Using local cache.',
+      }), {
+        headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
+      });
+    }
+
+    if (request.method === 'POST') {
+      const payload = await request.json();
+      if (env.KV) {
+        await env.KV.put(`fox3_sync_${syncKey}`, JSON.stringify(payload), { expirationTtl: 86400 * 30 });
+        return new Response(JSON.stringify({
+          success: true,
+          syncedToCloud: true,
+          timestamp: Date.now(),
+        }), {
+          headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
+        });
+      }
+      return new Response(JSON.stringify({
+        success: true,
+        syncedToCloud: false,
+        message: 'KV not bound on host. Synced locally.',
+        timestamp: Date.now(),
+      }), {
+        headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
+      });
+    }
+  }
+
+  // Cloudflare R2 Upload Handler (Images, Videos, Ebooks)
   if (path === '/upload' && request.method === 'POST') {
     if (!env.R2_BUCKET) {
       return new Response(JSON.stringify({
@@ -65,6 +124,10 @@ export const onRequest = async (context: any) => {
       const key = `${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
       await env.R2_BUCKET.put(key, file.stream(), {
         httpMetadata: { contentType: file.type },
+        customMetadata: {
+          originalName: encodeURIComponent(file.name),
+          uploadedAt: String(Date.now()),
+        }
       });
 
       const publicUrl = `/api/files/${key}`;
@@ -86,7 +149,7 @@ export const onRequest = async (context: any) => {
     }
   }
 
-  // Cloudflare R2 File Access
+  // Cloudflare R2 File Access & Stream
   if (path.startsWith('/files/')) {
     const key = path.replace('/files/', '');
     if (!env.R2_BUCKET) {
@@ -119,29 +182,6 @@ export const onRequest = async (context: any) => {
     } catch (err: any) {
       return new Response(JSON.stringify({ success: false, error: err.message }), {
         status: 500,
-        headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
-      });
-    }
-  }
-
-  // KV Cache / Room Sync
-  if (path.startsWith('/kv/')) {
-    const kvKey = path.replace('/kv/', '');
-    if (!env.KV) {
-      return new Response(JSON.stringify({ fallbackToLocal: true }), {
-        headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
-      });
-    }
-    if (request.method === 'GET') {
-      const val = await env.KV.get(kvKey);
-      return new Response(JSON.stringify({ value: val ? JSON.parse(val) : null }), {
-        headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
-      });
-    }
-    if (request.method === 'POST') {
-      const body = await request.json();
-      await env.KV.put(kvKey, JSON.stringify(body));
-      return new Response(JSON.stringify({ success: true }), {
         headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
       });
     }

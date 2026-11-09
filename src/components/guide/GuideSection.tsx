@@ -10,6 +10,8 @@ import {
   Copy,
   ChevronRight,
   ExternalLink,
+  Layers,
+  Key,
 } from 'lucide-react';
 
 export const GuideSection: React.FC = () => {
@@ -28,10 +30,10 @@ export const GuideSection: React.FC = () => {
       <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-2">
         <h2 className="text-xl md:text-2xl font-bold font-serif-sc text-slate-900 dark:text-slate-100 flex items-center gap-2">
           <HelpCircle className="w-6 h-6 text-rose-500" />
-          <span>fox3 博客全平台极速部署指引与 D1 / R2 使用说明</span>
+          <span>fox3 博客全平台极速部署指引与 D1 / R2 / 坚果云使用说明</span>
         </h2>
         <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-          本项目依赖 Cloudflare D1 和 R2。D1 用于存储文章、评论、分类、标签、文件元数据等结构化数据；R2 用于存储图片、视频、音频和附件等大文件实体。KV 仅用于缓存和配置。本指南提供 Cloudflare Pages Git 拉取部署（首选优先）、一键上传 ZIP 文件部署、腾讯云与阿里云服务器部署的完整步骤。
+          本项目依赖 Cloudflare D1 和 R2。D1 用于存储文章、评论、分类、标签、文件元数据等结构化数据；R2 用于存储图片、视频、音频和附件等大文件实体。KV 仅用于缓存和配置，不作为主数据存储。如果未配置 D1 或 R2，系统将无感降级至本地持久化。在腾讯云和阿里云环境下，可通过环境变量接入对应数据库与存储桶，实现全平台统一体验。
         </p>
       </div>
 
@@ -70,7 +72,7 @@ export const GuideSection: React.FC = () => {
           }`}
         >
           <Server className="w-4 h-4" />
-          <span>腾讯云 EdgeOne / 轻量服务器部署</span>
+          <span>腾讯云 EdgeOne / 轻量服务器部署与 COS 存储绑定</span>
         </button>
 
         <button
@@ -82,7 +84,7 @@ export const GuideSection: React.FC = () => {
           }`}
         >
           <Server className="w-4 h-4" />
-          <span>阿里云 ESA / ECS 部署</span>
+          <span>阿里云 ESA / ECS 部署与 OSS 存储绑定</span>
         </button>
       </div>
 
@@ -144,7 +146,7 @@ export const GuideSection: React.FC = () => {
               <span className="w-5 h-5 rounded-full bg-rose-500 text-white flex items-center justify-center text-[10px]">
                 3
               </span>
-              <span>Cloudflare 后台绑定 D1 数据库、R2 存储桶与 KV</span>
+              <span>Cloudflare 后台绑定 D1 数据库、R2 存储桶与 KV 变量</span>
             </h4>
             <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
               部署完成后，进入项目页面点击 <b>Settings</b> -&gt; <b>Functions</b>，向下滚动到 <b>Bindings (绑定)</b>：
@@ -256,7 +258,7 @@ export const GuideSection: React.FC = () => {
           <div className="space-y-2">
             <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
               <Server className="w-5 h-5 text-blue-500" />
-              <span>腾讯云 EdgeOne / 轻量应用服务器部署指南</span>
+              <span>腾讯云 EdgeOne / 轻量应用服务器部署指南与 COS 存储接入</span>
             </h3>
             <p className="text-xs text-slate-500">
               支持腾讯云 EdgeOne Pages 托管与腾讯云轻量服务器（Lighthouse / CVM）使用 Nginx + Node.js 托管。
@@ -270,6 +272,21 @@ export const GuideSection: React.FC = () => {
             <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
               在 EdgeOne 控制台进入 Pages 服务，绑定 Git 仓库，构建目录指定为 <code>dist</code>，享受中国大陆顶级全站加速与防御能力。
             </p>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/70 dark:border-slate-700 space-y-3">
+            <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200">
+              腾讯云 COS 对象存储环境变量绑定说明
+            </h4>
+            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+              在轻量服务器部署时，可通过 <code>.env</code> 文件或环境变量传入腾讯云 COS 凭证：
+            </p>
+            <div className="p-3 bg-slate-950 text-slate-200 rounded-xl text-xs font-mono space-y-1">
+              <p>TENCENT_COS_SECRET_ID=AKIDxxxxxxxxxxxxxxxx</p>
+              <p>TENCENT_COS_SECRET_KEY=xxxxxxxxxxxxxxxxxxxx</p>
+              <p>TENCENT_COS_BUCKET=fox3-1250000000</p>
+              <p>TENCENT_COS_REGION=ap-guangzhou</p>
+            </div>
           </div>
 
           <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/70 dark:border-slate-700 space-y-3">
@@ -297,7 +314,7 @@ export const GuideSection: React.FC = () => {
           <div className="space-y-2">
             <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
               <Server className="w-5 h-5 text-orange-500" />
-              <span>阿里云 ESA / OSS 静态网站与 ECS 部署指南</span>
+              <span>阿里云 ESA / OSS 静态网站与 ECS 部署指南与 OSS 存储接入</span>
             </h3>
             <p className="text-xs text-slate-500">
               支持阿里云边缘安全加速 ESA Pages、阿里云 OSS 静态网站托管或 ECS 云服务器托管。
@@ -314,6 +331,21 @@ export const GuideSection: React.FC = () => {
               <li>将 <code>dist/</code> 下所有编译生成的文件上传至该存储桶。</li>
               <li>绑定您的独立域名并申请免费 SSL 证书，享受高可用全球分发！</li>
             </ol>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/70 dark:border-slate-700 space-y-3">
+            <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200">
+              阿里云 OSS 环境变量绑定说明
+            </h4>
+            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+              在 ECS 或容器部署时，可通过环境变量配置阿里云 OSS：
+            </p>
+            <div className="p-3 bg-slate-950 text-slate-200 rounded-xl text-xs font-mono space-y-1">
+              <p>ALIYUN_OSS_ACCESS_KEY_ID=LTAIxxxxxxxxxxxxxx</p>
+              <p>ALIYUN_OSS_ACCESS_KEY_SECRET=xxxxxxxxxxxxxxxxxxxx</p>
+              <p>ALIYUN_OSS_BUCKET=fox3-bucket</p>
+              <p>ALIYUN_OSS_ENDPOINT=oss-cn-hangzhou.aliyuncs.com</p>
+            </div>
           </div>
         </div>
       )}

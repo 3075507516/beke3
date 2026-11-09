@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { AppProvider, useApp } from './context/AppContext';
 import { Header } from './components/layout/Header';
 import { HeroIntro } from './components/blog/HeroIntro';
-import { MinimalistBlogSection } from './components/minimalist/MinimalistBlogSection';
 import { BlogSection } from './components/blog/BlogSection';
 import { BookmarksSection } from './components/bookmarks/BookmarksSection';
 import { BookshelfSection } from './components/books/BookshelfSection';
@@ -15,30 +14,40 @@ import { SettingsSection } from './components/settings/SettingsSection';
 import { GuideSection } from './components/guide/GuideSection';
 import { AuthModal } from './components/modals/AuthModal';
 import { TransferProgressBar } from './components/common/TransferProgressBar';
+import { RetroControlPanel } from './components/retro/RetroControlPanel';
 
 const MainLayout: React.FC = () => {
-  const { systemSettings, currentUser, deviceMode } = useApp();
+  const { systemSettings, currentUser, deviceMode, themeMode, t } = useApp();
   const [currentTab, setCurrentTab] = useState<string>('blog');
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
   });
   const [isAuthOpen, setIsAuthOpen] = useState<boolean>(false);
 
-  // Sync dark class on root html
-  useEffect(() => {
-    if (darkMode) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
-  }, [darkMode]);
+  const isAdmin = currentUser?.role === 'admin';
+  const isRetro = themeMode === 'retro';
 
-  // If non-admin tries to access admin-only tabs, redirect safely
+  // Sync dark class on root html (only in modern mode)
   useEffect(() => {
-    if (currentUser?.role !== 'admin' && ['mail', 'settings'].includes(currentTab)) {
+    if (isRetro) {
+      document.documentElement.classList.remove('dark');
+      document.body.classList.add('retro-theme');
+    } else {
+      document.body.classList.remove('retro-theme');
+      if (darkMode) {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
+    }
+  }, [darkMode, isRetro]);
+
+  // If non-admin tries to access admin-only tabs (mail, settings, backup), redirect safely to blog
+  useEffect(() => {
+    if (!isAdmin && ['mail', 'settings', 'backup'].includes(currentTab)) {
       setCurrentTab('blog');
     }
-  }, [currentUser, currentTab]);
+  }, [isAdmin, currentTab]);
 
   // Privacy protection: if guest and restricted, redirect to blog
   useEffect(() => {
@@ -51,31 +60,36 @@ const MainLayout: React.FC = () => {
     }
   }, [currentUser, systemSettings.hideNonBlogForGuests, currentTab]);
 
-  // Container styling based on deviceMode (responsive, mobile simulation, or desktop)
+  // Container styling based on deviceMode (responsive vs mobile simulation)
   const getContainerClasses = () => {
     if (deviceMode === 'mobile') {
-      return 'max-w-md mx-auto my-6 shadow-2xl rounded-[40px] overflow-hidden border-[8px] border-slate-800 min-h-[844px]';
-    }
-    if (deviceMode === 'desktop') {
-      return 'max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6';
+      return 'max-w-md mx-auto my-6 shadow-2xl rounded-[40px] overflow-hidden border-[10px] border-slate-800 bg-white dark:bg-slate-900 min-h-[844px]';
     }
     return 'max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6';
   };
 
   return (
     <div
-      className="min-h-screen transition-colors duration-300 relative flex flex-col justify-between"
+      className={`min-h-screen transition-colors duration-300 relative flex flex-col justify-between ${
+        isRetro
+          ? 'bg-[#f0e7d5] text-[#2b2118] selection:bg-[#e28b3c] selection:text-white'
+          : ''
+      }`}
       style={{
-        backgroundColor: systemSettings.customPaletteBg || (darkMode ? '#020617' : '#f8fafc'),
+        backgroundColor: isRetro
+          ? '#f2e9d8'
+          : systemSettings.customPaletteBg || (darkMode ? '#020617' : '#f8fafc'),
         backgroundImage: systemSettings.fullBackgroundUrl
           ? `url(${systemSettings.fullBackgroundUrl})`
-          : undefined,
-        backgroundSize: 'cover',
+          : isRetro
+            ? 'radial-gradient(#d3c4a8 1px, transparent 1px)'
+            : undefined,
+        backgroundSize: systemSettings.fullBackgroundUrl ? 'cover' : isRetro ? '20px 20px' : undefined,
         backgroundPosition: 'center',
         backgroundAttachment: 'fixed',
       }}
     >
-      {/* Global Background overlay */}
+      {/* Global Background overlay if custom background photo is provided */}
       {systemSettings.fullBackgroundUrl && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-[1px] pointer-events-none z-0" />
       )}
@@ -90,22 +104,26 @@ const MainLayout: React.FC = () => {
           setDarkMode={setDarkMode}
         />
 
+        {/* Retro Header Banner & Quick Launcher if in retro mode */}
+        {isRetro && (
+          <RetroControlPanel currentTab={currentTab} onSelectTab={setCurrentTab} />
+        )}
+
         {/* Main Content Area */}
         <main className={`flex-1 ${getContainerClasses()}`}>
           {/* Hero Section shown on standard blog */}
           {currentTab === 'blog' && <HeroIntro />}
 
           {/* Tab Views */}
-          {currentTab === 'minimalist' && <MinimalistBlogSection />}
           {currentTab === 'blog' && <BlogSection />}
           {currentTab === 'bookmarks' && <BookmarksSection />}
           {currentTab === 'books' && <BookshelfSection />}
           {currentTab === 'gallery' && <GallerySection />}
           {currentTab === 'media' && <MediaSection />}
           {currentTab === 'shop' && <ShopSection />}
-          {currentTab === 'backup' && <WebDavBackupSection />}
-          {currentTab === 'mail' && <MailSection />}
-          {currentTab === 'settings' && (
+          {currentTab === 'backup' && isAdmin && <WebDavBackupSection />}
+          {currentTab === 'mail' && isAdmin && <MailSection />}
+          {currentTab === 'settings' && isAdmin && (
             <div className="space-y-6">
               <SettingsSection />
               <WebDavBackupSection />
@@ -115,7 +133,11 @@ const MainLayout: React.FC = () => {
         </main>
 
         {/* Global Footer */}
-        <footer className="relative z-10 border-t border-slate-200/60 dark:border-slate-800/80 bg-white/70 dark:bg-slate-900/70 backdrop-blur-md py-6 text-center text-xs text-slate-500 dark:text-slate-400">
+        <footer className={`relative z-10 border-t py-6 text-center text-xs ${
+          isRetro
+            ? 'border-[#b09f80] bg-[#e8dec8]/90 text-[#594735]'
+            : 'border-slate-200/60 dark:border-slate-800/80 bg-white/70 dark:bg-slate-900/70 backdrop-blur-md text-slate-500 dark:text-slate-400'
+        }`}>
           <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3">
             <div>
               <span>&copy; {new Date().getFullYear()} <b>{systemSettings.siteName}</b> (fox3). All rights reserved.</span>
@@ -125,7 +147,7 @@ const MainLayout: React.FC = () => {
               <span>•</span>
               <button
                 onClick={() => setCurrentTab('guide')}
-                className="hover:text-sky-500 transition underline"
+                className="hover:underline transition text-sky-600 dark:text-sky-400 font-medium"
               >
                 全平台部署指引
               </button>

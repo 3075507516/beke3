@@ -15,7 +15,10 @@ import {
   WebDavBackupItem,
   User,
   ViewMode,
+  GlobalThemeMode,
+  DeviceViewMode,
 } from '../types';
+import { Locale, i18nDict, getTranslation } from '../utils/i18n';
 import {
   STORAGE_KEYS,
   loadLocalStorage,
@@ -94,8 +97,11 @@ interface AppContextType {
   uploadFile: (file: File) => Promise<{ url: string; size: number; name: string }>;
   addStorageUsage: (bytes: number) => void;
 
-  deviceMode: 'responsive' | 'mobile' | 'desktop';
-  setDeviceMode: (mode: 'responsive' | 'mobile' | 'desktop') => void;
+  deviceMode: DeviceViewMode;
+  setDeviceMode: (mode: DeviceViewMode) => void;
+
+  themeMode: GlobalThemeMode;
+  setThemeMode: (mode: GlobalThemeMode) => void;
 
   // View modes for sections
   viewModes: Record<string, ViewMode>;
@@ -111,6 +117,15 @@ interface AppContextType {
 
   // Bookmark toggle
   toggleBookmark: (postId: string) => void;
+
+  // Multi-language
+  locale: Locale;
+  setLocale: (loc: Locale) => void;
+  t: (path: string) => string;
+
+  // Real backend channel connectivity check
+  channelConnected: boolean;
+  refreshChannelStatus: () => Promise<boolean>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -191,7 +206,59 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     loadLocalStorage<WebDavConfig>(STORAGE_KEYS.WEBDAV_CONFIG, DEFAULT_WEBDAV_CONFIG)
   );
 
-  const [deviceMode, setDeviceMode] = useState<'responsive' | 'mobile' | 'desktop'>('responsive');
+  const [locale, setLocaleState] = useState<Locale>(() =>
+    loadLocalStorage<Locale>(STORAGE_KEYS.LOCALE, 'zh-CN')
+  );
+
+  const setLocale = (loc: Locale) => {
+    setLocaleState(loc);
+    saveLocalStorage(STORAGE_KEYS.LOCALE, loc);
+  };
+
+  const t = useCallback((path: string): string => {
+    const dict = i18nDict[locale] || i18nDict['zh-CN'];
+    return getTranslation(dict, path);
+  }, [locale]);
+
+  const [themeMode, setThemeModeState] = useState<GlobalThemeMode>(() =>
+    (loadLocalStorage<GlobalThemeMode>('fox3_global_theme', 'modern'))
+  );
+
+  const setThemeMode = (mode: GlobalThemeMode) => {
+    setThemeModeState(mode);
+    saveLocalStorage('fox3_global_theme', mode);
+  };
+
+  const [deviceMode, setDeviceModeState] = useState<DeviceViewMode>('responsive');
+
+  const setDeviceMode = (mode: DeviceViewMode) => {
+    setDeviceModeState(mode);
+  };
+
+  const [channelConnected, setChannelConnected] = useState<boolean>(false);
+
+  const refreshChannelStatus = useCallback(async (): Promise<boolean> => {
+    try {
+      const res = await fetch('/api/status', { method: 'GET', headers: { 'Accept': 'application/json' } });
+      if (res.ok) {
+        const data = await res.json();
+        const isOk = Boolean(data && data.success && data.channelOnline);
+        setChannelConnected(isOk);
+        return isOk;
+      }
+      setChannelConnected(false);
+      return false;
+    } catch {
+      setChannelConnected(false);
+      return false;
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshChannelStatus();
+    const interval = setInterval(refreshChannelStatus, 15000);
+    return () => clearInterval(interval);
+  }, [refreshChannelStatus]);
 
   const [viewModes, setViewModesState] = useState<Record<string, ViewMode>>(() =>
     loadLocalStorage<Record<string, ViewMode>>(STORAGE_KEYS.VIEW_MODES, {
@@ -299,7 +366,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const triggerManualSync = useCallback(async () => {
     setSyncState(prev => ({ ...prev, isSyncing: true, status: 'syncing', message: '正在同步 D1/KV 数据...' }));
     try {
-      // Attempt backend API sync
       const res = await fetch('/api/stats', { method: 'GET' }).catch(() => null);
       if (res && res.ok) {
         setSyncState({
@@ -309,7 +375,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           message: '已与 Cloudflare D1/R2/KV 实时同步',
         });
       } else {
-        // Frontend direct sync mode
         await new Promise(r => setTimeout(r, 400));
         setSyncState({
           isSyncing: false,
@@ -513,6 +578,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addStorageUsage,
         deviceMode,
         setDeviceMode,
+        themeMode,
+        setThemeMode,
         viewModes,
         setViewMode,
         syncState,
@@ -520,6 +587,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         performBackup,
         performRestore,
         toggleBookmark,
+        locale,
+        setLocale,
+        t,
+        channelConnected,
+        refreshChannelStatus,
       }}
     >
       {children}

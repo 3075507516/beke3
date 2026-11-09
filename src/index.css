@@ -43,3 +43,40 @@ body {
 .safe-bottom {
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
+
+/* Retro Classic Skeuomorphic Styles */
+body.retro-theme {
+  background-color: #f2e9d8 !important;
+  color: #2e2319 !important;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+}
+
+body.retro-theme .card-retro {
+  background: linear-gradient(to bottom, #fcf9f2, #ece0cd);
+  border: 2px solid #bba98c;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  color: #3b2b1d;
+}
+
+body.retro-theme .btn-retro-primary {
+  background: linear-gradient(to bottom, #df9344, #b35e18);
+  border: 1px solid #7a3909;
+  color: #ffffff;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2), inset 0 1px 1px rgba(255, 255, 255, 0.4);
+}
+
+body.retro-theme .btn-retro-primary:hover {
+  background: linear-gradient(to bottom, #e89f53, #bf671f);
+}
+
+body.retro-theme .btn-retro-secondary {
+  background: linear-gradient(to bottom, #f7f1e6, #ded0bb);
+  border: 1px solid #ab987c;
+  color: #3f2e1e;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+body.retro-theme .btn-retro-secondary:hover {
+  background: linear-gradient(to bottom, #fff8ee, #e5d8c4);
+}

@@ -186,6 +186,9 @@ export interface StorageConfig {
   kvToken?: string;
 }
 
+export type GlobalThemeMode = 'modern' | 'retro';
+export type DeviceViewMode = 'responsive' | 'mobile';
+
 export interface SystemSettings {
   siteName: string;
   themeColor: string;
@@ -205,6 +208,8 @@ export interface SystemSettings {
   storageConfig: StorageConfig;
   autoSync: boolean;
   syncIntervalSeconds: number;
+  globalTheme: GlobalThemeMode; // 'modern' or 'retro'
+  deviceView: DeviceViewMode; // 'responsive' or 'mobile'
 }
 
 export interface PaymentSettings {

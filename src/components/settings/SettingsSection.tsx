@@ -143,9 +143,7 @@ export const SettingsSection: React.FC = () => {
 
         <button
           onClick={() => {
-            if (deviceMode === 'responsive') setDeviceMode('mobile');
-            else if (deviceMode === 'mobile') setDeviceMode('desktop');
-            else setDeviceMode('responsive');
+            setDeviceMode(deviceMode === 'mobile' ? 'responsive' : 'mobile');
           }}
           className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold rounded-xl transition"
         >
@@ -155,7 +153,7 @@ export const SettingsSection: React.FC = () => {
             <Monitor className="w-4 h-4 text-indigo-500" />
           )}
           <span>
-            一键切换模式: {deviceMode === 'responsive' ? '响应式' : deviceMode === 'mobile' ? '手机端' : '电脑端'}
+            一键切换模式: {deviceMode === 'mobile' ? '手机端视图' : '电脑/响应式视图'}
           </span>
         </button>
       </div>

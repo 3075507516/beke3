@@ -30,6 +30,7 @@ export const STORAGE_KEYS = {
   SYSTEM_SETTINGS: 'fox3_system_settings',
   EMAIL_SETTINGS: 'fox3_email_settings',
   PAYMENT_SETTINGS: 'fox3_payment_settings',
+  LOCALE: 'fox3_locale',
   WEBDAV_CONFIG: 'fox3_webdav_config',
   WEBDAV_BACKUPS: 'fox3_webdav_backups',
   VIEW_MODES: 'fox3_view_modes',
@@ -99,6 +100,8 @@ export const DEFAULT_SETTINGS: SystemSettings = {
   },
   autoSync: true,
   syncIntervalSeconds: 30,
+  globalTheme: 'modern',
+  deviceView: 'responsive',
 };
 
 export const DEFAULT_ADMIN: User = {
