@@ -22,10 +22,14 @@ import {
   Square,
   Download,
   Upload,
+  Image as ImageIcon,
+  Check,
+  X,
 } from 'lucide-react';
 
 export const BlogSection: React.FC = () => {
-  const { posts, setPosts, currentUser, uploadFile, viewModes, setViewMode, systemSettings, deviceMode } = useApp();
+  const { posts, setPosts, photos, currentUser, uploadFile, viewModes, setViewMode, systemSettings, deviceMode } = useApp();
+  const [showGalleryPicker, setShowGalleryPicker] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [activePost, setActivePost] = useState<Post | null>(null);
@@ -751,19 +755,95 @@ export const BlogSection: React.FC = () => {
                 />
               </div>
 
+              {/* Blog Content Image Insertion Controls (Distinct from Cover Image) */}
               <div>
-                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                  正文内容 (支持 Markdown 与排版)
-                </label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300">
+                    正文内容配图 (与封面图区分，插入正文任意位置)
+                  </label>
+                  <div className="flex items-center gap-2">
+                    {/* Upload local image into content */}
+                    <label className="flex items-center gap-1 px-2.5 py-1 bg-sky-50 dark:bg-sky-950/40 text-sky-600 dark:text-sky-400 hover:bg-sky-100 text-[11px] font-medium rounded-lg cursor-pointer transition border border-sky-200/50">
+                      <Upload className="w-3 h-3" />
+                      <span>上传本地配图</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          const res = await uploadFile(file);
+                          const markdownImg = `\n\n![${file.name.replace(/\.[^/.]+$/, '')}](${res.url})\n\n`;
+                          setEditingPost(prev => ({
+                            ...prev,
+                            content: (prev.content || '') + markdownImg
+                          }));
+                        }}
+                      />
+                    </label>
+
+                    {/* Pick from existing album / gallery */}
+                    <button
+                      type="button"
+                      onClick={() => setShowGalleryPicker(true)}
+                      className="flex items-center gap-1 px-2.5 py-1 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-[11px] font-medium rounded-lg transition"
+                    >
+                      <ImageIcon className="w-3 h-3 text-sky-500" />
+                      <span>从相册选择配图</span>
+                    </button>
+                  </div>
+                </div>
+
                 <textarea
                   rows={8}
                   value={editingPost.content || ''}
                   onChange={e => setEditingPost({ ...editingPost, content: e.target.value })}
-                  placeholder="在这里输入文章 Markdown 格式正文..."
+                  placeholder="在这里输入文章 Markdown 格式正文...\n可以使用上方“上传本地配图”或“从相册选择配图”将图片插入到正文中作为段落配图！"
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 font-mono text-slate-800 dark:text-slate-100"
                   required
                 />
               </div>
+
+              {/* Gallery Image Picker Modal */}
+              {showGalleryPicker && (
+                <div className="p-4 bg-slate-50 dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                      <ImageIcon className="w-3.5 h-3.5 text-sky-500" />
+                      选择相册图片插入博文正文配图
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowGalleryPicker(false)}
+                      className="text-xs text-slate-400 hover:text-slate-600"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-4 sm:grid-cols-6 gap-2 max-h-48 overflow-y-auto p-1">
+                    {photos.map(p => (
+                      <div
+                        key={p.id}
+                        onClick={() => {
+                          const markdownImg = `\n\n![${p.title}](${p.url})\n\n`;
+                          setEditingPost(prev => ({
+                            ...prev,
+                            content: (prev.content || '') + markdownImg
+                          }));
+                          setShowGalleryPicker(false);
+                        }}
+                        className="group relative aspect-square rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 cursor-pointer hover:ring-2 hover:ring-sky-500 transition"
+                      >
+                        <SafeImage src={p.url} alt={p.title} className="w-full h-full object-cover" />
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition">
+                          <Check className="w-4 h-4 text-white" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100 dark:border-slate-800">
                 <button

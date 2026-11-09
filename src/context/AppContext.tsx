@@ -100,6 +100,8 @@ interface AppContextType {
   deviceMode: DeviceViewMode;
   setDeviceMode: (mode: DeviceViewMode) => void;
 
+  darkMode: boolean;
+  setDarkMode: (dark: boolean) => void;
   themeMode: GlobalThemeMode;
   setThemeMode: (mode: GlobalThemeMode) => void;
 
@@ -125,6 +127,7 @@ interface AppContextType {
 
   // Real backend channel connectivity check
   channelConnected: boolean;
+  cloudServicesStatus: { d1: boolean; r2: boolean; kv: boolean };
   refreshChannelStatus: () => Promise<boolean>;
 }
 
@@ -229,6 +232,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     saveLocalStorage('fox3_global_theme', mode);
   };
 
+  const [darkMode, setDarkModeState] = useState<boolean>(() => {
+    const saved = localStorage.getItem('fox3_dark_mode');
+    if (saved !== null) return saved === 'true';
+    return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  });
+
+  const setDarkMode = (dark: boolean) => {
+    setDarkModeState(dark);
+    localStorage.setItem('fox3_dark_mode', String(dark));
+    if (dark) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  };
+
+  useEffect(() => {
+    if (darkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [darkMode]);
+
   const [deviceMode, setDeviceModeState] = useState<DeviceViewMode>('responsive');
 
   const setDeviceMode = (mode: DeviceViewMode) => {
@@ -236,6 +263,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const [channelConnected, setChannelConnected] = useState<boolean>(false);
+  const [cloudServicesStatus, setCloudServicesStatus] = useState<{ d1: boolean; r2: boolean; kv: boolean }>({
+    d1: false,
+    r2: false,
+    kv: false,
+  });
 
   const refreshChannelStatus = useCallback(async (): Promise<boolean> => {
     try {
@@ -246,12 +278,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const data = await res.json();
         const isOk = Boolean(data && data.success && data.channelOnline === true);
         setChannelConnected(isOk);
+        if (data && data.cloudServices) {
+          setCloudServicesStatus({
+            d1: Boolean(data.cloudServices.d1),
+            r2: Boolean(data.cloudServices.r2),
+            kv: Boolean(data.cloudServices.kv),
+          });
+        } else {
+          setCloudServicesStatus({ d1: false, r2: false, kv: false });
+        }
         return isOk;
       }
       setChannelConnected(false);
+      setCloudServicesStatus({ d1: false, r2: false, kv: false });
       return false;
     } catch {
       setChannelConnected(false);
+      setCloudServicesStatus({ d1: false, r2: false, kv: false });
       return false;
     }
   }, []);
@@ -359,9 +402,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const toggleBookmark = (postId: string) => {
-    setPosts(prev =>
-      prev.map(p => (p.id === postId ? { ...p, isBookmarked: !p.isBookmarked } : p))
-    );
+    setPosts(prev => {
+      const updated = prev.map(p => (p.id === postId ? { ...p, isBookmarked: !p.isBookmarked } : p));
+      // Broadcast immediate bookmark update
+      try {
+        const bc = new BroadcastChannel('fox3_realtime_sync');
+        bc.postMessage({ type: 'SYNC_ALL', payload: { posts: updated } });
+        bc.close();
+      } catch (e) {}
+      return updated;
+    });
   };
 
   // BroadcastChannel for instant cross-tab / cross-window sync
@@ -441,6 +491,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         status: 'synced',
         message: postRes?.ok ? '多设备云端与本地已无缝实时同步' : '本地与多窗口已实时同步',
       });
+      // Also sync bookmarks and posts to dedicated /api/sync/posts
+      fetch('/api/sync/posts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ posts, updatedAt: Date.now() }),
+      }).catch(() => null);
     } catch {
       setSyncState({
         isSyncing: false,
@@ -667,6 +723,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addStorageUsage,
         deviceMode,
         setDeviceMode,
+        darkMode,
+        setDarkMode,
         themeMode,
         setThemeMode,
         viewModes,
@@ -680,6 +738,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setLocale,
         t,
         channelConnected,
+        cloudServicesStatus,
         refreshChannelStatus,
       }}
     >

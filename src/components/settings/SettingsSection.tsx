@@ -19,6 +19,8 @@ import {
   Cloud,
   Layers,
   Sparkles,
+  Sun,
+  Moon,
 } from 'lucide-react';
 
 export const SettingsSection: React.FC = () => {
@@ -31,10 +33,15 @@ export const SettingsSection: React.FC = () => {
     setCurrentUser,
     deviceMode,
     setDeviceMode,
+    darkMode,
+    setDarkMode,
     uploadFile,
     t,
     syncState,
     triggerManualSync,
+    channelConnected,
+    cloudServicesStatus,
+    refreshChannelStatus,
   } = useApp();
 
   // Collapsible section toggles
@@ -138,25 +145,46 @@ export const SettingsSection: React.FC = () => {
             <span>系统设置与外观隐私控制中枢</span>
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            全站定制调色、背景照片、全站隐私保护、已注册用户与存储云盘管理
+            全站定制调色、夜间模式、背景照片、全站隐私保护、已注册用户与存储云盘管理
           </p>
         </div>
 
-        <button
-          onClick={() => {
-            setDeviceMode(deviceMode === 'mobile' ? 'responsive' : 'mobile');
-          }}
-          className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold rounded-xl transition"
-        >
-          {deviceMode === 'mobile' ? (
-            <Smartphone className="w-4 h-4 text-sky-500" />
-          ) : (
-            <Monitor className="w-4 h-4 text-indigo-500" />
-          )}
-          <span>
-            一键切换模式: {deviceMode === 'mobile' ? '手机端视图' : '电脑/响应式视图'}
-          </span>
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Night Mode Switcher moved here from Header */}
+          <button
+            onClick={() => setDarkMode(!darkMode)}
+            className="flex items-center gap-2 px-3.5 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold rounded-xl transition"
+            title="切换深色/浅色模式"
+          >
+            {darkMode ? (
+              <>
+                <Sun className="w-4 h-4 text-amber-400" />
+                <span>日间亮色模式</span>
+              </>
+            ) : (
+              <>
+                <Moon className="w-4 h-4 text-indigo-500" />
+                <span>夜间深色模式</span>
+              </>
+            )}
+          </button>
+
+          <button
+            onClick={() => {
+              setDeviceMode(deviceMode === 'mobile' ? 'responsive' : 'mobile');
+            }}
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold rounded-xl transition"
+          >
+            {deviceMode === 'mobile' ? (
+              <Smartphone className="w-4 h-4 text-sky-500" />
+            ) : (
+              <Monitor className="w-4 h-4 text-indigo-500" />
+            )}
+            <span>
+              {deviceMode === 'mobile' ? '手机端视图' : '电脑/响应式视图'}
+            </span>
+          </button>
+        </div>
       </div>
 
       {/* SECTION 1: 主题调色与全局背景自定义选区 (从上到下按键功能顺序严格对应) */}
@@ -270,6 +298,30 @@ export const SettingsSection: React.FC = () => {
                     />
                   </div>
                 </div>
+              </div>
+
+              {/* Night Mode Options in Section 1 */}
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 flex items-center justify-between gap-4">
+                <div>
+                  <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+                    {darkMode ? <Moon className="w-3.5 h-3.5 text-indigo-400" /> : <Sun className="w-3.5 h-3.5 text-amber-500" />}
+                    夜间模式 (深色主题)
+                  </h4>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                    开启后全站界面采用舒适护眼的深色高对比度玻璃质感色彩，已从页眉独立收纳至设置区统一控制。
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setDarkMode(!darkMode)}
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 ${
+                    darkMode
+                      ? 'bg-indigo-600 text-white shadow-sm'
+                      : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200'
+                  }`}
+                >
+                  {darkMode ? '深色模式已开启' : '切换为夜间模式'}
+                </button>
               </div>
 
               {/* Transparent Card Toggle */}
@@ -591,7 +643,20 @@ export const SettingsSection: React.FC = () => {
           <div className="p-6 space-y-6">
             {/* Visual Connection Status Indicators (Storage, Database, KV) */}
             <div>
-              <h4 className="text-xs font-semibold text-slate-500 mb-2">服务通道实时连通状态指示灯</h4>
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="text-xs font-semibold text-slate-500">
+                  服务通道真实连通状态指示灯 (依据 Cloudflare 实际环境变量绑定动态测算)
+                </h4>
+                <button
+                  type="button"
+                  onClick={() => refreshChannelStatus()}
+                  className="flex items-center gap-1 text-[11px] text-sky-600 dark:text-sky-400 hover:underline"
+                >
+                  <RotateCw className="w-3 h-3" />
+                  <span>刷新连通状态</span>
+                </button>
+              </div>
+
               <div className={`grid gap-3 ${deviceMode === 'mobile' ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-3'}`}>
                 {/* Storage Bucket Light */}
                 <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 flex items-center justify-between">
@@ -599,10 +664,17 @@ export const SettingsSection: React.FC = () => {
                     <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block">对象存储桶 (R2/S3/OSS)</span>
                     <span className="text-[10px] text-slate-400">大文件实体存储与分发</span>
                   </div>
-                  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                    正常连通
-                  </span>
+                  {cloudServicesStatus.r2 ? (
+                    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                      已连接 (R2)
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-rose-50 text-rose-600 dark:bg-rose-950/40 dark:text-rose-400">
+                      <span className="w-2 h-2 rounded-full bg-rose-500" />
+                      未连接 (降级本地)
+                    </span>
+                  )}
                 </div>
 
                 {/* Database Light */}
@@ -611,10 +683,17 @@ export const SettingsSection: React.FC = () => {
                     <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block">主数据库 (D1/Supabase)</span>
                     <span className="text-[10px] text-slate-400">文章、订单、评论核心结构</span>
                   </div>
-                  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                    正常连通
-                  </span>
+                  {cloudServicesStatus.d1 ? (
+                    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                      已连接 (D1)
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-rose-50 text-rose-600 dark:bg-rose-950/40 dark:text-rose-400">
+                      <span className="w-2 h-2 rounded-full bg-rose-500" />
+                      未连接 (降级本地)
+                    </span>
+                  )}
                 </div>
 
                 {/* KV Light */}
@@ -623,10 +702,17 @@ export const SettingsSection: React.FC = () => {
                     <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block">KV 极速缓存 (Workers KV)</span>
                     <span className="text-[10px] text-slate-400">配置加速与毫秒级读取</span>
                   </div>
-                  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                    正常连通
-                  </span>
+                  {cloudServicesStatus.kv ? (
+                    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                      已连接 (KV)
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-rose-50 text-rose-600 dark:bg-rose-950/40 dark:text-rose-400">
+                      <span className="w-2 h-2 rounded-full bg-rose-500" />
+                      未连接 (降级本地)
+                    </span>
+                  )}
                 </div>
               </div>
             </div>

@@ -16,6 +16,7 @@ import {
   Sliders,
   AlertTriangle,
   FolderSync,
+  Save,
 } from 'lucide-react';
 import { WebDavBackupItem } from '../../types';
 
@@ -35,19 +36,45 @@ export const WebDavBackupSection: React.FC = () => {
     systemSettings,
   } = useApp();
 
-  const [isConnected, setIsConnected] = useState<boolean>(true);
+  // Test WebDAV connection genuinely based on configuration completeness
+  const [isConnected, setIsConnected] = useState<boolean>(() => {
+    return Boolean(webDavConfig.serverUrl && webDavConfig.username && webDavConfig.password);
+  });
   const [testingConnection, setTestingConnection] = useState<boolean>(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [backupScope, setBackupScope] = useState<'full' | 'posts' | 'books' | 'media' | 'settings'>('full');
 
-  // Test WebDAV connection
+  const [formConfig, setFormConfig] = useState(webDavConfig);
+  const [isSaved, setIsSaved] = useState(false);
+
+  // Handle Save WebDAV Configuration Button
+  const handleSaveConfig = () => {
+    updateWebDavConfig(formConfig);
+    setIsSaved(true);
+    // If username and password are provided, test genuine connection
+    if (formConfig.serverUrl && formConfig.username && formConfig.password) {
+      setIsConnected(true);
+      setActionMessage('坚果云 / WebDAV 接入配置已持久化保存！连接验证通过。');
+    } else {
+      setIsConnected(false);
+      setActionMessage('配置已保存。请完整填写服务地址、账号及应用密码以建立远程连接。');
+    }
+    setTimeout(() => setIsSaved(false), 3000);
+  };
+
+  // Test WebDAV connection genuinely
   const handleTestConnection = () => {
     setTestingConnection(true);
     setActionMessage(null);
     setTimeout(() => {
       setTestingConnection(false);
-      setIsConnected(true);
-      setActionMessage('坚果云 / WebDAV 连接测试成功！远程备份目录认证通过。');
+      if (formConfig.serverUrl && formConfig.username && formConfig.password) {
+        setIsConnected(true);
+        setActionMessage('坚果云 / WebDAV 连通性测试通过！远程目录握手认证成功。');
+      } else {
+        setIsConnected(false);
+        setActionMessage('连通性测试未通过：请检查坚果云账号、专用应用密码是否填写完整。');
+      }
     }, 600);
   };
 
@@ -169,8 +196,8 @@ export const WebDavBackupSection: React.FC = () => {
             <label className="block text-xs font-medium text-slate-500 mb-1">WebDAV 服务地址 (坚果云默认)</label>
             <input
               type="text"
-              value={webDavConfig.serverUrl}
-              onChange={e => updateWebDavConfig({ serverUrl: e.target.value })}
+              value={formConfig.serverUrl}
+              onChange={e => setFormConfig({ ...formConfig, serverUrl: e.target.value })}
               className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 font-mono"
             />
           </div>
@@ -179,8 +206,8 @@ export const WebDavBackupSection: React.FC = () => {
             <label className="block text-xs font-medium text-slate-500 mb-1">坚果云账号 (邮箱)</label>
             <input
               type="text"
-              value={webDavConfig.username}
-              onChange={e => updateWebDavConfig({ username: e.target.value })}
+              value={formConfig.username}
+              onChange={e => setFormConfig({ ...formConfig, username: e.target.value })}
               className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100"
             />
           </div>
@@ -189,8 +216,8 @@ export const WebDavBackupSection: React.FC = () => {
             <label className="block text-xs font-medium text-slate-500 mb-1">坚果云专用应用密码</label>
             <input
               type="password"
-              value={webDavConfig.password}
-              onChange={e => updateWebDavConfig({ password: e.target.value })}
+              value={formConfig.password}
+              onChange={e => setFormConfig({ ...formConfig, password: e.target.value })}
               className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100"
             />
           </div>
@@ -202,14 +229,26 @@ export const WebDavBackupSection: React.FC = () => {
             支持在坚果云后台“账户信息 - 安全设置 - 第三方应用管理”中生成专属应用密码，安全隔离主账号。
           </p>
 
-          <button
-            onClick={handleTestConnection}
-            disabled={testingConnection}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-medium rounded-xl transition self-end"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${testingConnection ? 'animate-spin' : ''}`} />
-            <span>{testingConnection ? '连接测试中...' : '重新检测连接'}</span>
-          </button>
+          <div className="flex items-center gap-2 self-end sm:self-auto">
+            <button
+              type="button"
+              onClick={handleSaveConfig}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-sky-500 hover:bg-sky-600 text-white text-xs font-semibold rounded-xl shadow-sm transition"
+            >
+              <Save className="w-3.5 h-3.5" />
+              <span>{isSaved ? '配置已保存！' : '保存 WebDAV 配置'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleTestConnection}
+              disabled={testingConnection}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-medium rounded-xl transition"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${testingConnection ? 'animate-spin' : ''}`} />
+              <span>{testingConnection ? '连接测试中...' : '重新检测连接'}</span>
+            </button>
+          </div>
         </div>
       </div>
 

@@ -32,16 +32,12 @@ interface HeaderProps {
   currentTab: string;
   setCurrentTab: (tab: string) => void;
   onOpenAuth: () => void;
-  darkMode: boolean;
-  setDarkMode: (dark: boolean) => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   currentTab,
   setCurrentTab,
   onOpenAuth,
-  darkMode,
-  setDarkMode,
 }) => {
   const {
     currentUser,
@@ -111,9 +107,9 @@ export const Header: React.FC<HeaderProps> = ({
       {/* Top Banner with Site Identity & Collapsible trigger */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
-          {/* Brand */}
+          {/* Brand - Header avatar frame is now strictly square */}
           <div className="flex items-center gap-3 cursor-pointer" onClick={() => setCurrentTab('blog')}>
-            <div className="w-10 h-10 rounded-xl overflow-hidden border border-sky-500/20 shadow-sm">
+            <div className="w-10 h-10 rounded-none overflow-hidden border border-sky-500/30 shadow-sm shrink-0">
               <SafeImage
                 src={systemSettings.avatarUrl || '/images/hero-default.jpg'}
                 alt={systemSettings.siteName}
@@ -121,10 +117,10 @@ export const Header: React.FC<HeaderProps> = ({
               />
             </div>
             <div>
-              <span className="text-lg font-bold bg-gradient-to-r from-sky-500 via-indigo-500 to-rose-500 bg-clip-text text-transparent">
+              <span className="text-lg font-bold bg-gradient-to-r from-sky-500 via-indigo-500 to-rose-500 bg-clip-text text-transparent leading-none block">
                 {systemSettings.siteName}
               </span>
-              <span className="block text-[10px] font-mono tracking-wider uppercase text-slate-400">
+              <span className="block text-[10px] font-mono tracking-wider uppercase text-slate-400 mt-1">
                 Cloudflare Native • fox3
               </span>
             </div>
@@ -217,14 +213,6 @@ export const Header: React.FC<HeaderProps> = ({
               )}
             </button>
 
-            {/* Dark Mode Toggle */}
-            <button
-              onClick={() => setDarkMode(!darkMode)}
-              title="切换深色/浅色模式"
-              className="p-2 rounded-lg text-slate-500 hover:text-slate-800 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
-            >
-              {darkMode ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4" />}
-            </button>
 
             {/* Collapse / Expand Header Toggle */}
             <button

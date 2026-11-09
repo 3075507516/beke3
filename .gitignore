@@ -7,3 +7,5 @@ dist-upload.zip
 .wrangler
 .env
 .env.local
+
+dev_server.log

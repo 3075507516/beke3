@@ -17,25 +17,12 @@ import { TransferProgressBar } from './components/common/TransferProgressBar';
 import { ArrowUp, Sparkles, Compass } from 'lucide-react';
 
 const MainLayout: React.FC = () => {
-  const { systemSettings, currentUser, deviceMode, t } = useApp();
+  const { systemSettings, currentUser, deviceMode, darkMode, t } = useApp();
   const [currentTab, setCurrentTab] = useState<string>('blog');
-  const [darkMode, setDarkMode] = useState<boolean>(() => {
-    return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-  });
   const [isAuthOpen, setIsAuthOpen] = useState<boolean>(false);
 
   const isAdmin = currentUser?.role === 'admin';
   const isGuestRestricted = !currentUser && systemSettings.hideNonBlogForGuests;
-
-  // Sync dark class on root html
-  useEffect(() => {
-    document.body.classList.remove('retro-theme');
-    if (darkMode) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
-  }, [darkMode]);
 
   // If non-admin tries to access admin-only tabs (mail, settings, backup), redirect safely to blog
   useEffect(() => {
@@ -87,8 +74,6 @@ const MainLayout: React.FC = () => {
           currentTab={currentTab}
           setCurrentTab={setCurrentTab}
           onOpenAuth={() => setIsAuthOpen(true)}
-          darkMode={darkMode}
-          setDarkMode={setDarkMode}
         />
 
         {/* Main Content Area */}
