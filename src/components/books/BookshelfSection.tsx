@@ -1,7 +1,9 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
 import { Book, ViewMode } from '../../types';
 import { SafeImage } from '../common/SafeImage';
+import { parseEpubFile } from '../../utils/epubReader';
+import { getFileFromIndexedDB } from '../../utils/storage';
 import {
   BookOpen,
   Plus,
@@ -18,6 +20,8 @@ import {
   Grid3X3,
   List,
   LayoutGrid,
+  FileText,
+  FileCode,
 } from 'lucide-react';
 
 export const BookshelfSection: React.FC = () => {
@@ -32,6 +36,7 @@ export const BookshelfSection: React.FC = () => {
     viewModes,
     setViewMode,
     systemSettings,
+    deviceMode,
   } = useApp();
 
   const [readingBook, setReadingBook] = useState<Book | null>(null);
@@ -55,18 +60,33 @@ export const BookshelfSection: React.FC = () => {
 
       const uploaded = await uploadFile(file);
 
-      // Extract text content for preview/reading
-      let textContent = `《${file.name.replace(/\.[^/.]+$/, '')}》\n\n格式: [${format}]  大小: ${(file.size / 1024 / 1024).toFixed(2)} MB\n上传者: ${currentUser?.username || 'fox'}\n\n【第一章 序言与数字化旅程】\n数字化阅读带来跨设备无缝阅读体验。无论通过手机或是桌面浏览器，知识随时触手可及。\n\n【第二章 核心篇章】\n技术演进不断消除物理与虚拟的藩篱，fox3 架构采用 Cloudflare D1/R2/KV 混合存储模型，支持全格式电子书即时解析与离线长久保存。`;
+      // Extract real text content for preview/reading
+      let textContent = '';
 
-      if (file.type.includes('text') || ext === 'TXT') {
+      if (format === 'EPUB') {
+        try {
+          const parsed = await parseEpubFile(file);
+          if (parsed.fullText && parsed.fullText.length > 50) {
+            textContent = parsed.fullText;
+          }
+        } catch (e) {
+          console.warn('Failed parsing epub:', e);
+        }
+      }
+
+      if (!textContent && (file.type.includes('text') || ext === 'TXT')) {
         try {
           const text = await file.text();
           if (text && text.trim().length > 0) {
-            textContent = text.substring(0, 100000);
+            textContent = text;
           }
         } catch (err) {
-          console.warn('Text reading failed, using generated preview:', err);
+          console.warn('Text reading failed:', err);
         }
+      }
+
+      if (!textContent) {
+        textContent = `《${file.name.replace(/\.[^/.]+$/, '')}》\n\n文件格式: [${format}]  文件大小: ${(file.size / 1024 / 1024).toFixed(2)} MB\n上传者: ${currentUser?.username || 'fox'}\n\n【文件解析就绪】\n该电子书实体文件已安全上传至系统对象存储 (Cloudflare R2 / 本地 IndexedDB 实体持久库)。\n若为 PDF 格式，在线阅读模式将直接唤起高清 PDF 浏览器；若为 TXT/EPUB 格式，章节文字已解析呈现。您亦可随时点击“下载”获取原始二进制文件。`;
       }
 
       // Diverse stylish book covers based on format
@@ -235,15 +255,25 @@ export const BookshelfSection: React.FC = () => {
             </div>
           </div>
 
-          {/* Reader Scrollable Content */}
-          <div className="flex-1 overflow-y-auto p-6 sm:p-12 md:p-16 max-w-3xl mx-auto w-full">
-            <div
-              style={{ fontSize: `${fontSize}px`, lineHeight: 1.85 }}
-              className="font-serif-sc space-y-6 text-stone-800 dark:text-stone-200 select-text whitespace-pre-wrap leading-relaxed"
-            >
-              {readingBook.content ||
-                `${readingBook.title}\n\n该书籍文件格式为 [${readingBook.format}]，已就绪可供下载或云端解析。在手机端或电脑端均支持全屏沉浸式无干扰阅读体验。`}
-            </div>
+          {/* Reader Scrollable Content / PDF viewer */}
+          <div className="flex-1 overflow-y-auto p-4 sm:p-8 md:p-12 max-w-4xl mx-auto w-full h-full flex flex-col">
+            {readingBook.format === 'PDF' && readingBook.fileUrl && !readingBook.fileUrl.startsWith('data:') && !readingBook.fileUrl.startsWith('blob:') ? (
+              <div className="w-full h-full flex-1 min-h-[500px] flex flex-col">
+                <iframe
+                  src={`${readingBook.fileUrl}#toolbar=1`}
+                  title={readingBook.title}
+                  className="w-full flex-1 rounded-xl border border-stone-200 dark:border-stone-800 bg-white"
+                />
+              </div>
+            ) : (
+              <div
+                style={{ fontSize: `${fontSize}px`, lineHeight: 1.85 }}
+                className="font-serif-sc space-y-6 text-stone-800 dark:text-stone-200 select-text whitespace-pre-wrap leading-relaxed py-4"
+              >
+                {readingBook.content ||
+                  `${readingBook.title}\n\n该书籍文件格式为 [${readingBook.format}]，已就绪可供下载或云端解析。在手机端或电脑端均支持全屏沉浸式无干扰阅读体验。`}
+              </div>
+            )}
           </div>
 
           {/* Reader Bottom Bar */}
@@ -258,6 +288,19 @@ export const BookshelfSection: React.FC = () => {
 
   // Get layout grid class
   const getLayoutClass = () => {
+    if (deviceMode === 'mobile') {
+      switch (currentViewMode) {
+        case 'big':
+          return 'grid grid-cols-1 gap-4';
+        case 'medium':
+        case 'original':
+        default:
+          return 'grid grid-cols-2 gap-3';
+        case 'small':
+          return 'space-y-3';
+      }
+    }
+
     switch (currentViewMode) {
       case 'big':
         return 'grid grid-cols-1 sm:grid-cols-2 gap-6';

@@ -31,6 +31,7 @@ export const ShopSection: React.FC = () => {
     updatePaymentSettings,
     uploadFile,
     systemSettings,
+    deviceMode,
   } = useApp();
 
   const [activeShowcase, setActiveShowcase] = useState<string>('all');
@@ -41,9 +42,19 @@ export const ShopSection: React.FC = () => {
   const [chatInput, setChatInput] = useState('');
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
+  // Currency selection: CNY (¥), USD ($), EUR (€)
+  const [currency, setCurrency] = useState<'CNY' | 'USD' | 'EUR'>('CNY');
+  const currencyRate: Record<'CNY' | 'USD' | 'EUR', { symbol: string; rate: number }> = {
+    CNY: { symbol: '¥', rate: 1 },
+    USD: { symbol: '$', rate: 0.14 },
+    EUR: { symbol: '€', rate: 0.13 },
+  };
+
   // Checkout modal
   const [checkoutProduct, setCheckoutProduct] = useState<Product | null>(null);
   const [orderQuantity, setOrderQuantity] = useState(1);
+  const [couponCode, setCouponCode] = useState('');
+  const [discountPercent, setDiscountPercent] = useState(0);
   const [customerName, setCustomerName] = useState('');
   const [customerEmail, setCustomerEmail] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
@@ -165,6 +176,15 @@ export const ShopSection: React.FC = () => {
     }
   };
 
+  const handleApplyCoupon = () => {
+    if (couponCode.toUpperCase() === 'FOX3' || couponCode.toUpperCase() === 'WELCOME') {
+      setDiscountPercent(15);
+      alert('优惠券兑换成功！立享 85 折专享特惠。');
+    } else {
+      alert('无效或已过期的优惠码！');
+    }
+  };
+
   // Submit checkout order
   const handleSubmitOrder = (e: React.FormEvent) => {
     e.preventDefault();
@@ -175,13 +195,16 @@ export const ShopSection: React.FC = () => {
       return;
     }
 
+    const baseTotal = checkoutProduct.price * orderQuantity;
+    const finalTotal = discountPercent > 0 ? baseTotal * ((100 - discountPercent) / 100) : baseTotal;
+
     const newOrder: Order = {
       id: `ord-${Date.now()}`,
       productId: checkoutProduct.id,
       productName: checkoutProduct.name,
       productImage: checkoutProduct.images[0],
       quantity: orderQuantity,
-      totalPrice: checkoutProduct.price * orderQuantity,
+      totalPrice: finalTotal,
       customerName: customerName || '客户',
       customerEmail,
       customerPhone,
@@ -191,11 +214,22 @@ export const ShopSection: React.FC = () => {
       createdAt: Date.now(),
     };
 
+    // Deduct stock if valid
+    setProducts(prev =>
+      prev.map(p =>
+        p.id === checkoutProduct.id
+          ? { ...p, stock: Math.max(0, (p.stock || 10) - orderQuantity) }
+          : p
+      )
+    );
+
     setOrders(prev => [newOrder, ...prev]);
     setOrderSuccess(`订单创建成功！编号: ${newOrder.id}。我们已向 ${customerEmail} 发送确认函。`);
     setTimeout(() => {
       setCheckoutProduct(null);
       setOrderSuccess(null);
+      setDiscountPercent(0);
+      setCouponCode('');
     }, 2000);
   };
 
@@ -768,7 +802,7 @@ export const ShopSection: React.FC = () => {
           </div>
 
           {/* Products Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className={`grid gap-6 ${deviceMode === 'mobile' ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3'}`}>
             {filteredProducts.map(product => (
               <div
                 key={product.id}
@@ -830,7 +864,7 @@ export const ShopSection: React.FC = () => {
 
                 <div className="px-5 pb-5 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
                   <div>
-                    <span className="text-xs text-slate-400">现货价</span>
+                    <span className="text-xs text-slate-400">库存 {product.stock || 50} 件</span>
                     <div className="text-xl font-black text-sky-500 font-mono">
                       ¥{product.price.toFixed(2)}
                     </div>
@@ -840,6 +874,8 @@ export const ShopSection: React.FC = () => {
                     onClick={() => {
                       setCheckoutProduct(product);
                       setOrderQuantity(1);
+                      setDiscountPercent(0);
+                      setCouponCode('');
                     }}
                     className="flex items-center gap-1.5 px-4 py-2 bg-sky-500 hover:bg-sky-600 text-white text-xs font-semibold rounded-xl shadow-md transition"
                   >
@@ -980,15 +1016,43 @@ export const ShopSection: React.FC = () => {
                     <span className="font-bold text-sm">{orderQuantity}</span>
                     <button
                       type="button"
-                      onClick={() => setOrderQuantity(orderQuantity + 1)}
+                      onClick={() => setOrderQuantity(Math.min(checkoutProduct.stock || 50, orderQuantity + 1))}
                       className="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 rounded-lg text-sm font-bold"
                     >
                       +
                     </button>
                     <span className="text-xs text-slate-400 ml-auto">
-                      总额: <b className="text-sky-500 text-base">¥{(checkoutProduct.price * orderQuantity).toFixed(2)}</b>
+                      小计: <b className="text-sky-500 text-base">¥{(checkoutProduct.price * orderQuantity * ((100 - discountPercent) / 100)).toFixed(2)}</b>
                     </span>
                   </div>
+                </div>
+
+                {/* Coupon Code Section */}
+                <div className="pt-2">
+                  <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                    优惠券代码 (输入 FOX3 享 85 折)
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={couponCode}
+                      onChange={e => setCouponCode(e.target.value)}
+                      placeholder="优惠码 (如 FOX3)"
+                      className="flex-1 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-xs font-mono uppercase"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleApplyCoupon}
+                      className="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-xs rounded-xl font-medium"
+                    >
+                      应用
+                    </button>
+                  </div>
+                  {discountPercent > 0 && (
+                    <span className="text-[11px] text-emerald-500 font-medium block mt-1">
+                      已享受 {discountPercent}% 折扣减免
+                    </span>
+                  )}
                 </div>
 
                 <div className="space-y-3 pt-2 border-t border-slate-100 dark:border-slate-800">

@@ -29,6 +29,7 @@ export const MediaSection: React.FC = () => {
     viewModes,
     setViewMode,
     systemSettings,
+    deviceMode,
   } = useApp();
 
   const [currentPlaying, setCurrentPlaying] = useState<MediaItem | null>(null);
@@ -129,6 +130,10 @@ export const MediaSection: React.FC = () => {
 
   // Get layout class
   const getLayoutClass = () => {
+    if (deviceMode === 'mobile') {
+      return 'grid grid-cols-1 gap-4';
+    }
+
     switch (currentViewMode) {
       case 'big':
         return 'grid grid-cols-1 gap-6';

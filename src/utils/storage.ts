@@ -88,6 +88,7 @@ export const DEFAULT_SETTINGS: SystemSettings = {
   heroTitle: '探索数字世界与全栈极简之美',
   heroSubtitle: '融合 Cloudflare D1/R2/KV 与 坚果云 WebDAV 容灾备份的下一代多终端响应式博客平台',
   transparentCards: false,
+  bottomButtonsEnabled: true,
   hideNonBlogForGuests: false,
   emailRegistrationOnly: true,
   allowRegistration: true,
@@ -463,11 +464,19 @@ export const DEFAULT_EMAIL_SETTINGS: EmailSettings = {
   autoReplyEnabled: true,
   rateLimitEnabled: true,
   maxDailyEmails: 3000,
+  inboundMethod: 'cf_routing',
   cfEmailRouting: {
     enabled: true,
     routingAddress: 'contact@whitefox.blog',
     forwardTo: 'admin@whitefox.blog',
     webhookUrl: '/api/mail/webhook',
+  },
+  imapConfig: {
+    host: 'imap.whitefox.blog',
+    port: 993,
+    user: 'service@whitefox.blog',
+    pass: '********',
+    tls: true,
   }
 };
 

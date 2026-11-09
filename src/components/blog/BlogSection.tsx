@@ -25,7 +25,7 @@ import {
 } from 'lucide-react';
 
 export const BlogSection: React.FC = () => {
-  const { posts, setPosts, currentUser, uploadFile, viewModes, setViewMode, systemSettings } = useApp();
+  const { posts, setPosts, currentUser, uploadFile, viewModes, setViewMode, systemSettings, deviceMode } = useApp();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [activePost, setActivePost] = useState<Post | null>(null);
@@ -295,8 +295,21 @@ export const BlogSection: React.FC = () => {
     );
   }
 
-  // Determine grid container class based on view mode
+  // Determine grid container class based on view mode and deviceMode
   const getLayoutClass = () => {
+    if (deviceMode === 'mobile') {
+      switch (currentViewMode) {
+        case 'small':
+          return 'space-y-3';
+        case 'big':
+          return 'grid grid-cols-1 gap-6';
+        case 'medium':
+        case 'original':
+        default:
+          return 'grid grid-cols-1 gap-5';
+      }
+    }
+
     switch (currentViewMode) {
       case 'big':
         return 'grid grid-cols-1 gap-8';

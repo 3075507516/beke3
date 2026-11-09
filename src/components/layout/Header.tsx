@@ -54,8 +54,6 @@ export const Header: React.FC<HeaderProps> = ({
     locale,
     setLocale,
     t,
-    themeMode,
-    setThemeMode,
     channelConnected,
   } = useApp();
 
@@ -108,26 +106,14 @@ export const Header: React.FC<HeaderProps> = ({
     setLocale(list[nextIdx]);
   };
 
-  const toggleThemeMode = () => {
-    setThemeMode(themeMode === 'retro' ? 'modern' : 'retro');
-  };
-
-  const isRetro = themeMode === 'retro';
-
   return (
-    <header
-      className={`sticky top-0 z-40 w-full transition-all duration-300 ${
-        isRetro
-          ? 'bg-[#e8dec8] border-b-2 border-[#b09f80] shadow-[0_4px_10px_rgba(0,0,0,0.15)] text-[#2d241e]'
-          : 'backdrop-blur-md bg-white/85 dark:bg-slate-900/85 border-b border-slate-200/80 dark:border-slate-800'
-      }`}
-    >
+    <header className="sticky top-0 z-40 w-full transition-all duration-300 backdrop-blur-md bg-white/85 dark:bg-slate-900/85 border-b border-slate-200/80 dark:border-slate-800">
       {/* Top Banner with Site Identity & Collapsible trigger */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           {/* Brand */}
           <div className="flex items-center gap-3 cursor-pointer" onClick={() => setCurrentTab('blog')}>
-            <div className={`w-10 h-10 rounded-xl overflow-hidden border ${isRetro ? 'border-[#8f7e62] shadow-[inset_0_1px_3px_rgba(0,0,0,0.3)]' : 'border-sky-500/20 shadow-sm'}`}>
+            <div className="w-10 h-10 rounded-xl overflow-hidden border border-sky-500/20 shadow-sm">
               <SafeImage
                 src={systemSettings.avatarUrl || '/images/hero-default.jpg'}
                 alt={systemSettings.siteName}
@@ -135,11 +121,11 @@ export const Header: React.FC<HeaderProps> = ({
               />
             </div>
             <div>
-              <span className={`text-lg font-bold ${isRetro ? 'text-[#3c2f1f] drop-shadow-sm font-serif' : 'bg-gradient-to-r from-sky-500 via-indigo-500 to-rose-500 bg-clip-text text-transparent'}`}>
+              <span className="text-lg font-bold bg-gradient-to-r from-sky-500 via-indigo-500 to-rose-500 bg-clip-text text-transparent">
                 {systemSettings.siteName}
               </span>
-              <span className={`block text-[10px] font-mono tracking-wider uppercase ${isRetro ? 'text-[#7d6b52]' : 'text-slate-400'}`}>
-                Cloudflare Native • fox3 {isRetro && '(Retro Classic)'}
+              <span className="block text-[10px] font-mono tracking-wider uppercase text-slate-400">
+                Cloudflare Native • fox3
               </span>
             </div>
           </div>
@@ -156,12 +142,8 @@ export const Header: React.FC<HeaderProps> = ({
                     onClick={() => setCurrentTab(item.id)}
                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium transition-all ${
                       isActive
-                        ? isRetro
-                          ? 'bg-gradient-to-b from-[#df9344] to-[#b35e18] text-white font-bold shadow-[inset_0_1px_2px_rgba(255,255,255,0.4),0_2px_4px_rgba(0,0,0,0.25)] border border-[#8a420b]'
-                          : 'bg-sky-500 text-white font-semibold shadow-sm'
-                        : isRetro
-                          ? 'text-[#423326] hover:bg-[#d8cbb2] border border-transparent'
-                          : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                        ? 'bg-sky-500 text-white font-semibold shadow-sm'
+                        : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
                     }`}
                   >
                     <Icon className="w-3.5 h-3.5" />
@@ -179,11 +161,7 @@ export const Header: React.FC<HeaderProps> = ({
               onClick={() => triggerManualSync()}
               disabled={syncState.isSyncing}
               title={`${syncState.message} (${t('common.refresh')})`}
-              className={`flex items-center gap-1 px-2 py-1 text-[11px] rounded-lg border transition ${
-                isRetro
-                  ? 'border-[#9e8d72] bg-[#f4ece0] text-[#3d2e20] shadow-[0_1px_2px_rgba(0,0,0,0.15)] active:translate-y-0.5'
-                  : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
-              }`}
+              className="flex items-center gap-1 px-2 py-1 text-[11px] rounded-lg border transition border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
             >
               <span
                 className={`w-2 h-2 rounded-full ${
@@ -204,29 +182,12 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               onClick={cycleLocale}
               title={`切换语言 (当前: ${locale})`}
-              className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold border transition ${
-                isRetro
-                  ? 'border-[#9e8d72] bg-[#f4ece0] text-[#3d2e20] shadow-[0_1px_2px_rgba(0,0,0,0.15)]'
-                  : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
-              }`}
+              className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold border transition border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
             >
               <Globe className="w-3.5 h-3.5" />
               <span className="text-[10px] uppercase font-mono">
                 {locale === 'zh-CN' ? '简' : locale === 'zh-TW' ? '繁' : 'EN'}
               </span>
-            </button>
-
-            {/* Global Theme Mode (Modern vs Retro Classic) */}
-            <button
-              onClick={toggleThemeMode}
-              title={`外观风格: ${isRetro ? t('theme.retro') : t('theme.modern')}`}
-              className={`p-2 rounded-lg transition ${
-                isRetro
-                  ? 'bg-amber-200/80 text-amber-900 border border-amber-400 shadow-[inset_0_1px_2px_rgba(255,255,255,0.6)]'
-                  : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800'
-              }`}
-            >
-              <Palette className="w-4 h-4" />
             </button>
 
             {/* Device Mode Switcher (Independent phone view vs responsive) */}
@@ -236,9 +197,7 @@ export const Header: React.FC<HeaderProps> = ({
               className={`p-2 rounded-lg transition ${
                 deviceMode === 'mobile'
                   ? 'bg-sky-500 text-white shadow-sm'
-                  : isRetro
-                    ? 'text-[#423326] hover:bg-[#d8cbb2]'
-                    : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800'
+                  : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800'
               }`}
             >
               {deviceMode === 'mobile' ? (
@@ -248,32 +207,28 @@ export const Header: React.FC<HeaderProps> = ({
               )}
             </button>
 
-            {/* Dark Mode Toggle (Disabled or stylized in retro) */}
-            {!isRetro && (
-              <button
-                onClick={() => setDarkMode(!darkMode)}
-                title="切换深色/浅色模式"
-                className="p-2 rounded-lg text-slate-500 hover:text-slate-800 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
-              >
-                {darkMode ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4" />}
-              </button>
-            )}
+            {/* Dark Mode Toggle */}
+            <button
+              onClick={() => setDarkMode(!darkMode)}
+              title="切换深色/浅色模式"
+              className="p-2 rounded-lg text-slate-500 hover:text-slate-800 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+            >
+              {darkMode ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4" />}
+            </button>
 
             {/* Collapse / Expand Header Toggle */}
             <button
               onClick={() => setIsCollapsed(!isCollapsed)}
               title={isCollapsed ? t('header.expand') : t('header.collapse')}
-              className={`p-2 rounded-lg transition ${
-                isRetro ? 'text-[#423326] hover:bg-[#d8cbb2]' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800'
-              }`}
+              className="p-2 rounded-lg transition text-slate-500 hover:text-slate-800 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800"
             >
               {isCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
             </button>
 
             {/* User Auth Info / Login */}
             {currentUser ? (
-              <div className={`flex items-center gap-1.5 pl-1.5 border-l ${isRetro ? 'border-[#b09f80]' : 'border-slate-200 dark:border-slate-800'}`}>
-                <span className={`hidden sm:inline-block text-xs font-medium ${isRetro ? 'text-[#3d2e20]' : 'text-slate-700 dark:text-slate-200'}`}>
+              <div className="flex items-center gap-1.5 pl-1.5 border-l border-slate-200 dark:border-slate-800">
+                <span className="hidden sm:inline-block text-xs font-medium text-slate-700 dark:text-slate-200">
                   {currentUser.username} {isAdmin && <span className="text-[10px] text-sky-500 bg-sky-50 dark:bg-sky-950 px-1.5 py-0.5 rounded ml-1 font-semibold">{t('header.adminBadge')}</span>}
                 </span>
                 <button
@@ -287,11 +242,7 @@ export const Header: React.FC<HeaderProps> = ({
             ) : (
               <button
                 onClick={onOpenAuth}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium shadow-sm transition ${
-                  isRetro
-                    ? 'bg-gradient-to-b from-[#df9344] to-[#b35e18] text-white border border-[#8a420b] shadow-[0_2px_4px_rgba(0,0,0,0.2)]'
-                    : 'bg-sky-500 hover:bg-sky-600 text-white'
-                }`}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium shadow-sm transition bg-sky-500 hover:bg-sky-600 text-white"
               >
                 <LogIn className="w-3.5 h-3.5" />
                 <span>{t('header.login')}</span>
@@ -310,11 +261,9 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Quick Section Selection Sub-Bar right under Header */}
         {!isCollapsed && (
-          <div className={`py-2 border-t flex items-center justify-between gap-2 overflow-x-auto no-scrollbar ${
-            isRetro ? 'border-[#b09f80]/60' : 'border-slate-100 dark:border-slate-800/80'
-          }`}>
+          <div className="py-2 border-t flex items-center justify-between gap-2 overflow-x-auto no-scrollbar border-slate-100 dark:border-slate-800/80">
             <div className="flex items-center gap-1.5 shrink-0">
-              <span className={`text-[10px] uppercase font-bold tracking-wider mr-1 ${isRetro ? 'text-[#7d6b52]' : 'text-slate-400 dark:text-slate-500'}`}>
+              <span className="text-[10px] uppercase font-bold tracking-wider mr-1 text-slate-400 dark:text-slate-500">
                 {t('header.quickJump')}:
               </span>
               {filteredNavItems.map(item => {
@@ -325,12 +274,8 @@ export const Header: React.FC<HeaderProps> = ({
                     onClick={() => setCurrentTab(item.id)}
                     className={`px-2.5 py-1 rounded-lg text-xs font-medium whitespace-nowrap transition-all ${
                       isActive
-                        ? isRetro
-                          ? 'bg-[#b35e18] text-white shadow-sm font-semibold'
-                          : 'bg-sky-500 text-white shadow-sm font-semibold'
-                        : isRetro
-                          ? 'bg-[#f4ece0] text-[#3d2e20] hover:bg-[#e4d8c6] border border-[#d2c3aa]'
-                          : 'bg-slate-100/80 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                        ? 'bg-sky-500 text-white shadow-sm font-semibold'
+                        : 'bg-slate-100/80 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
                     }`}
                   >
                     {item.label}
@@ -340,7 +285,7 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
 
             <div className="hidden lg:flex items-center gap-2 shrink-0 text-[11px] text-slate-400">
-              <span className={isRetro ? 'text-[#7d6b52]' : ''}>{t('header.channelStatus')}:</span>
+              <span>{t('header.channelStatus')}:</span>
               <span className={`inline-flex items-center gap-1 font-medium ${
                 channelConnected ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-500'
               }`}>
@@ -372,11 +317,7 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Mobile Drawer Navigation */}
       {mobileMenuOpen && (
-        <div className={`md:hidden border-t px-4 py-3 space-y-1 ${
-          isRetro
-            ? 'border-[#b09f80] bg-[#e8dec8]'
-            : 'border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md'
-        }`}>
+        <div className="md:hidden border-t px-4 py-3 space-y-1 border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md">
           {filteredNavItems.map(item => {
             const Icon = item.icon;
             const isActive = currentTab === item.id;
@@ -389,12 +330,8 @@ export const Header: React.FC<HeaderProps> = ({
                 }}
                 className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-sm font-medium transition ${
                   isActive
-                    ? isRetro
-                      ? 'bg-[#b35e18] text-white font-semibold'
-                      : 'bg-sky-500 text-white font-semibold'
-                    : isRetro
-                      ? 'text-[#3d2e20] hover:bg-[#d8cbb2]'
-                      : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+                    ? 'bg-sky-500 text-white font-semibold'
+                    : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
                 }`}
               >
                 <div className="flex items-center gap-2.5">

@@ -420,12 +420,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const getRes = await fetch('/api/sync/global_state', { method: 'GET' }).catch(() => null);
       if (getRes && getRes.ok) {
         const data = await getRes.json();
-        if (data && data.data && data.data.posts) {
-          // If remote has newer posts
-          if (data.data.updatedAt && data.data.updatedAt > (syncPayload.updatedAt - 10000)) {
-            if (data.data.posts.length > 0) setPosts(data.data.posts);
-            if (data.data.books && data.data.books.length > 0) setBooks(data.data.books);
-            if (data.data.photos && data.data.photos.length > 0) setPhotos(data.data.photos);
+        if (data && data.data) {
+          const remote = data.data;
+          // If remote has newer posts or media
+          if (remote.updatedAt && remote.updatedAt > (syncPayload.updatedAt - 10000)) {
+            if (Array.isArray(remote.posts) && remote.posts.length > 0) setPosts(remote.posts);
+            if (Array.isArray(remote.books) && remote.books.length > 0) setBooks(remote.books);
+            if (Array.isArray(remote.photos) && remote.photos.length > 0) setPhotos(remote.photos);
+            if (Array.isArray(remote.media) && remote.media.length > 0) setMedia(remote.media);
+            if (Array.isArray(remote.products) && remote.products.length > 0) setProducts(remote.products);
           }
         }
       }
@@ -463,6 +466,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             }
             if (Array.isArray(remote.photos) && remote.photos.length > 0) {
               setPhotos(remote.photos);
+            }
+            if (Array.isArray(remote.media) && remote.media.length > 0) {
+              setMedia(remote.media);
+            }
+            if (Array.isArray(remote.products) && remote.products.length > 0) {
+              setProducts(remote.products);
             }
           }
         }

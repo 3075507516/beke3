@@ -14,6 +14,8 @@ import {
   Grid3X3,
   List,
   LayoutGrid,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import JSZip from 'jszip';
 
@@ -29,6 +31,7 @@ export const GallerySection: React.FC = () => {
     updateTransferPercent,
     finishTransfer,
     systemSettings,
+    deviceMode,
     t,
   } = useApp();
 
@@ -36,6 +39,22 @@ export const GallerySection: React.FC = () => {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const currentViewMode: ViewMode = viewModes['gallery'] || 'original';
+
+  const currentPhotoIndex = selectedPhoto ? photos.findIndex(p => p.id === selectedPhoto.id) : -1;
+
+  const handlePrevPhoto = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (photos.length === 0 || currentPhotoIndex === -1) return;
+    const prevIdx = (currentPhotoIndex - 1 + photos.length) % photos.length;
+    setSelectedPhoto(photos[prevIdx]);
+  };
+
+  const handleNextPhoto = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (photos.length === 0 || currentPhotoIndex === -1) return;
+    const nextIdx = (currentPhotoIndex + 1) % photos.length;
+    setSelectedPhoto(photos[nextIdx]);
+  };
 
   const handleUploadPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -127,6 +146,19 @@ export const GallerySection: React.FC = () => {
 
   // Layout classes
   const getLayoutClass = () => {
+    if (deviceMode === 'mobile') {
+      switch (currentViewMode) {
+        case 'big':
+          return 'grid grid-cols-1 gap-4';
+        case 'medium':
+        case 'original':
+        default:
+          return 'grid grid-cols-2 gap-3';
+        case 'small':
+          return 'space-y-3';
+      }
+    }
+
     switch (currentViewMode) {
       case 'big':
         return 'grid grid-cols-1 sm:grid-cols-2 gap-6';
@@ -377,13 +409,17 @@ export const GallerySection: React.FC = () => {
         })}
       </div>
 
-      {/* Lightbox Modal */}
+      {/* Lightbox Modal with Next / Prev */}
       {selectedPhoto && (
         <div
           onClick={() => setSelectedPhoto(null)}
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in cursor-zoom-out"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-md animate-in fade-in select-none"
         >
-          <div className="absolute top-6 right-6 flex items-center gap-2">
+          {/* Top Controls */}
+          <div className="absolute top-6 right-6 flex items-center gap-3 z-50">
+            <span className="text-xs text-white/70 font-mono">
+              {currentPhotoIndex + 1} / {photos.length}
+            </span>
             <button
               onClick={e => handleDownloadSingle(selectedPhoto, e)}
               className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition"
@@ -399,22 +435,45 @@ export const GallerySection: React.FC = () => {
             </button>
           </div>
 
+          {/* Left / Prev Arrow */}
+          {photos.length > 1 && (
+            <button
+              onClick={handlePrevPhoto}
+              className="absolute left-4 sm:left-8 top-1/2 -translate-y-1/2 z-50 p-3 rounded-full bg-black/50 hover:bg-black/80 text-white border border-white/20 backdrop-blur-md transition hover:scale-110"
+              title="上一张 (Left Arrow)"
+            >
+              <ChevronLeft className="w-6 h-6" />
+            </button>
+          )}
+
+          {/* Center Image Container */}
           <div
             onClick={e => e.stopPropagation()}
-            className="max-w-4xl max-h-[85vh] overflow-hidden rounded-2xl cursor-default"
+            className="max-w-5xl max-h-[85vh] overflow-hidden rounded-2xl flex flex-col items-center justify-center cursor-default"
           >
             <SafeImage
               src={selectedPhoto.url}
               alt={selectedPhoto.title}
-              className="max-w-full max-h-[80vh] object-contain rounded-xl"
+              className="max-w-full max-h-[75vh] object-contain rounded-xl shadow-2xl"
             />
-            <div className="mt-3 text-center text-white">
+            <div className="mt-4 text-center text-white space-y-1">
               <h3 className="text-base font-bold font-serif-sc">{selectedPhoto.title}</h3>
-              {selectedPhoto.description && (
-                <p className="text-xs text-white/70 mt-1">{selectedPhoto.description}</p>
-              )}
+              <p className="text-xs text-white/70">
+                {selectedPhoto.category} • {new Date(selectedPhoto.createdAt).toLocaleDateString()}
+              </p>
             </div>
           </div>
+
+          {/* Right / Next Arrow */}
+          {photos.length > 1 && (
+            <button
+              onClick={handleNextPhoto}
+              className="absolute right-4 sm:right-8 top-1/2 -translate-y-1/2 z-50 p-3 rounded-full bg-black/50 hover:bg-black/80 text-white border border-white/20 backdrop-blur-md transition hover:scale-110"
+              title="下一张 (Right Arrow)"
+            >
+              <ChevronRight className="w-6 h-6" />
+            </button>
+          )}
         </div>
       )}
     </div>

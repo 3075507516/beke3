@@ -289,6 +289,25 @@ export const SettingsSection: React.FC = () => {
                   className="w-5 h-5 text-sky-500 rounded cursor-pointer"
                 />
               </div>
+
+              {/* Bottom Buttons Master Switch */}
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 flex items-center justify-between gap-4">
+                <div>
+                  <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+                    <Layers className="w-3.5 h-3.5 text-sky-500" />
+                    全站悬浮底部功能按键总开关 (置顶/快捷工具)
+                  </h4>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                    控制页面右下角悬浮的一键返回顶部、快速导航等按键的全局显示或隐藏（默认开启）。
+                  </p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={systemSettings.bottomButtonsEnabled !== false}
+                  onChange={e => updateSystemSettings({ bottomButtonsEnabled: e.target.checked })}
+                  className="w-5 h-5 text-sky-500 rounded cursor-pointer"
+                />
+              </div>
             </div>
 
             {/* 4. 自定义头像 */}
@@ -572,7 +591,7 @@ export const SettingsSection: React.FC = () => {
             {/* Visual Connection Status Indicators (Storage, Database, KV) */}
             <div>
               <h4 className="text-xs font-semibold text-slate-500 mb-2">服务通道实时连通状态指示灯</h4>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className={`grid gap-3 ${deviceMode === 'mobile' ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-3'}`}>
                 {/* Storage Bucket Light */}
                 <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 flex items-center justify-between">
                   <div>
@@ -612,7 +631,7 @@ export const SettingsSection: React.FC = () => {
             </div>
 
             {/* Capacity Metres */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className={`grid gap-4 ${deviceMode === 'mobile' ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2'}`}>
               <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700">
                 <span className="text-xs text-slate-400 block mb-1">系统已用容量 (零值起点计费计量)</span>
                 <span className="text-2xl font-bold font-mono text-sky-500">

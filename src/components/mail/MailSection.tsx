@@ -193,59 +193,79 @@ export const MailSection: React.FC = () => {
               </h4>
 
               <div>
-                <label className="block text-xs text-slate-500 mb-1">服务提供商</label>
+                <label className="block text-xs text-slate-500 mb-1">发信服务提供商 (多通道支持)</label>
                 <select
                   value={emailSettings.provider}
                   onChange={e => updateEmailSettings({ provider: e.target.value as any })}
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100"
                 >
-                  <option value="resend">Resend (支持保存 API Key)</option>
-                  <option value="sendgrid">SendGrid API</option>
-                  <option value="smtp">原生企业 SMTP 服务器</option>
+                  <option value="resend">Resend (官方推荐 / 极速交付)</option>
+                  <option value="sendgrid">Twilio SendGrid API</option>
+                  <option value="mailgun">Mailgun API</option>
+                  <option value="ses">Amazon SES (简单邮件服务)</option>
+                  <option value="brevo">Brevo (原 Sendinblue)</option>
+                  <option value="postmark">Postmark 事务邮件</option>
+                  <option value="smtp">企业专用 SMTP 服务器 (TLS/SSL)</option>
+                  <option value="custom">通用自定义 Webhook API</option>
                 </select>
               </div>
 
               <div>
-                <label className="block text-xs text-slate-500 mb-1">API Key 密钥 (已安全加密存储)</label>
+                <label className="block text-xs text-slate-500 mb-1">API Key / Token 密钥 (安全加密持久化)</label>
                 <input
                   type="password"
                   value={emailSettings.apiKey}
                   onChange={e => updateEmailSettings({ apiKey: e.target.value })}
-                  placeholder="re_xxxxxxxxxxxxxx"
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100"
+                  placeholder="re_xxxxxxxxxxxxxx 或 key-xxxxxxxx"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 font-mono"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block text-xs text-slate-500 mb-1">SMTP 主机</label>
+                  <label className="block text-xs text-slate-500 mb-1">发件服务地址 (SMTP/Endpoint)</label>
                   <input
                     type="text"
                     value={emailSettings.smtpHost}
                     onChange={e => updateEmailSettings({ smtpHost: e.target.value })}
+                    placeholder="smtp.domain.com 或 https://api..."
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-500 mb-1">发件地址</label>
+                  <label className="block text-xs text-slate-500 mb-1">发信账号 / 发件人</label>
                   <input
                     type="text"
                     value={emailSettings.senderEmail}
                     onChange={e => updateEmailSettings({ senderEmail: e.target.value })}
+                    placeholder="service@whitefox.blog"
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100"
                   />
                 </div>
               </div>
             </div>
 
-            {/* Cloudflare Email Routing & Rate Limits */}
+            {/* Cloudflare Email Routing & Inbound Routing */}
             <div className="space-y-4">
               <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
-                Cloudflare Email Routing 预留与风控限制
+                收信通道方式 & Cloudflare Email Routing 预留
               </h4>
 
               <div>
-                <label className="block text-xs text-slate-500 mb-1">CF 路由接收地址 (预留显示)</label>
+                <label className="block text-xs text-slate-500 mb-1">收信处理方式</label>
+                <select
+                  value={emailSettings.inboundMethod || 'cf_routing'}
+                  onChange={e => updateEmailSettings({ inboundMethod: e.target.value as any })}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100"
+                >
+                  <option value="cf_routing">Cloudflare Email Routing (云端边缘路由)</option>
+                  <option value="webhook">Webhook 自动化接收回调 (HTTP POST)</option>
+                  <option value="imap_pop3">IMAP / POP3 定期轮询收取</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs text-slate-500 mb-1">Cloudflare 路由公共收件地址 (显示与预留)</label>
                 <input
                   type="text"
                   value={emailSettings.cfEmailRouting.routingAddress}
@@ -262,7 +282,7 @@ export const MailSection: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-xs text-slate-500 mb-1">自动转发至管理员邮箱</label>
+                <label className="block text-xs text-slate-500 mb-1">管理员专属目标接收邮箱</label>
                 <input
                   type="text"
                   value={emailSettings.cfEmailRouting.forwardTo}
@@ -278,31 +298,37 @@ export const MailSection: React.FC = () => {
                 />
               </div>
 
-              {/* Switches */}
-              <div className="space-y-2 pt-2">
-                <label className="flex items-center justify-between p-2 rounded-xl bg-slate-50 dark:bg-slate-800 cursor-pointer">
-                  <span className="text-xs text-slate-700 dark:text-slate-200 font-medium">
-                    收发限制开关 (防止恶意爆破发信)
-                  </span>
+              {/* Switches & Limits */}
+              <div className="space-y-2 pt-1">
+                <div className="flex items-center justify-between p-2 rounded-xl bg-slate-50 dark:bg-slate-800">
+                  <div>
+                    <span className="text-xs text-slate-700 dark:text-slate-200 font-medium block">
+                      发信配额与风控限制开关
+                    </span>
+                    <span className="text-[10px] text-slate-400">单日上限: {emailSettings.maxDailyEmails || 3000} 封 (防恶意刷信)</span>
+                  </div>
                   <input
                     type="checkbox"
                     checked={emailSettings.rateLimitEnabled}
                     onChange={e => updateEmailSettings({ rateLimitEnabled: e.target.checked })}
                     className="w-4 h-4 text-rose-500 rounded focus:ring-rose-500"
                   />
-                </label>
+                </div>
 
-                <label className="flex items-center justify-between p-2 rounded-xl bg-slate-50 dark:bg-slate-800 cursor-pointer">
-                  <span className="text-xs text-slate-700 dark:text-slate-200 font-medium">
-                    新注册验证码自动回复
-                  </span>
+                <div className="flex items-center justify-between p-2 rounded-xl bg-slate-50 dark:bg-slate-800">
+                  <div>
+                    <span className="text-xs text-slate-700 dark:text-slate-200 font-medium block">
+                      注册验证码自动应答回复
+                    </span>
+                    <span className="text-[10px] text-slate-400">收到新注册邮件时自动生成6位验证码并秒级回信</span>
+                  </div>
                   <input
                     type="checkbox"
                     checked={emailSettings.autoReplyEnabled}
                     onChange={e => updateEmailSettings({ autoReplyEnabled: e.target.checked })}
                     className="w-4 h-4 text-rose-500 rounded focus:ring-rose-500"
                   />
-                </label>
+                </div>
               </div>
             </div>
           </div>

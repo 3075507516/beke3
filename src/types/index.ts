@@ -152,7 +152,7 @@ export interface WebDavConfig {
 
 export interface EmailSettings {
   enabled: boolean;
-  provider: 'resend' | 'sendgrid' | 'smtp' | 'custom';
+  provider: 'resend' | 'sendgrid' | 'mailgun' | 'ses' | 'brevo' | 'postmark' | 'smtp' | 'custom';
   apiKey: string;
   apiEndpoint: string;
   smtpHost: string;
@@ -163,11 +163,19 @@ export interface EmailSettings {
   autoReplyEnabled: boolean;
   rateLimitEnabled: boolean;
   maxDailyEmails: number;
+  inboundMethod: 'cf_routing' | 'webhook' | 'imap_pop3';
   cfEmailRouting: {
     enabled: boolean;
     routingAddress: string;
     forwardTo: string;
     webhookUrl: string;
+  };
+  imapConfig?: {
+    host: string;
+    port: number;
+    user: string;
+    pass: string;
+    tls: boolean;
   };
 }
 
@@ -200,6 +208,7 @@ export interface SystemSettings {
   heroTitle?: string;
   heroSubtitle?: string;
   transparentCards: boolean; // Semi-transparent glass card showing site background
+  bottomButtonsEnabled: boolean; // Global master switch for floating bottom buttons (back-to-top, shortcuts)
   hideNonBlogForGuests: boolean;
   emailRegistrationOnly: boolean;
   allowRegistration: boolean;
