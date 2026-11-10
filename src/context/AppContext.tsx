@@ -193,11 +193,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Probe backend environment variable for admin config on startup
   useEffect(() => {
     fetch('/api/admin/config')
-      .then(r => r.ok && r.json())
+      .then(r => (r.ok ? r.json() : null))
       .then(data => {
         if (data && data.success && data.adminUsername) {
-          setAdminUsernameState(data.adminUsername);
-          saveLocalStorage(STORAGE_KEYS.ADMIN_USERNAME, data.adminUsername);
+          const fetchedAdmin = data.adminUsername.trim().toLowerCase();
+          setAdminUsernameState(fetchedAdmin);
+          saveLocalStorage(STORAGE_KEYS.ADMIN_USERNAME, fetchedAdmin);
+
+          // Update current user username if currently logged in as admin
+          setCurrentUser(prev => {
+            if (prev && prev.role === 'admin' && prev.username !== fetchedAdmin) {
+              const updated = { ...prev, username: fetchedAdmin };
+              saveLocalStorage(STORAGE_KEYS.CURRENT_USER, updated);
+              return updated;
+            }
+            return prev;
+          });
         }
       })
       .catch(() => {});

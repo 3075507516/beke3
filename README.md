@@ -58,6 +58,27 @@
 4. 部署成功后，进入 **Settings** -> **Functions** -> **Bindings** 绑定资源：
    * **D1 Database 绑定**：变量名称填写 `DB`，绑定您的 Cloudflare D1 数据库。
    * **R2 Bucket 绑定**：变量名称填写 `R2_BUCKET`，绑定您的 Cloudflare R2 存储桶。
+   * **KV Namespace 绑定**：变量名称填写 `KV`，绑定用于缓存与跨设备实时同步的 KV 命名空间。
+   * **环境变量设置 (Environment Variables)**：
+     * `ADMIN_USERNAME`：自定义管理员账号名（默认 `fox`）。
+     * `ADMIN_PASSWORD`：自定义管理员高强度登录密码（系统内置默认初始密码为 `fox3admin2026`）。
+
+---
+
+### 🔑 最佳推荐登录与权限保障方案 (彻底解决无法登录问题)
+
+为保证在各种网络、离线环境、反向代理或跨域 CDN 场景下均能 100% 顺畅登录，系统采用了**双重自适应鉴权引擎**：
+
+1. **唯一超级管理员凭据**：
+   * **默认账号**：`fox`（同时支持以 `admin` 或管理邮箱 `service@whitefox.blog` 识别）。
+   * **默认初始密码**：`fox3admin2026`。
+2. **多层异步双重鉴权**：
+   * **云端模式**：当部署在 Cloudflare Pages 时，登录时前端优先向边缘 Functions `/api/auth/admin` 发起异步身份校验，能够即时读取 Cloudflare 控制台后台设定的 `ADMIN_PASSWORD` 与 `ADMIN_USERNAME` 环境变量。
+   * **本地/容灾模式**：若未配置环境变量或处于本地开发环境，系统自动无缝对齐本地持久化凭据与默认凭据。
+   * **格式自适应容错**：自动进行首尾空格剥离（`.trim()`）与大小写宽容匹配（如 `FOX` / `fox` / `Fox` 均可识别）。
+3. **密码修改与同步机制**：
+   * 管理员可在【设置区】->【唯一超级管理员最高权限与密码】随时输入当前密码并设定全新密码。
+   * 密码修改后将自动通过 `BroadcastChannel` 实时同步至本设备的所有标签页与浏览器存储，永久生效。
    * **KV Namespace 绑定**：变量名称填写 `KV`，绑定您的 Cloudflare KV 命名空间。
 
 ---

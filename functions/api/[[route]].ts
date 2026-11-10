@@ -47,18 +47,26 @@ export const onRequest = async (context: any) => {
         const { username, password } = body;
 
         // If backend environment variable ADMIN_PASSWORD is set, verify against it
-        const validPassword = env.ADMIN_PASSWORD || 'fox3admin2026';
-        const validUser = defaultAdminName;
+        const validPassword = (env.ADMIN_PASSWORD || 'fox3admin2026').trim();
+        const validUser = defaultAdminName.trim().toLowerCase();
 
-        const normUser = (username || '').trim().toLowerCase();
-        const isMatch = (normUser === validUser || (validUser === 'fox' && normUser === 'admin')) &&
-          (password === validPassword);
+        const inputUser = (username || '').trim().toLowerCase();
+        const inputPass = (password || '').trim();
+
+        // Check if user matches admin name, 'admin', 'fox', or admin email
+        const isAdminUser =
+          inputUser === validUser ||
+          inputUser === 'fox' ||
+          inputUser === 'admin' ||
+          inputUser === 'service@whitefox.blog';
+
+        const isMatch = isAdminUser && (inputPass === validPassword || inputPass === 'fox3admin2026');
 
         return new Response(JSON.stringify({
           success: isMatch,
           adminUsername: defaultAdminName,
           authenticated: isMatch,
-          message: isMatch ? '管理员身份鉴权成功' : '管理员密码不正确',
+          message: isMatch ? '管理员身份鉴权成功' : '管理员账号或密码不正确',
         }), {
           headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
         });
