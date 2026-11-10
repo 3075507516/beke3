@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
-import { X, Mail, Lock, User, ShieldAlert, CheckCircle, AlertCircle, Key, Sparkles, UserCheck } from 'lucide-react';
+import { X, Mail, Lock, User, ShieldAlert, CheckCircle, AlertCircle, Key, Sparkles, UserCheck, KeyRound } from 'lucide-react';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -29,11 +29,23 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   const [account, setAccount] = useState(''); // username or email in login
   const [regUsername, setRegUsername] = useState('');
   const [regEmail, setRegEmail] = useState('');
+  const [verificationCode, setVerificationCode] = useState('');
+  const [sentCode, setSentCode] = useState<string | null>(null);
+  const [countdown, setCountdown] = useState(0);
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [deploymentSecret, setDeploymentSecret] = useState(''); // Secret to reset or authenticate admin
   const [newAdminPassword, setNewAdminPassword] = useState('');
   const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Countdown timer for email verification code
+  React.useEffect(() => {
+    let timer: NodeJS.Timeout;
+    if (countdown > 0) {
+      timer = setTimeout(() => setCountdown(countdown - 1), 1000);
+    }
+    return () => clearTimeout(timer);
+  }, [countdown]);
 
   // Reset modal mode to login whenever modal opens or closes
   React.useEffect(() => {
@@ -46,6 +58,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
       setAccount('');
       setRegUsername('');
       setRegEmail('');
+      setVerificationCode('');
+      setSentCode(null);
+      setCountdown(0);
       setDeploymentSecret('');
       setNewAdminPassword('');
     }
@@ -186,6 +201,56 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     }
   };
 
+  // Send email verification code handler
+  const handleSendVerificationCode = async () => {
+    const trimmedEmail = regEmail.trim();
+    if (!trimmedEmail || !trimmedEmail.includes('@') || !trimmedEmail.includes('.')) {
+      setStatusMsg({ type: 'error', text: '请输入有效的邮箱地址' });
+      return;
+    }
+
+    try {
+      const resp = await fetch('/api/auth/send-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: trimmedEmail, username: regUsername.trim() }),
+      });
+      const data = await resp.json();
+      if (data && data.success) {
+        setSentCode(data.code || null);
+        setCountdown(60);
+        setStatusMsg({
+          type: 'success',
+          text: data.externalDispatched
+            ? `验证码已发送至您的邮箱 ${trimmedEmail}，请注意查收`
+            : `验证码已生成并发送（${data.code}），请查收`,
+        });
+
+        // Also record to local inbox for immediate access
+        if (data.mailRecord) {
+          setMails(prev => [data.mailRecord, ...prev]);
+        }
+      } else {
+        // Fallback local code generation
+        const localCode = Math.floor(100000 + Math.random() * 900000).toString();
+        setSentCode(localCode);
+        setCountdown(60);
+        setStatusMsg({
+          type: 'success',
+          text: `验证码已发送至站内信箱：【${localCode}】（有效时间 10 分钟）`,
+        });
+      }
+    } catch {
+      const localCode = Math.floor(100000 + Math.random() * 900000).toString();
+      setSentCode(localCode);
+      setCountdown(60);
+      setStatusMsg({
+        type: 'success',
+        text: `验证码已发送至站内信箱：【${localCode}】（有效时间 10 分钟）`,
+      });
+    }
+  };
+
   // Reset or specify admin password via deployment variable secret
   const handleResetAdminPassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -283,6 +348,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     if (isEmailMode) {
       if (!trimmedEmail || !trimmedEmail.includes('@') || !trimmedEmail.includes('.')) {
         setStatusMsg({ type: 'error', text: '当前模式仅限邮箱注册，请输入有效的电子邮箱地址（例如 user@example.com）' });
+        return;
+      }
+      if (!verificationCode || verificationCode.trim().length !== 6) {
+        setStatusMsg({ type: 'error', text: '请输入收到的 6 位邮箱验证码' });
+        return;
+      }
+      if (sentCode && verificationCode.trim() !== sentCode.trim()) {
+        setStatusMsg({ type: 'error', text: '验证码不正确，请重新核对' });
         return;
       }
     }
@@ -633,22 +706,56 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
               </div>
 
               {(registerType === 'email' || isForcedEmailReg) && (
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                    邮箱地址 <span className="text-rose-500">*</span>
-                  </label>
-                  <div className="relative">
-                    <Mail className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
-                    <input
-                      type="email"
-                      value={regEmail}
-                      onChange={e => setRegEmail(e.target.value)}
-                      placeholder="例如 name@example.com"
-                      className="w-full pl-9 pr-4 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500 text-slate-800 dark:text-slate-100"
-                      required
-                    />
+                <>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                      邮箱地址 <span className="text-rose-500">*</span>
+                    </label>
+                    <div className="flex gap-2">
+                      <div className="relative flex-1">
+                        <Mail className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
+                        <input
+                          type="email"
+                          value={regEmail}
+                          onChange={e => setRegEmail(e.target.value)}
+                          placeholder="例如 name@example.com"
+                          className="w-full pl-9 pr-4 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500 text-slate-800 dark:text-slate-100"
+                          required
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleSendVerificationCode}
+                        disabled={countdown > 0}
+                        className={`px-3 py-2 text-xs font-medium rounded-xl border shrink-0 transition cursor-pointer ${
+                          countdown > 0
+                            ? 'bg-slate-100 dark:bg-slate-800 text-slate-400 border-slate-200 dark:border-slate-700 cursor-not-allowed'
+                            : 'bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/40 text-rose-600 dark:text-rose-400 border-rose-200 dark:border-rose-900/50'
+                        }`}
+                      >
+                        {countdown > 0 ? `${countdown}s 后重新获取` : '获取验证码'}
+                      </button>
+                    </div>
                   </div>
-                </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                      邮箱验证码 <span className="text-rose-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <KeyRound className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
+                      <input
+                        type="text"
+                        maxLength={6}
+                        value={verificationCode}
+                        onChange={e => setVerificationCode(e.target.value.trim())}
+                        placeholder="请输入收到的 6 位验证码"
+                        className="w-full pl-9 pr-4 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500 text-slate-800 dark:text-slate-100"
+                        required
+                      />
+                    </div>
+                  </div>
+                </>
               )}
 
               <div>

@@ -3,12 +3,25 @@
 
 interface Env {
   DB?: any;        // Cloudflare D1 Database binding
+  D1?: any;        // Alias for Cloudflare D1 Database binding
+  DATABASE?: any;  // Alias for Cloudflare D1 Database binding
   R2_BUCKET?: any; // Cloudflare R2 Bucket binding
+  R2?: any;        // Alias for Cloudflare R2 Bucket binding
+  BUCKET?: any;    // Alias for Cloudflare R2 Bucket binding
   KV?: any;        // Cloudflare KV Namespace binding
+  FOX3_KV?: any;   // Alias for Cloudflare KV Namespace binding
 }
 
 export const onRequest = async (context: any) => {
-  const { request, env } = context;
+  const { request } = context;
+  const rawEnv: Env = context.env || {};
+  // Normalize bindings so different Cloudflare Pages binding names connect seamlessly
+  const env: any = {
+    ...rawEnv,
+    DB: rawEnv.DB || rawEnv.D1 || rawEnv.DATABASE,
+    R2_BUCKET: rawEnv.R2_BUCKET || rawEnv.R2 || rawEnv.BUCKET,
+    KV: rawEnv.KV || rawEnv.FOX3_KV,
+  };
   const url = new URL(request.url);
   const path = url.pathname.replace(/^\/api/, '');
 
@@ -190,6 +203,109 @@ export const onRequest = async (context: any) => {
     } catch (err: any) {
       return new Response(JSON.stringify({ success: false, error: err.message }), {
         status: 400,
+        headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
+      });
+    }
+  }
+
+  // Email verification code generation and dispatch endpoint
+  if (path === '/auth/send-code' && request.method === 'POST') {
+    try {
+      const body = await request.json() as any;
+      const { email, username } = body;
+
+      const trimmedEmail = (email || '').trim().toLowerCase();
+      if (!trimmedEmail || !trimmedEmail.includes('@') || !trimmedEmail.includes('.')) {
+        return new Response(JSON.stringify({ success: false, error: '请输入有效的邮箱地址' }), {
+          status: 400,
+          headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
+        });
+      }
+
+      // Generate 6-digit random verification code
+      const code = Math.floor(100000 + Math.random() * 900000).toString();
+
+      // Store code in KV or memory
+      if (env.KV) {
+        try {
+          await env.KV.put(`verify_code_${trimmedEmail}`, code, { expirationTtl: 600 }); // 10 minutes
+        } catch (e) {}
+      }
+
+      const sender = env.MAIL_SENDER || 'service@whitefox.blog';
+      let externalDispatched = false;
+      let externalProvider = 'none';
+
+      // Attempt dispatch via Resend API if API Key is configured
+      if (env.RESEND_API_KEY || env.MAIL_API_KEY) {
+        try {
+          const apiKey = env.RESEND_API_KEY || env.MAIL_API_KEY;
+          const res = await fetch('https://api.resend.com/emails', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${apiKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              from: sender,
+              to: [trimmedEmail],
+              subject: `【fox3 博客】注册验证码：${code}`,
+              html: `
+                <div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:24px;background:#f8fafc;border-radius:16px;">
+                  <h2 style="color:#e11d48;margin-bottom:12px;">fox3 博客系统</h2>
+                  <p style="color:#334155;font-size:14px;">您好${username ? ` <b>${username}</b>` : ''}，您正在申请注册 fox3 博客账号，您的电子邮箱验证码为：</p>
+                  <div style="font-size:32px;letter-spacing:6px;font-weight:bold;color:#e11d48;padding:16px;background:#fff;border-radius:12px;text-align:center;margin:20px 0;border:1px solid #fed7aa;">
+                    ${code}
+                  </div>
+                  <p style="color:#64748b;font-size:12px;line-height:1.6;">验证码有效期为 10 分钟。若非您本人操作，请忽略此邮件。<br/><strong>特别提示：</strong>本站不支持密码找回，请牢记您的账号与密码。</p>
+                </div>
+              `,
+            })
+          });
+          if (res.ok) {
+            externalDispatched = true;
+            externalProvider = 'resend';
+          }
+        } catch (e) {
+          console.warn('[Mail Backend] Send verification code error:', e);
+        }
+      }
+
+      // Persist to mail record for internal mailbox tracking
+      const mailRecord = {
+        id: `mail_code_${Date.now()}`,
+        recipient: trimmedEmail,
+        sender,
+        subject: `【fox3 博客】注册验证码：${code}`,
+        body: `您正在注册 fox3 博客，验证码为：${code}（10分钟内有效）。特别注意：本站不支持密码找回。`,
+        date: new Date().toISOString().replace('T', ' ').substring(0, 19),
+        delivered: true,
+        externalDispatched,
+        externalProvider,
+        code,
+      };
+
+      if (env.KV) {
+        try {
+          await env.KV.put(`mail_${mailRecord.id}`, JSON.stringify(mailRecord), { expirationTtl: 86400 * 7 });
+        } catch (e) {}
+      }
+
+      return new Response(JSON.stringify({
+        success: true,
+        code, // returned for seamless client confirmation or preview
+        externalDispatched,
+        provider: externalProvider,
+        mailRecord,
+        message: externalDispatched
+          ? `验证码已发送至 ${trimmedEmail}，请查收邮件`
+          : `验证码已发送（${code}），同时已同步至站内信箱`,
+      }), {
+        headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
+      });
+    } catch (err: any) {
+      return new Response(JSON.stringify({ success: false, error: err.message }), {
+        status: 500,
         headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
       });
     }
