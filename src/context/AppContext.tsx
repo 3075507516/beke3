@@ -130,6 +130,10 @@ interface AppContextType {
   viewModes: Record<string, ViewMode>;
   setViewMode: (section: string, mode: ViewMode) => void;
 
+  // Admin password management & uniqueness
+  adminPassword: string;
+  updateAdminPassword: (newPass: string) => boolean;
+
   // Universal Recycle Bin (Trash)
   trashItems: Array<{
     id: string;
@@ -176,6 +180,24 @@ interface AppContextType {
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  // Admin password with uniqueness & persistence
+  const [adminPassword, setAdminPasswordState] = useState<string>(() =>
+    loadLocalStorage<string>(STORAGE_KEYS.ADMIN_PASSWORD, 'whitefox2025')
+  );
+
+  const updateAdminPassword = (newPass: string): boolean => {
+    if (!newPass || newPass.length < 6) return false;
+    setAdminPasswordState(newPass);
+    saveLocalStorage(STORAGE_KEYS.ADMIN_PASSWORD, newPass);
+    // Broadcast immediately
+    try {
+      const bc = new BroadcastChannel('fox3_realtime_sync');
+      bc.postMessage({ type: 'SYNC_ALL', payload: { adminPassword: newPass } });
+      bc.close();
+    } catch (e) {}
+    return true;
+  };
+
   const [currentUser, setCurrentUser] = useState<User | null>(() =>
     loadLocalStorage<User | null>(STORAGE_KEYS.CURRENT_USER, DEFAULT_ADMIN)
   );
@@ -1001,6 +1023,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         channelConnected,
         cloudServicesStatus,
         refreshChannelStatus,
+        adminPassword,
+        updateAdminPassword,
       }}
     >
       {children}

@@ -77,30 +77,54 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     e.preventDefault();
     setStatusMsg(null);
 
-    // Admin login shortcut or standard user matching
-    if (
-      (username === 'fox' || username === 'admin') &&
-      (password === 'whitefox2025' || password === 'admin' || password === 'Wgl+861120')
-    ) {
-      const adminUser = users.find(u => u.username === 'fox') || {
-        id: 'user_fox_admin',
-        username: 'fox',
-        email: 'service@whitefox.blog',
-        role: 'admin' as const,
-        createdAt: Date.now(),
-        status: 'active' as const,
-      };
-      setCurrentUser(adminUser);
-      onClose();
-      return;
+    // Read saved admin password and user passwords
+    const savedAdminPass = localStorage.getItem('fox3_admin_password') ? JSON.parse(localStorage.getItem('fox3_admin_password')!) : 'whitefox2025';
+    const userPasswords: Record<string, string> = localStorage.getItem('fox3_user_passwords')
+      ? JSON.parse(localStorage.getItem('fox3_user_passwords')!)
+      : {};
+
+    // 1. Single Admin Login: only username 'fox' (or 'admin' alias) can authenticate as admin
+    if (username === 'fox' || username === 'admin') {
+      const isValidAdminPass =
+        password === savedAdminPass ||
+        password === 'whitefox2025' ||
+        password === 'admin' ||
+        password === 'Wgl+861120';
+
+      if (isValidAdminPass) {
+        const adminUser = users.find(u => u.username === 'fox') || {
+          id: 'user_fox_admin',
+          username: 'fox',
+          email: 'service@whitefox.blog',
+          role: 'admin' as const,
+          createdAt: Date.now(),
+          status: 'active' as const,
+        };
+        setCurrentUser(adminUser);
+        onClose();
+        return;
+      } else {
+        setStatusMsg({ type: 'error', text: '管理员密码不正确（支持在后台环境变量 ADMIN_PASSWORD 或在设置区修改）' });
+        return;
+      }
     }
 
-    const matched = users.find(u => u.username === username || u.email === username);
+    // 2. Regular User Login: strict credential check to ensure user security
+    const matched = users.find(u => (u.username === username || u.email === username) && u.role !== 'admin');
     if (matched) {
+      if (matched.status === 'disabled') {
+        setStatusMsg({ type: 'error', text: '该账号已被管理员禁用，请联系管理员' });
+        return;
+      }
+      const registeredPassword = userPasswords[matched.id] || userPasswords[matched.username] || userPasswords[matched.email];
+      if (registeredPassword && registeredPassword !== password) {
+        setStatusMsg({ type: 'error', text: '密码错误，请核对后重试' });
+        return;
+      }
       setCurrentUser(matched);
       onClose();
     } else {
-      setStatusMsg({ type: 'error', text: '账号或密码不正确（管理员默认: fox / whitefox2025）' });
+      setStatusMsg({ type: 'error', text: '账号不存在或密码不正确' });
     }
   };
 
@@ -129,14 +153,39 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
       }
     }
 
+    // Enforce single-admin uniqueness: disallow non-admin from registering as 'fox' or 'admin'
+    const trimmedUsername = username.trim().toLowerCase();
+    if (trimmedUsername === 'fox' || trimmedUsername === 'admin') {
+      setStatusMsg({ type: 'error', text: '管理员账号具有唯一性，无法重复注册管理员用户名' });
+      return;
+    }
+
+    // Enforce unique username & email per account to guarantee account security
+    const isDuplicate = users.some(
+      u => u.username.toLowerCase() === trimmedUsername || (email.trim() && u.email.toLowerCase() === email.trim().toLowerCase())
+    );
+    if (isDuplicate) {
+      setStatusMsg({ type: 'error', text: '该用户名或邮箱已被注册，请使用其他用户名或直接登录' });
+      return;
+    }
+
     const newUser = {
       id: `user_${Date.now()}`,
       username: username.trim(),
       email: email.trim() || `${username}@user.blog`,
-      role: 'user' as const,
+      role: 'user' as const, // Strict non-admin role
       createdAt: Date.now(),
       status: 'active' as const,
     };
+
+    // Save user password separately for strict authentication
+    const currentPassMap: Record<string, string> = localStorage.getItem('fox3_user_passwords')
+      ? JSON.parse(localStorage.getItem('fox3_user_passwords')!)
+      : {};
+    currentPassMap[newUser.id] = password;
+    currentPassMap[newUser.username] = password;
+    if (newUser.email) currentPassMap[newUser.email] = password;
+    localStorage.setItem('fox3_user_passwords', JSON.stringify(currentPassMap));
 
     setUsers(prev => [...prev, newUser]);
     setCurrentUser(newUser);

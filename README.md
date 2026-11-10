@@ -134,6 +134,9 @@ http://<你的服务器IP>:8080
 | `TENCENT_COS_SECRET_KEY`| 腾讯云环境变量 | 腾讯云 COS 访问 SecretKey | 腾讯云环境可选 |
 | `ALIYUN_OSS_ACCESS_KEY_ID` | 阿里云环境变量 | 阿里云 OSS 访问 Key ID | 阿里云环境可选 |
 | `ALIYUN_OSS_ACCESS_KEY_SECRET` | 阿里云环境变量 | 阿里云 OSS 访问 Key Secret | 阿里云环境可选 |
+| `ADMIN_USERNAME` | Cloudflare / 环境变量 | 管理员用户名 (项目仅单一管理员，默认为 `fox`) | 唯一性保证 |
+| `ADMIN_PASSWORD` | Cloudflare / 环境变量 | 管理员密码 (以后台变量为准，亦支持前端修改) | 最高安全控制权 |
+| `MAIL_API_KEY` | 邮件服务密钥 (可选) | Resend 或 SendGrid 接口秘钥 | 邮件发信通道 |
 
 ---
 

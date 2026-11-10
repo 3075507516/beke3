@@ -34,6 +34,8 @@ export const STORAGE_KEYS = {
   WEBDAV_CONFIG: 'fox3_webdav_config',
   WEBDAV_BACKUPS: 'fox3_webdav_backups',
   VIEW_MODES: 'fox3_view_modes',
+  ADMIN_PASSWORD: 'fox3_admin_password',
+  USER_PASSWORDS: 'fox3_user_passwords',
 };
 
 // Safe LocalStorage Reader / Writer
