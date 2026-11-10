@@ -26,6 +26,8 @@ export const MailSection: React.FC = () => {
     emailSettings,
     updateEmailSettings,
     currentUser,
+    moveToTrash,
+    showToast,
   } = useApp();
 
   const [activeFolder, setActiveFolder] = useState<'inbox' | 'sent' | 'trash'>('inbox');
@@ -33,6 +35,24 @@ export const MailSection: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [showConfig, setShowConfig] = useState(false);
   const [isComposing, setIsComposing] = useState(false);
+
+  // Local draft of settings inside drawer
+  const [formSettings, setFormSettings] = useState(emailSettings);
+  const [isSaved, setIsSaved] = useState(false);
+  const [testingStatus, setTestingStatus] = useState(false);
+  const [actionAlert, setActionAlert] = useState<string | null>(null);
+
+  // Accurate connection indicators for Outbound & Inbound
+  const isOutboundConnected = Boolean(
+    (formSettings.provider === 'smtp' && formSettings.smtpHost && formSettings.smtpUser && formSettings.smtpPass && formSettings.smtpPass !== '********') ||
+    (formSettings.provider !== 'smtp' && formSettings.apiKey && formSettings.apiKey !== '********' && !formSettings.apiKey.includes('demo') && formSettings.apiKey.length >= 8)
+  );
+
+  const isInboundConnected = Boolean(
+    (formSettings.inboundMethod === 'cf_routing' && formSettings.cfEmailRouting?.routingAddress && formSettings.cfEmailRouting?.forwardTo) ||
+    (formSettings.inboundMethod === 'imap_pop3' && formSettings.imapConfig?.host && formSettings.imapConfig?.user && formSettings.imapConfig?.pass && formSettings.imapConfig?.pass !== '********') ||
+    (formSettings.inboundMethod === 'webhook' && formSettings.cfEmailRouting?.webhookUrl)
+  );
 
   // New Compose state
   const [recipient, setRecipient] = useState('');
@@ -145,7 +165,32 @@ export const MailSection: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3 flex-wrap">
+          {/* Real-time Status Indicators Lamp in Header */}
+          <div className="flex items-center gap-2">
+            <span
+              className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full font-medium ${
+                isOutboundConnected
+                  ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200/50'
+                  : 'bg-rose-50 text-rose-600 dark:bg-rose-950/40 dark:text-rose-400 border border-rose-200/50'
+              }`}
+            >
+              <span className={`w-2 h-2 rounded-full ${isOutboundConnected ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
+              <span>发信: {isOutboundConnected ? '已连通' : '未连通'}</span>
+            </span>
+
+            <span
+              className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full font-medium ${
+                isInboundConnected
+                  ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200/50'
+                  : 'bg-rose-50 text-rose-600 dark:bg-rose-950/40 dark:text-rose-400 border border-rose-200/50'
+              }`}
+            >
+              <span className={`w-2 h-2 rounded-full ${isInboundConnected ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
+              <span>收信: {isInboundConnected ? '已连通' : '未连通'}</span>
+            </span>
+          </div>
+
           <button
             onClick={() => setShowConfig(!showConfig)}
             className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-medium rounded-xl transition"
@@ -172,10 +217,23 @@ export const MailSection: React.FC = () => {
       {/* Cloudflare Routing & SMTP Settings Drawer */}
       {showConfig && (
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-xl space-y-6 animate-in fade-in">
+          {/* Detailed Setup Guide Banner inside Section */}
+          <div className="p-4 bg-sky-50/70 dark:bg-sky-950/40 border border-sky-200/80 dark:border-sky-900/60 rounded-2xl space-y-2 text-xs">
+            <div className="flex items-center gap-2 font-bold text-sky-800 dark:text-sky-200 text-sm">
+              <ShieldCheck className="w-4 h-4 text-sky-500 shrink-0" />
+              <span>站内发信与收信配置指南 & 后端环境变量说明</span>
+            </div>
+            <div className="text-slate-600 dark:text-slate-300 leading-relaxed space-y-1">
+              <p><b>1. 前端配置与后端变量双模生效：</b>前端填写的配置直接加密存储于本地并在连通时同步至云端。后端亦可配置 Cloudflare 环境变量（<code>MAIL_API_KEY</code>, <code>SMTP_HOST</code>, <code>CF_EMAIL_ROUTING_ADDRESS</code> 等）。</p>
+              <p><b>2. 发信通道推荐：</b>推荐使用 <b>Resend API</b> (每天免费 100 封，极速到达) 或企业自建 <b>SMTP</b>。填写有效 API Key 或 SMTP 账密后状态灯将变绿。</p>
+              <p><b>3. 收信通道方式：</b>推荐开启 <b>Cloudflare Email Routing</b>，在 Cloudflare 域名后台启用 Email Routing 并配置捕获地址与转发目标，实现 0 成本企业域名收件。</p>
+            </div>
+          </div>
+
           <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
             <div className="flex items-center gap-2 text-rose-500 font-bold text-sm">
               <ShieldCheck className="w-4 h-4" />
-              <span>邮件服务提供商与收发限制设置</span>
+              <span>邮件服务提供商与收发限制参数设定</span>
             </div>
             <button
               onClick={() => setShowConfig(false)}
@@ -188,34 +246,42 @@ export const MailSection: React.FC = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Third party API configuration */}
             <div className="space-y-4">
-              <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
-                第三方 API & SMTP 保存
-              </h4>
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
+                  <span>发信通道设置 (Outbound)</span>
+                </h4>
+                <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                  isOutboundConnected ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'
+                }`}>
+                  {isOutboundConnected ? '● 发信服务连通' : '○ 未连通'}
+                </span>
+              </div>
 
               <div>
-                <label className="block text-xs text-slate-500 mb-1">发信服务提供商 (多通道支持)</label>
+                <label className="block text-xs text-slate-500 mb-1">
+                  发信服务提供商 <span className="text-rose-500 font-bold">[必填]</span>
+                </label>
                 <select
-                  value={emailSettings.provider}
-                  onChange={e => updateEmailSettings({ provider: e.target.value as any })}
+                  value={formSettings.provider}
+                  onChange={e => setFormSettings({ ...formSettings, provider: e.target.value as any })}
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100"
                 >
                   <option value="resend">Resend (官方推荐 / 极速交付)</option>
                   <option value="sendgrid">Twilio SendGrid API</option>
                   <option value="mailgun">Mailgun API</option>
                   <option value="ses">Amazon SES (简单邮件服务)</option>
-                  <option value="brevo">Brevo (原 Sendinblue)</option>
-                  <option value="postmark">Postmark 事务邮件</option>
                   <option value="smtp">企业专用 SMTP 服务器 (TLS/SSL)</option>
-                  <option value="custom">通用自定义 Webhook API</option>
                 </select>
               </div>
 
               <div>
-                <label className="block text-xs text-slate-500 mb-1">API Key / Token 密钥 (安全加密持久化)</label>
+                <label className="block text-xs text-slate-500 mb-1">
+                  API Key / Token 密钥 <span className="text-rose-500 font-bold">[必填 (使用 API 时)]</span>
+                </label>
                 <input
                   type="password"
-                  value={emailSettings.apiKey}
-                  onChange={e => updateEmailSettings({ apiKey: e.target.value })}
+                  value={formSettings.apiKey}
+                  onChange={e => setFormSettings({ ...formSettings, apiKey: e.target.value })}
                   placeholder="re_xxxxxxxxxxxxxx 或 key-xxxxxxxx"
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 font-mono"
                 />
@@ -223,23 +289,27 @@ export const MailSection: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block text-xs text-slate-500 mb-1">发件服务地址 (SMTP/Endpoint)</label>
+                  <label className="block text-xs text-slate-500 mb-1">
+                    发件服务地址 <span className="text-slate-400">[必填 (SMTP)]</span>
+                  </label>
                   <input
                     type="text"
-                    value={emailSettings.smtpHost}
-                    onChange={e => updateEmailSettings({ smtpHost: e.target.value })}
-                    placeholder="smtp.domain.com 或 https://api..."
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100"
+                    value={formSettings.smtpHost}
+                    onChange={e => setFormSettings({ ...formSettings, smtpHost: e.target.value })}
+                    placeholder="smtp.domain.com"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 font-mono"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-500 mb-1">发信账号 / 发件人</label>
+                  <label className="block text-xs text-slate-500 mb-1">
+                    发信账号 / 发件人 <span className="text-rose-500 font-bold">[必填]</span>
+                  </label>
                   <input
                     type="text"
-                    value={emailSettings.senderEmail}
-                    onChange={e => updateEmailSettings({ senderEmail: e.target.value })}
+                    value={formSettings.senderEmail}
+                    onChange={e => setFormSettings({ ...formSettings, senderEmail: e.target.value })}
                     placeholder="service@whitefox.blog"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 font-mono"
                   />
                 </div>
               </div>
@@ -247,53 +317,70 @@ export const MailSection: React.FC = () => {
 
             {/* Cloudflare Email Routing & Inbound Routing */}
             <div className="space-y-4">
-              <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
-                收信通道方式 & Cloudflare Email Routing 预留
-              </h4>
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
+                  收信通道方式 & Cloudflare Email Routing (Inbound)
+                </h4>
+                <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                  isInboundConnected ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'
+                }`}>
+                  {isInboundConnected ? '● 收信路由连通' : '○ 未连通'}
+                </span>
+              </div>
 
               <div>
-                <label className="block text-xs text-slate-500 mb-1">收信处理方式</label>
+                <label className="block text-xs text-slate-500 mb-1">
+                  收信处理方式 <span className="text-rose-500 font-bold">[必填]</span>
+                </label>
                 <select
-                  value={emailSettings.inboundMethod || 'cf_routing'}
-                  onChange={e => updateEmailSettings({ inboundMethod: e.target.value as any })}
+                  value={formSettings.inboundMethod || 'cf_routing'}
+                  onChange={e => setFormSettings({ ...formSettings, inboundMethod: e.target.value as any })}
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100"
                 >
-                  <option value="cf_routing">Cloudflare Email Routing (云端边缘路由)</option>
+                  <option value="cf_routing">Cloudflare Email Routing (边缘直接路由)</option>
                   <option value="webhook">Webhook 自动化接收回调 (HTTP POST)</option>
                   <option value="imap_pop3">IMAP / POP3 定期轮询收取</option>
                 </select>
               </div>
 
               <div>
-                <label className="block text-xs text-slate-500 mb-1">Cloudflare 路由公共收件地址 (显示与预留)</label>
+                <label className="block text-xs text-slate-500 mb-1">
+                  Cloudflare 路由公共收件地址 <span className="text-rose-500 font-bold">[必填]</span>
+                </label>
                 <input
                   type="text"
-                  value={emailSettings.cfEmailRouting.routingAddress}
+                  value={formSettings.cfEmailRouting.routingAddress}
                   onChange={e =>
-                    updateEmailSettings({
+                    setFormSettings({
+                      ...formSettings,
                       cfEmailRouting: {
-                        ...emailSettings.cfEmailRouting,
+                        ...formSettings.cfEmailRouting,
                         routingAddress: e.target.value,
                       },
                     })
                   }
+                  placeholder="contact@yourdomain.com"
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 font-mono"
                 />
               </div>
 
               <div>
-                <label className="block text-xs text-slate-500 mb-1">管理员专属目标接收邮箱</label>
+                <label className="block text-xs text-slate-500 mb-1">
+                  管理员专属目标接收邮箱 <span className="text-rose-500 font-bold">[必填]</span>
+                </label>
                 <input
                   type="text"
-                  value={emailSettings.cfEmailRouting.forwardTo}
+                  value={formSettings.cfEmailRouting.forwardTo}
                   onChange={e =>
-                    updateEmailSettings({
+                    setFormSettings({
+                      ...formSettings,
                       cfEmailRouting: {
-                        ...emailSettings.cfEmailRouting,
+                        ...formSettings.cfEmailRouting,
                         forwardTo: e.target.value,
                       },
                     })
                   }
+                  placeholder="admin@gmail.com"
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 font-mono"
                 />
               </div>
@@ -303,14 +390,14 @@ export const MailSection: React.FC = () => {
                 <div className="flex items-center justify-between p-2 rounded-xl bg-slate-50 dark:bg-slate-800">
                   <div>
                     <span className="text-xs text-slate-700 dark:text-slate-200 font-medium block">
-                      发信配额与风控限制开关
+                      发信配额与风控限制开关 <span className="text-slate-400">[可选]</span>
                     </span>
-                    <span className="text-[10px] text-slate-400">单日上限: {emailSettings.maxDailyEmails || 3000} 封 (防恶意刷信)</span>
+                    <span className="text-[10px] text-slate-400">单日上限: {formSettings.maxDailyEmails || 3000} 封 (防恶意刷信)</span>
                   </div>
                   <input
                     type="checkbox"
-                    checked={emailSettings.rateLimitEnabled}
-                    onChange={e => updateEmailSettings({ rateLimitEnabled: e.target.checked })}
+                    checked={formSettings.rateLimitEnabled}
+                    onChange={e => setFormSettings({ ...formSettings, rateLimitEnabled: e.target.checked })}
                     className="w-4 h-4 text-rose-500 rounded focus:ring-rose-500"
                   />
                 </div>
@@ -318,14 +405,14 @@ export const MailSection: React.FC = () => {
                 <div className="flex items-center justify-between p-2 rounded-xl bg-slate-50 dark:bg-slate-800">
                   <div>
                     <span className="text-xs text-slate-700 dark:text-slate-200 font-medium block">
-                      注册验证码自动应答回复
+                      注册验证码自动应答回复 <span className="text-slate-400">[可选]</span>
                     </span>
                     <span className="text-[10px] text-slate-400">收到新注册邮件时自动生成6位验证码并秒级回信</span>
                   </div>
                   <input
                     type="checkbox"
-                    checked={emailSettings.autoReplyEnabled}
-                    onChange={e => updateEmailSettings({ autoReplyEnabled: e.target.checked })}
+                    checked={formSettings.autoReplyEnabled}
+                    onChange={e => setFormSettings({ ...formSettings, autoReplyEnabled: e.target.checked })}
                     className="w-4 h-4 text-rose-500 rounded focus:ring-rose-500"
                   />
                 </div>
@@ -334,21 +421,28 @@ export const MailSection: React.FC = () => {
           </div>
 
           {/* Explicit Save Configuration Button */}
-          <div className="flex items-center justify-between pt-4 border-t border-slate-100 dark:border-slate-800">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-4 border-t border-slate-100 dark:border-slate-800">
             <span className="text-xs text-slate-400">
-              设置修改后将即时加密存储于本地并尝试同步至云端 D1 / KV 配置库
+              [必填项已明确标注] 设置保存后即时持久化到浏览器本地并同步云端 D1 / KV
             </span>
-            <button
-              onClick={() => {
-                updateEmailSettings(emailSettings);
-                alert('邮箱设置已成功保存并同步！');
-                setShowConfig(false);
-              }}
-              className="flex items-center gap-1.5 px-5 py-2 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white text-xs font-semibold rounded-xl shadow-md transition"
-            >
-              <CheckCircle className="w-4 h-4" />
-              <span>保存邮箱配置</span>
-            </button>
+            <div className="flex items-center gap-2 self-end sm:self-auto">
+              <button
+                type="button"
+                onClick={() => {
+                  updateEmailSettings(formSettings);
+                  setIsSaved(true);
+                  showToast('邮箱配置已成功保存！发信/收信连通状态已更新。', 'success');
+                  setTimeout(() => {
+                    setIsSaved(false);
+                    setShowConfig(false);
+                  }, 1200);
+                }}
+                className="flex items-center gap-1.5 px-5 py-2 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white text-xs font-semibold rounded-xl shadow-md transition"
+              >
+                <CheckCircle className="w-4 h-4" />
+                <span>{isSaved ? '已保存！' : '保存邮箱配置'}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

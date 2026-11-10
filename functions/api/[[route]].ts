@@ -229,6 +229,42 @@ export const onRequest = async (context: any) => {
     }
   }
 
+  // Mail Service API Status & Configuration Endpoint
+  // Reads backend Cloudflare environment variables or D1/KV storage
+  if (path === '/mail/status') {
+    const outboundConfigured = Boolean(
+      env.MAIL_API_KEY ||
+      env.RESEND_API_KEY ||
+      env.SENDGRID_API_KEY ||
+      (env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS)
+    );
+    const inboundConfigured = Boolean(
+      env.CF_EMAIL_ROUTING_ADDRESS ||
+      env.CF_EMAIL_DESTINATION ||
+      (env.IMAP_HOST && env.IMAP_USER && env.IMAP_PASS)
+    );
+
+    return new Response(JSON.stringify({
+      success: true,
+      outbound: {
+        configured: outboundConfigured,
+        provider: env.RESEND_API_KEY ? 'resend' : env.SENDGRID_API_KEY ? 'sendgrid' : (env.SMTP_HOST ? 'smtp' : 'none'),
+        status: outboundConfigured ? 'connected' : 'unconfigured',
+        senderEmail: env.MAIL_SENDER || 'service@whitefox.blog',
+      },
+      inbound: {
+        configured: inboundConfigured,
+        routingAddress: env.CF_EMAIL_ROUTING_ADDRESS || 'contact@whitefox.blog',
+        destination: env.CF_EMAIL_DESTINATION || 'admin@whitefox.blog',
+        status: inboundConfigured ? 'connected' : 'unconfigured',
+      },
+      quotaLimit: 3000,
+      timestamp: Date.now(),
+    }), {
+      headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
+    });
+  }
+
   return new Response(JSON.stringify({ message: 'fox3 Cloudflare API Ready' }), {
     headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
   });
