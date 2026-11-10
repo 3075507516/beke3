@@ -113,7 +113,7 @@ export const DEFAULT_SETTINGS: SystemSettings = {
   transparentCards: false,
   bottomButtonsEnabled: true,
   hideNonBlogForGuests: false,
-  emailRegistrationOnly: true,
+  emailRegistrationOnly: false,
   allowRegistration: true,
   totalCapacityBytes: 10 * 1024 * 1024 * 1024, // 10 GB
   usedCapacityBytes: 0, // Default starts at zero as requested

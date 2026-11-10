@@ -46,8 +46,8 @@ export const onRequest = async (context: any) => {
         const body = await request.json();
         const { username, password } = body;
 
-        // If backend environment variable ADMIN_PASSWORD is set, verify against it
-        const validPassword = (env.ADMIN_PASSWORD || 'fox3admin2026').trim();
+        // If backend environment variable ADMIN_PASSWORD is set, strictly verify against it
+        const validPassword = (env.ADMIN_PASSWORD ? env.ADMIN_PASSWORD.trim() : 'fox3admin2026');
         const validUser = defaultAdminName.trim().toLowerCase();
 
         const inputUser = (username || '').trim().toLowerCase();
@@ -60,7 +60,7 @@ export const onRequest = async (context: any) => {
           inputUser === 'admin' ||
           inputUser === 'service@whitefox.blog';
 
-        const isMatch = isAdminUser && (inputPass === validPassword || inputPass === 'fox3admin2026');
+        const isMatch = isAdminUser && inputPass === validPassword;
 
         return new Response(JSON.stringify({
           success: isMatch,
@@ -94,7 +94,7 @@ export const onRequest = async (context: any) => {
       const { account, password } = body;
 
       const validAdminName = (env.ADMIN_USERNAME || 'fox').trim().toLowerCase();
-      const validAdminPass = (env.ADMIN_PASSWORD || 'fox3admin2026').trim();
+      const validAdminPass = (env.ADMIN_PASSWORD ? env.ADMIN_PASSWORD.trim() : 'fox3admin2026');
 
       const inputAccount = (account || '').trim().toLowerCase();
       const inputPass = (password || '').trim();
@@ -106,7 +106,7 @@ export const onRequest = async (context: any) => {
         inputAccount === 'admin' ||
         inputAccount === 'service@whitefox.blog';
 
-      if (isAdminAccount && (inputPass === validAdminPass || inputPass === 'fox3admin2026')) {
+      if (isAdminAccount && inputPass === validAdminPass) {
         return new Response(JSON.stringify({
           success: true,
           authenticated: true,
@@ -194,24 +194,34 @@ export const onRequest = async (context: any) => {
     }
   }
 
-  // Unified registration endpoint: handles regular user registration & Option B admin activation
+  // Registration endpoint (Option A: strictly forbid registering admin reserved names)
   if (path === '/auth/register' && request.method === 'POST') {
     try {
       const body = await request.json();
-      const { id, username, email, password, role } = body;
+      const { id, username, email, password } = body;
 
       const validAdminName = (env.ADMIN_USERNAME || 'fox').trim().toLowerCase();
-      const validAdminPass = (env.ADMIN_PASSWORD || 'fox3admin2026').trim();
 
       const inputUser = (username || '').trim();
       const inputEmail = (email || '').trim();
       const inputPass = (password || '').trim();
 
-      // Check Option B: activating admin via deployment password
-      let assignedRole = role || 'user';
-      if (inputPass === validAdminPass && (inputUser.toLowerCase() === validAdminName || inputUser.toLowerCase() === 'fox' || inputUser.toLowerCase() === 'admin')) {
-        assignedRole = 'admin';
+      // Forbid registration of reserved administrator names
+      if (
+        inputUser.toLowerCase() === validAdminName ||
+        inputUser.toLowerCase() === 'fox' ||
+        inputUser.toLowerCase() === 'admin'
+      ) {
+        return new Response(JSON.stringify({
+          success: false,
+          error: '系统保留账号不可注册，超级管理员请直接通过登录页面鉴权进入。'
+        }), {
+          status: 400,
+          headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
+        });
       }
+
+      const assignedRole = 'user';
 
       // Persist to D1 if available
       if (env.DB) {

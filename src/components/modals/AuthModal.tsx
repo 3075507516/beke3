@@ -28,6 +28,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   React.useEffect(() => {
     if (isOpen) {
       setMode('login');
+      setRegisterType('standard');
       setStatusMsg(null);
       setPassword('');
       setConfirmPassword('');
@@ -43,7 +44,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   const [regEmail, setRegEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [adminDeploymentSecret, setAdminDeploymentSecret] = useState(''); // Optional deployment secret to activate admin
   const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   if (!isOpen) return null;
@@ -110,7 +110,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
       normalizedInput === 'service@whitefox.blog';
 
     if (isAdminIdentifier) {
-      if (inputPass === effectiveAdminPass || inputPass === 'fox3admin2026') {
+      if (inputPass === effectiveAdminPass) {
         const adminUser = users.find(u => u.role === 'admin' || u.username.toLowerCase() === effectiveAdminName) || {
           id: 'user_fox_admin',
           username: effectiveAdminName,
@@ -224,26 +224,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     const lowerEmail = trimmedEmail ? trimmedEmail.toLowerCase() : '';
 
     const effectiveAdminName = (adminUsername || 'fox').trim().toLowerCase();
-    const effectiveAdminPass = (adminPassword || 'fox3admin2026').trim();
 
-    // Option B: Check if registrant provides the deployment ADMIN_PASSWORD
-    // If inputting deployment variable admin password (or entering in admin activation field),
-    // registrant is activated as the deployment Administrator!
-    let isAdminActivation = false;
-    if (
-      (adminDeploymentSecret && adminDeploymentSecret.trim() === effectiveAdminPass) ||
-      (trimmedPass === effectiveAdminPass && (lowerUsername === effectiveAdminName || lowerUsername === 'fox' || lowerUsername === 'admin'))
-    ) {
-      isAdminActivation = true;
-    } else {
-      // Disallow non-admin from taking reserved admin usernames without admin credentials
-      if (lowerUsername === effectiveAdminName || lowerUsername === 'admin' || lowerUsername === 'fox') {
-        setStatusMsg({
-          type: 'error',
-          text: `用户名【${trimmedUsername}】为管理员保留名称。若您是部署者，请输入部署时的管理员密码进行激活注册。`,
-        });
-        return;
-      }
+    // Option A: Strictly disallow registering reserved administrator names
+    if (lowerUsername === effectiveAdminName || lowerUsername === 'admin' || lowerUsername === 'fox') {
+      setStatusMsg({
+        type: 'error',
+        text: `用户名【${trimmedUsername}】为系统超级管理员保留名称，不允许注册。管理员请直接使用部署变量密码登录。`,
+      });
+      return;
     }
 
     // Duplicate check in existing users
@@ -260,10 +248,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
 
     // Construct new user entity
     const newUser = {
-      id: isAdminActivation ? 'user_fox_admin' : `user_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      id: `user_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       username: trimmedUsername,
       email: trimmedEmail || `${lowerUsername}@user.blog`,
-      role: (isAdminActivation ? 'admin' : 'user') as 'admin' | 'user',
+      role: 'user' as const,
       createdAt: Date.now(),
       status: 'active' as const,
     };
@@ -330,14 +318,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
 
     setStatusMsg({
       type: 'success',
-      text: isAdminActivation
-        ? `管理员身份激活并注册成功！已登入超级管理员【${newUser.username}】`
-        : `注册成功！已为您自动登录为【${newUser.username}】`,
+      text: `注册成功！已为您自动登录为【${newUser.username}】`,
     });
 
     setTimeout(() => {
       onClose();
-    }, 800);
+    }, 400);
   };
 
   const isForcedEmailReg = systemSettings.emailRegistrationOnly;
@@ -556,31 +542,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                     required
                   />
                 </div>
-              </div>
-
-              {/* Optional: Deployment Administrator Activation Secret (Option B) */}
-              <div className="pt-1">
-                <details className="text-[11px] text-slate-500 dark:text-slate-400 group">
-                  <summary className="cursor-pointer hover:text-rose-500 flex items-center gap-1 select-none">
-                    <UserCheck className="w-3.5 h-3.5" />
-                    <span>我是部署者？点此输入部署变量激活管理员账号</span>
-                  </summary>
-                  <div className="mt-2 p-2.5 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 space-y-1.5">
-                    <label className="block font-medium text-slate-700 dark:text-slate-300">
-                      部署环境变量 ADMIN_PASSWORD：
-                    </label>
-                    <input
-                      type="password"
-                      value={adminDeploymentSecret}
-                      onChange={e => setAdminDeploymentSecret(e.target.value)}
-                      placeholder="部署时设定的管理员密码（默认: fox3admin2026）"
-                      className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs focus:ring-1 focus:ring-rose-500 focus:outline-none"
-                    />
-                    <p className="text-[10px] text-slate-400 leading-tight">
-                      * 验证通过后将自动将此账号绑定并激活为系统超级管理员。
-                    </p>
-                  </div>
-                </details>
               </div>
 
               <button

@@ -91,16 +91,16 @@ describe('fox3 storage and authentication verification', () => {
     expect(passMap[loginByEmail.toLowerCase()] === wrongPass).toBe(false);
   });
 
-  it('verifies Option B: deployment admin password activation during registration', () => {
-    const deploymentEnvAdminPass = 'fox3admin2026';
-    const registrantUser = 'master_fox';
-    const registrantPass = 'fox3admin2026';
+  it('verifies Option A: disallow registration of reserved administrator names', () => {
+    const reservedNames = ['fox', 'admin', 'FOX', '  Admin  '];
+    reservedNames.forEach(name => {
+      const normalized = name.trim().toLowerCase();
+      const isReserved = normalized === 'fox' || normalized === 'admin';
+      expect(isReserved).toBe(true);
+    });
 
-    const isActivatedAsAdmin = registrantPass === deploymentEnvAdminPass;
-    expect(isActivatedAsAdmin).toBe(true);
-
-    const createdRole = isActivatedAsAdmin ? 'admin' : 'user';
-    expect(createdRole).toBe('admin');
+    const regularName = 'regular_user';
+    expect(regularName.toLowerCase() === 'fox' || regularName.toLowerCase() === 'admin').toBe(false);
   });
 
   it('verifies standard vs email registration requirement checks', () => {
