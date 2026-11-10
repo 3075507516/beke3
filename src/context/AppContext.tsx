@@ -66,6 +66,8 @@ interface AppContextType {
   setBooks: React.Dispatch<React.SetStateAction<Book[]>>;
   photos: Photo[];
   setPhotos: React.Dispatch<React.SetStateAction<Photo[]>>;
+  photoFolders: Array<{ id: string; name: string; createdAt: number }>;
+  setPhotoFolders: React.Dispatch<React.SetStateAction<Array<{ id: string; name: string; createdAt: number }>>>;
   media: MediaItem[];
   setMedia: React.Dispatch<React.SetStateAction<MediaItem[]>>;
   mails: MailMessage[];
@@ -128,6 +130,27 @@ interface AppContextType {
   viewModes: Record<string, ViewMode>;
   setViewMode: (section: string, mode: ViewMode) => void;
 
+  // Universal Recycle Bin (Trash)
+  trashItems: Array<{
+    id: string;
+    originId: string;
+    originType: 'post' | 'book' | 'photo' | 'media' | 'mail' | 'chat' | 'product' | 'order';
+    title: string;
+    preview?: string;
+    deletedAt: number;
+    data: any;
+  }>;
+  moveToTrash: (item: {
+    originId: string;
+    originType: 'post' | 'book' | 'photo' | 'media' | 'mail' | 'chat' | 'product' | 'order';
+    title: string;
+    preview?: string;
+    data: any;
+  }) => void;
+  restoreFromTrash: (trashId: string) => void;
+  permanentDeleteFromTrash: (trashId: string) => void;
+  emptyTrash: () => void;
+
   // Real-time synchronization
   syncState: SyncState;
   triggerManualSync: () => Promise<void>;
@@ -173,6 +196,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     loadLocalStorage<Photo[]>(STORAGE_KEYS.PHOTOS, DEFAULT_PHOTOS)
   );
 
+  const [photoFolders, setPhotoFolders] = useState<Array<{ id: string; name: string; createdAt: number }>>(() =>
+    loadLocalStorage<Array<{ id: string; name: string; createdAt: number }>>('fox3_photo_folders', [
+      { id: 'folder-landscape', name: '自然风光', createdAt: Date.now() - 86400000 * 10 },
+      { id: 'folder-cyberpunk', name: '赛博都市', createdAt: Date.now() - 86400000 * 9 },
+      { id: 'folder-daily', name: '日常记录', createdAt: Date.now() - 86400000 * 8 },
+    ])
+  );
+  useEffect(() => saveLocalStorage('fox3_photo_folders', photoFolders), [photoFolders]);
+
   const [media, setMedia] = useState<MediaItem[]>(() =>
     loadLocalStorage<MediaItem[]>(STORAGE_KEYS.MEDIA, DEFAULT_MEDIA)
   );
@@ -211,6 +243,82 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [webDavBackups, setWebDavBackups] = useState<WebDavBackupItem[]>(() =>
     loadLocalStorage<WebDavBackupItem[]>(STORAGE_KEYS.WEBDAV_BACKUPS, DEFAULT_WEBDAV_BACKUPS)
   );
+
+  // Universal Recycle Bin state
+  const [trashItems, setTrashItems] = useState<Array<{
+    id: string;
+    originId: string;
+    originType: 'post' | 'book' | 'photo' | 'media' | 'mail' | 'chat' | 'product' | 'order';
+    title: string;
+    preview?: string;
+    deletedAt: number;
+    data: any;
+  }>>(() => loadLocalStorage('fox3_trash_items', [
+    {
+      id: 'trash-demo-1',
+      originId: 'post-old-sample',
+      originType: 'post',
+      title: '旧版 Cloudflare Workers 部署心得随笔',
+      preview: '这是一篇早期测试文章，已归档移至全站回收站',
+      deletedAt: Date.now() - 86400000 * 4,
+      data: {
+        id: 'post-old-sample',
+        title: '旧版 Cloudflare Workers 部署心得随笔',
+        content: '早期随笔内容...',
+        category: '随笔',
+        tags: ['Workers'],
+        author: 'fox',
+        createdAt: Date.now() - 86400000 * 10,
+      }
+    }
+  ]));
+  useEffect(() => saveLocalStorage('fox3_trash_items', trashItems), [trashItems]);
+
+  const moveToTrash = useCallback((item: {
+    originId: string;
+    originType: 'post' | 'book' | 'photo' | 'media' | 'mail' | 'chat' | 'product' | 'order';
+    title: string;
+    preview?: string;
+    data: any;
+  }) => {
+    const trashItem = {
+      id: `trash-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      deletedAt: Date.now(),
+      ...item,
+    };
+    setTrashItems(prev => [trashItem, ...prev]);
+  }, []);
+
+  const restoreFromTrash = useCallback((trashId: string) => {
+    const item = trashItems.find(t => t.id === trashId);
+    if (!item) return;
+
+    if (item.originType === 'post' && item.data) {
+      setPosts(prev => [item.data, ...prev]);
+    } else if (item.originType === 'book' && item.data) {
+      setBooks(prev => [item.data, ...prev]);
+    } else if (item.originType === 'photo' && item.data) {
+      setPhotos(prev => [item.data, ...prev]);
+    } else if (item.originType === 'media' && item.data) {
+      setMedia(prev => [item.data, ...prev]);
+    } else if (item.originType === 'mail' && item.data) {
+      setMails(prev => [item.data, ...prev]);
+    } else if (item.originType === 'product' && item.data) {
+      setProducts(prev => [item.data, ...prev]);
+    } else if (item.originType === 'order' && item.data) {
+      setOrders(prev => [item.data, ...prev]);
+    }
+
+    setTrashItems(prev => prev.filter(t => t.id !== trashId));
+  }, [trashItems]);
+
+  const permanentDeleteFromTrash = useCallback((trashId: string) => {
+    setTrashItems(prev => prev.filter(t => t.id !== trashId));
+  }, []);
+
+  const emptyTrash = useCallback(() => {
+    setTrashItems([]);
+  }, []);
 
   const [systemSettings, setSystemSettings] = useState<SystemSettings>(() =>
     loadLocalStorage<SystemSettings>(STORAGE_KEYS.SYSTEM_SETTINGS, DEFAULT_SETTINGS)
@@ -508,7 +616,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           if (payload.books) setBooks(payload.books);
           if (payload.photos) setPhotos(payload.photos);
           if (payload.media) setMedia(payload.media);
+          if (payload.mails) setMails(payload.mails);
           if (payload.products) setProducts(payload.products);
+          if (payload.orders) setOrders(payload.orders);
+          if (payload.chatMessages) setChatMessages(payload.chatMessages);
+          if (payload.webDavBackups) setWebDavBackups(payload.webDavBackups);
+          if (payload.webDavConfig) setWebDavConfig(payload.webDavConfig);
+          if (payload.trashItems) setTrashItems(payload.trashItems);
           if (payload.systemSettings) setSystemSettings(payload.systemSettings);
         }
       };
@@ -524,13 +638,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const triggerManualSync = useCallback(async () => {
     setSyncState(prev => ({ ...prev, isSyncing: true, status: 'syncing', message: '正在同步多设备数据...' }));
     try {
-      // 1. Send our state to cloud sync endpoint
+      // 1. Send all our state to cloud sync endpoint
       const syncPayload = {
         posts,
         books,
         photos,
         media,
+        mails,
         products,
+        orders,
+        chatMessages,
+        webDavBackups,
+        webDavConfig,
+        trashItems,
         systemSettings,
         updatedAt: Date.now(),
       };
@@ -555,13 +675,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const data = await getRes.json();
         if (data && data.data) {
           const remote = data.data;
-          // If remote has newer posts or media
+          // If remote has newer updates
           if (remote.updatedAt && remote.updatedAt > (syncPayload.updatedAt - 10000)) {
-            if (Array.isArray(remote.posts) && remote.posts.length > 0) setPosts(remote.posts);
-            if (Array.isArray(remote.books) && remote.books.length > 0) setBooks(remote.books);
-            if (Array.isArray(remote.photos) && remote.photos.length > 0) setPhotos(remote.photos);
-            if (Array.isArray(remote.media) && remote.media.length > 0) setMedia(remote.media);
-            if (Array.isArray(remote.products) && remote.products.length > 0) setProducts(remote.products);
+            if (Array.isArray(remote.posts)) setPosts(remote.posts);
+            if (Array.isArray(remote.books)) setBooks(remote.books);
+            if (Array.isArray(remote.photos)) setPhotos(remote.photos);
+            if (Array.isArray(remote.media)) setMedia(remote.media);
+            if (Array.isArray(remote.mails)) setMails(remote.mails);
+            if (Array.isArray(remote.products)) setProducts(remote.products);
+            if (Array.isArray(remote.orders)) setOrders(remote.orders);
+            if (Array.isArray(remote.chatMessages)) setChatMessages(remote.chatMessages);
+            if (Array.isArray(remote.webDavBackups)) setWebDavBackups(remote.webDavBackups);
+            if (remote.webDavConfig) setWebDavConfig(remote.webDavConfig);
+            if (Array.isArray(remote.trashItems)) setTrashItems(remote.trashItems);
+            if (remote.systemSettings) setSystemSettings(remote.systemSettings);
           }
         }
       }
@@ -586,7 +713,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         message: '数据已在当前设备与多端完成对齐',
       });
     }
-  }, [posts, books, photos, media, products, systemSettings]);
+  }, [posts, books, photos, media, mails, products, orders, chatMessages, webDavBackups, webDavConfig, trashItems, systemSettings]);
 
   // Initial fetch from cloud on load to pull changes made from other devices
   useEffect(() => {
@@ -815,6 +942,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setBooks,
         photos,
         setPhotos,
+        photoFolders,
+        setPhotoFolders,
         media,
         setMedia,
         mails,
@@ -827,6 +956,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setChatMessages,
         webDavBackups,
         setWebDavBackups,
+        trashItems,
+        moveToTrash,
+        restoreFromTrash,
+        permanentDeleteFromTrash,
+        emptyTrash,
         systemSettings,
         updateSystemSettings,
         emailSettings,

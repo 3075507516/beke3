@@ -91,19 +91,23 @@ export const BookshelfSection: React.FC = () => {
 
         // Extract real text content for preview/reading
         let textContent = '';
+        let detectedTitle = file.name;
 
         if (format === 'EPUB') {
           try {
             const parsed = await parseEpubFile(file);
-            if (parsed.fullText && parsed.fullText.length > 50) {
+            if (parsed.fullText && parsed.fullText.length > 30) {
               textContent = parsed.fullText;
+            }
+            if (parsed.title && parsed.title.trim()) {
+              detectedTitle = `${file.name} (${parsed.title.trim()})`;
             }
           } catch (e) {
             console.warn('Failed parsing epub:', e);
           }
         }
 
-        if (!textContent && (file.type.includes('text') || ext === 'TXT' || ext === 'MD' || ext === 'JSON')) {
+        if (format === 'TXT' || ext === 'TXT' || ext === 'MD' || ext === 'JSON' || file.type.includes('text')) {
           try {
             const text = await file.text();
             if (text && text.trim().length > 0) {
@@ -115,20 +119,20 @@ export const BookshelfSection: React.FC = () => {
         }
 
         if (!textContent) {
-          textContent = `《${file.name.replace(/\.[^/.]+$/, '')}》\n\n文件格式: [${format}]  文件大小: ${(file.size / 1024 / 1024).toFixed(2)} MB\n上传者: ${currentUser?.username || 'fox'}\n\n【文件解析就绪】\n该电子书实体文件已安全上传至系统对象存储 (Cloudflare R2 / 本地 IndexedDB 实体持久库)。\n若为 PDF 格式，在线阅读模式将直接唤起高清 PDF 浏览器；若为 TXT/EPUB 格式，章节文字已解析呈现。您亦可随时点击“下载”获取原始二进制文件。`;
+          textContent = `《${file.name}》\n\n原上传文件名: ${file.name}\n文件格式: [${format}]  实际大小: ${(file.size / 1024 / 1024).toFixed(2)} MB (${file.size.toLocaleString()} 字节)\n上传时间: ${new Date().toLocaleString()}\n上传者: ${currentUser?.username || 'fox'}\n\n【文件在线阅读模式】\n实体数据已成功持久化并映射。您可直接在上方调整字体字号进行全屏沉浸式阅读，或随时点击“下载”获取该文件的原始二进制副本。`;
         }
 
         const createdBook: Book = {
           id: `book-${Date.now()}-${i}`,
-          title: file.name.replace(/\.[^/.]+$/, ''),
+          title: file.name, // Display the exact uploaded filename as requested
           author: currentUser?.username || 'fox',
           format,
           cover: coverOptions[format] || coverOptions.EPUB,
-          description: `已成功载入文档/书籍：${file.name}`,
+          description: `原文件名：${file.name} (${(file.size / 1024).toFixed(1)} KB)`,
           fileSize: file.size,
           fileUrl: uploaded?.url || '',
           content: textContent,
-          progress: 0,
+          progress: 5,
           createdAt: Date.now() - i * 1000,
           updatedAt: Date.now() - i * 1000,
         };

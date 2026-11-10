@@ -99,6 +99,60 @@ export const MediaSection: React.FC = () => {
     const videoExtensions = ['.mp4', '.webm', '.mov', '.mkv', '.m4v', '.avi', '.ogv'];
     const isVideo = file.type.startsWith('video/') ||
       videoExtensions.some(ext => file.name.toLowerCase().endsWith(ext));
+
+    // Capture real video frame as poster cover if it's a video!
+    let posterCover = isVideo
+      ? 'https://images.unsplash.com/photo-1470240731273-7821a6eeb6bd?auto=format&fit=crop&w=800&q=80'
+      : 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?auto=format&fit=crop&w=400&q=80';
+
+    let detectedDuration = isVideo ? '00:00' : '03:30';
+
+    if (isVideo && typeof document !== 'undefined') {
+      try {
+        const videoElement = document.createElement('video');
+        videoElement.preload = 'metadata';
+        videoElement.src = URL.createObjectURL(file);
+        videoElement.muted = true;
+
+        await new Promise((resolve) => {
+          videoElement.onloadeddata = () => {
+            const minutes = Math.floor(videoElement.duration / 60);
+            const seconds = Math.floor(videoElement.duration % 60);
+            if (!isNaN(videoElement.duration) && videoElement.duration > 0) {
+              detectedDuration = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+            }
+
+            // Seek slightly forward to capture frame
+            videoElement.currentTime = Math.min(1.0, videoElement.duration / 2);
+          };
+
+          videoElement.onseeked = () => {
+            try {
+              const canvas = document.createElement('canvas');
+              canvas.width = videoElement.videoWidth || 640;
+              canvas.height = videoElement.videoHeight || 360;
+              const ctx = canvas.getContext('2d');
+              if (ctx) {
+                ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+                const snapshotUrl = canvas.toDataURL('image/jpeg', 0.85);
+                if (snapshotUrl && snapshotUrl.length > 100) {
+                  posterCover = snapshotUrl;
+                }
+              }
+            } catch (canvasErr) {
+              console.warn('Canvas video capture failed', canvasErr);
+            }
+            resolve(true);
+          };
+
+          videoElement.onerror = () => resolve(true);
+          setTimeout(() => resolve(true), 2500); // 2.5s safe timeout
+        });
+      } catch (err) {
+        console.warn('Video thumbnail capture error:', err);
+      }
+    }
+
     const uploaded = await uploadFile(file);
 
     const newItem: MediaItem = {
@@ -107,10 +161,10 @@ export const MediaSection: React.FC = () => {
       title: file.name.replace(/\.[^/.]+$/, ''),
       artist: currentUser?.username || 'fox',
       src: uploaded.url,
-      cover: isVideo
-        ? 'https://images.unsplash.com/photo-1470240731273-7821a6eeb6bd?auto=format&fit=crop&w=800&q=80'
-        : 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?auto=format&fit=crop&w=400&q=80',
-      duration: '03:45',
+      cover: posterCover,
+      duration: detectedDuration,
+      fileSize: file.size,
+      uploadedAt: Date.now(),
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
@@ -400,14 +454,26 @@ export const MediaSection: React.FC = () => {
               </div>
 
               <div className="flex-1 min-w-0">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-sky-500">
-                  {item.type}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-sky-500">
+                    {item.type}
+                  </span>
+                  {item.fileSize && (
+                    <span className="text-[10px] text-slate-400 font-mono">
+                      {(item.fileSize / 1024 / 1024).toFixed(2)} MB
+                    </span>
+                  )}
+                </div>
                 <h4 className="text-sm font-bold font-serif-sc text-slate-800 dark:text-slate-100 truncate group-hover:text-sky-500 transition">
                   {item.title}
                 </h4>
-                <p className="text-xs text-slate-400 truncate mt-0.5">{item.artist}</p>
-                <span className="text-[10px] text-slate-400 mt-1 block">时长: {item.duration}</span>
+                <div className="flex items-center gap-2 text-[11px] text-slate-400 mt-0.5">
+                  <span>{item.artist}</span>
+                  <span>•</span>
+                  <span>时长: {item.duration}</span>
+                  <span>•</span>
+                  <span>{new Date(item.uploadedAt || item.createdAt).toLocaleDateString()}</span>
+                </div>
               </div>
 
               {currentUser?.role === 'admin' && (

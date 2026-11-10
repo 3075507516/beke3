@@ -43,12 +43,20 @@ export interface Book {
   deleted?: boolean;
 }
 
+export interface PhotoFolder {
+  id: string;
+  name: string;
+  createdAt: number;
+}
+
 export interface Photo {
   id: string;
   title: string;
   url: string;
   thumbnail?: string;
   category: string;
+  folderId?: string; // photo folder/album id
+  folderName?: string;
   width?: number;
   height?: number;
   description?: string;
@@ -65,6 +73,8 @@ export interface MediaItem {
   src: string;
   cover: string;
   duration: string;
+  fileSize?: number;
+  uploadedAt?: number;
   createdAt: number;
   updatedAt: number;
   deleted?: boolean;
@@ -220,6 +230,7 @@ export interface SystemSettings {
   syncIntervalSeconds: number;
   globalTheme: GlobalThemeMode; // 'modern' or 'retro'
   deviceView: DeviceViewMode; // 'responsive' or 'mobile'
+  timezone?: string; // Timezone setting, e.g. 'Asia/Shanghai', 'UTC', 'America/New_York'
 }
 
 export interface PaymentSettings {
@@ -283,4 +294,14 @@ export interface MultiTransferProgress {
   speed?: string;
   totalBytes?: number;
   transferredBytes?: number;
+}
+
+export interface TrashItem {
+  id: string;
+  originId: string;
+  originType: 'post' | 'book' | 'photo' | 'media' | 'mail' | 'chat' | 'product' | 'order';
+  title: string;
+  preview?: string;
+  deletedAt: number;
+  data: any;
 }

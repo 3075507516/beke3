@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { useApp } from '../../context/AppContext';
-import { Photo, ViewMode } from '../../types';
+import { Photo, ViewMode, PhotoFolder } from '../../types';
 import { SafeImage } from '../common/SafeImage';
 import {
   Image as ImageIcon,
@@ -16,6 +16,10 @@ import {
   LayoutGrid,
   ChevronLeft,
   ChevronRight,
+  Folder,
+  FolderPlus,
+  MoveRight,
+  FolderOpen,
 } from 'lucide-react';
 import JSZip from 'jszip';
 
@@ -23,6 +27,8 @@ export const GallerySection: React.FC = () => {
   const {
     photos,
     setPhotos,
+    photoFolders,
+    setPhotoFolders,
     currentUser,
     uploadFile,
     viewModes,
@@ -37,6 +43,10 @@ export const GallerySection: React.FC = () => {
 
   const [selectedPhoto, setSelectedPhoto] = useState<Photo | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [activeFolderId, setActiveFolderId] = useState<string>('all');
+  const [newFolderName, setNewFolderName] = useState<string>('');
+  const [isCreatingFolder, setIsCreatingFolder] = useState<boolean>(false);
+  const [targetFolderMove, setTargetFolderMove] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const currentViewMode: ViewMode = viewModes['gallery'] || 'original';
 
@@ -56,9 +66,46 @@ export const GallerySection: React.FC = () => {
     setSelectedPhoto(photos[nextIdx]);
   };
 
+  const filteredPhotos = photos.filter(p => {
+    if (activeFolderId === 'all') return true;
+    if (activeFolderId === 'uncategorized') return !p.folderId;
+    return p.folderId === activeFolderId;
+  });
+
+  const handleCreateFolder = () => {
+    if (!newFolderName.trim()) return;
+    const newF: PhotoFolder = {
+      id: `folder-${Date.now()}`,
+      name: newFolderName.trim(),
+      createdAt: Date.now(),
+    };
+    setPhotoFolders(prev => [...prev, newF]);
+    setNewFolderName('');
+    setIsCreatingFolder(false);
+  };
+
+  const handleMoveToFolder = (folderId: string) => {
+    if (selectedIds.length === 0) return;
+    const folder = photoFolders.find(f => f.id === folderId);
+    setPhotos(prev =>
+      prev.map(p =>
+        selectedIds.includes(p.id)
+          ? {
+              ...p,
+              folderId: folderId || undefined,
+              folderName: folder?.name || undefined,
+            }
+          : p
+      )
+    );
+    setSelectedIds([]);
+  };
+
   const handleUploadPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
+
+    const currentFolder = photoFolders.find(f => f.id === activeFolderId);
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
@@ -67,7 +114,9 @@ export const GallerySection: React.FC = () => {
         id: `photo-${Date.now()}-${i}`,
         title: file.name.replace(/\.[^/.]+$/, ''),
         url: uploaded.url,
-        category: '相册精选',
+        category: currentFolder ? currentFolder.name : '相册精选',
+        folderId: activeFolderId !== 'all' ? activeFolderId : undefined,
+        folderName: currentFolder?.name,
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };
@@ -245,7 +294,82 @@ export const GallerySection: React.FC = () => {
         </div>
       </div>
 
-      {/* Batch Operations Bar */}
+      {/* Folder / Album Navigation Bar */}
+      <div className={`p-3.5 rounded-2xl border flex items-center justify-between gap-3 overflow-x-auto ${
+        systemSettings.transparentCards
+          ? 'bg-white/60 dark:bg-slate-900/60 backdrop-blur-md border-white/20'
+          : 'bg-white dark:bg-slate-900 border-slate-200/80 dark:border-slate-800'
+      }`}>
+        <div className="flex items-center gap-2 overflow-x-auto">
+          <button
+            onClick={() => setActiveFolderId('all')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition ${
+              activeFolderId === 'all'
+                ? 'bg-rose-500 text-white shadow-sm'
+                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
+            }`}
+          >
+            <FolderOpen className="w-3.5 h-3.5" />
+            <span>全部照片 ({photos.length})</span>
+          </button>
+
+          {photoFolders.map(folder => {
+            const count = photos.filter(p => p.folderId === folder.id).length;
+            return (
+              <button
+                key={folder.id}
+                onClick={() => setActiveFolderId(folder.id)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition ${
+                  activeFolderId === folder.id
+                    ? 'bg-rose-500 text-white shadow-sm'
+                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200'
+                }`}
+              >
+                <Folder className="w-3.5 h-3.5 text-amber-500" />
+                <span>{folder.name} ({count})</span>
+              </button>
+            );
+          })}
+        </div>
+
+        {currentUser?.role === 'admin' && (
+          <div className="flex items-center gap-2 shrink-0">
+            {isCreatingFolder ? (
+              <div className="flex items-center gap-1">
+                <input
+                  type="text"
+                  value={newFolderName}
+                  onChange={e => setNewFolderName(e.target.value)}
+                  placeholder="新文件夹名称"
+                  className="px-2.5 py-1 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
+                />
+                <button
+                  onClick={handleCreateFolder}
+                  className="px-2.5 py-1 bg-rose-500 text-white text-xs font-semibold rounded-lg shadow-sm"
+                >
+                  创建
+                </button>
+                <button
+                  onClick={() => setIsCreatingFolder(false)}
+                  className="px-2 py-1 text-xs text-slate-400 hover:text-slate-600"
+                >
+                  取消
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setIsCreatingFolder(true)}
+                className="flex items-center gap-1 px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-medium rounded-xl transition whitespace-nowrap"
+              >
+                <FolderPlus className="w-3.5 h-3.5 text-rose-500" />
+                <span>新建相册文件夹</span>
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Batch Operations & Move to Folder Bar */}
       <div className={`p-3 rounded-2xl border flex flex-wrap items-center justify-between gap-3 text-xs ${
         systemSettings.transparentCards
           ? 'bg-white/60 dark:bg-slate-900/60 backdrop-blur-md border-white/20'
@@ -256,12 +380,12 @@ export const GallerySection: React.FC = () => {
             onClick={handleSelectAll}
             className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300 font-medium hover:text-rose-500"
           >
-            {selectedIds.length === photos.length && photos.length > 0 ? (
+            {selectedIds.length === filteredPhotos.length && filteredPhotos.length > 0 ? (
               <CheckSquare className="w-4 h-4 text-rose-500" />
             ) : (
               <Square className="w-4 h-4 text-slate-400" />
             )}
-            <span>{t('action.selectAll')} ({selectedIds.length}/{photos.length})</span>
+            <span>{t('action.selectAll')} ({selectedIds.length}/{filteredPhotos.length})</span>
           </button>
 
           {selectedIds.length > 0 && (
@@ -285,11 +409,27 @@ export const GallerySection: React.FC = () => {
             </>
           )}
         </div>
+
+        {selectedIds.length > 0 && currentUser?.role === 'admin' && (
+          <div className="flex items-center gap-2">
+            <span className="text-slate-500 text-[11px]">移至文件夹:</span>
+            <select
+              onChange={e => handleMoveToFolder(e.target.value)}
+              defaultValue=""
+              className="px-2 py-1 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+            >
+              <option value="" disabled>选择目标文件夹</option>
+              {photoFolders.map(f => (
+                <option key={f.id} value={f.id}>{f.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
       {/* Gallery Grid */}
       <div className={getLayoutClass()}>
-        {photos.map(photo => {
+        {filteredPhotos.map(photo => {
           const isSelected = selectedIds.includes(photo.id);
 
           // Small list view
