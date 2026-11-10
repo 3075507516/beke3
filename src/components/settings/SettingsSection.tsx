@@ -869,30 +869,13 @@ export const SettingsSection: React.FC = () => {
                     仅限邮箱注册 (强制邮箱身份验证)
                   </h4>
                   <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
-                    开启后新用户注册必须提供有效邮箱并验证，杜绝虚假机器人批量注水。
+                    开启后普通账号注册通道将关闭，新用户注册必须提供有效邮箱地址。
                   </p>
                 </div>
                 <input
                   type="checkbox"
                   checked={systemSettings.emailRegistrationOnly}
                   onChange={e => updateSystemSettings({ emailRegistrationOnly: e.target.checked })}
-                  className="w-5 h-5 text-sky-500 rounded focus:ring-sky-500 shrink-0 cursor-pointer"
-                />
-              </div>
-
-              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/70 dark:border-slate-700 flex items-start justify-between gap-4">
-                <div>
-                  <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100">
-                    开放新用户注册
-                  </h4>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
-                    关闭后仅管理员可登录，阻断外部注册通道。
-                  </p>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={systemSettings.allowRegistration}
-                  onChange={e => updateSystemSettings({ allowRegistration: e.target.checked })}
                   className="w-5 h-5 text-sky-500 rounded focus:ring-sky-500 shrink-0 cursor-pointer"
                 />
               </div>

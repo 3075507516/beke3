@@ -1,4 +1,5 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
+import { resolveFileUrl } from '../../utils/storage';
 
 interface SafeImageProps extends React.ImgHTMLAttributes<HTMLImageElement> {
   src: string;
@@ -34,19 +35,47 @@ export const SafeImage: React.FC<SafeImageProps> = ({
     setIsLoaded(true);
   };
 
-  React.useEffect(() => {
+  useEffect(() => {
+    let isCancelled = false;
+
     if (src) {
-      setCurrentSrc(src);
       setHasError(false);
-      // If already complete in cache
-      if (imgRef.current?.complete && imgRef.current.naturalWidth > 0) {
-        setIsLoaded(true);
+      // If src is an IndexedDB file key (idb_file_*), resolve it to a readable blob URL
+      if (src.startsWith('idb_file_')) {
+        resolveFileUrl(src)
+          .then((resolved) => {
+            if (!isCancelled) {
+              if (resolved && resolved !== src) {
+                setCurrentSrc(resolved);
+              } else {
+                setCurrentSrc(fallbackSrc);
+                setHasError(true);
+              }
+              setIsLoaded(true);
+            }
+          })
+          .catch(() => {
+            if (!isCancelled) {
+              setCurrentSrc(fallbackSrc);
+              setHasError(true);
+              setIsLoaded(true);
+            }
+          });
+      } else {
+        setCurrentSrc(src);
+        if (imgRef.current?.complete && imgRef.current.naturalWidth > 0) {
+          setIsLoaded(true);
+        }
       }
     } else {
       setCurrentSrc(fallbackSrc);
       setHasError(true);
       setIsLoaded(true);
     }
+
+    return () => {
+      isCancelled = true;
+    };
   }, [src, fallbackSrc]);
 
   return (

@@ -39,7 +39,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   React.useEffect(() => {
     if (isOpen) {
       setMode('login');
-      setRegisterType('standard');
+      setRegisterType(systemSettings.emailRegistrationOnly ? 'email' : 'standard');
       setStatusMsg(null);
       setPassword('');
       setConfirmPassword('');
@@ -49,7 +49,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
       setDeploymentSecret('');
       setNewAdminPassword('');
     }
-  }, [isOpen]);
+  }, [isOpen, systemSettings.emailRegistrationOnly]);
 
   if (!isOpen) return null;
 
@@ -275,9 +275,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     // Determine effective registration type
     const isEmailMode = systemSettings.emailRegistrationOnly || registerType === 'email';
 
+    if (systemSettings.emailRegistrationOnly && registerType !== 'email') {
+      setStatusMsg({ type: 'error', text: '当前系统已开启仅限邮箱注册，账号注册通道已关闭，请使用邮箱注册！' });
+      return;
+    }
+
     if (isEmailMode) {
       if (!trimmedEmail || !trimmedEmail.includes('@') || !trimmedEmail.includes('.')) {
-        setStatusMsg({ type: 'error', text: '请输入有效的电子邮箱地址（例如 user@example.com）' });
+        setStatusMsg({ type: 'error', text: '当前模式仅限邮箱注册，请输入有效的电子邮箱地址（例如 user@example.com）' });
         return;
       }
     }
@@ -567,46 +572,46 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
           /* REGISTRATION FORM */
           <div className="space-y-4">
             {/* Registration Mode Selector Tabs */}
-            <div className="flex p-1 bg-slate-100 dark:bg-slate-800 rounded-xl text-xs font-semibold">
-              <button
-                type="button"
-                onClick={() => {
-                  if (!isForcedEmailReg) {
+            {!isForcedEmailReg ? (
+              <div className="flex p-1 bg-slate-100 dark:bg-slate-800 rounded-xl text-xs font-semibold">
+                <button
+                  type="button"
+                  onClick={() => {
                     setRegisterType('standard');
                     setStatusMsg(null);
-                  }
-                }}
-                disabled={isForcedEmailReg}
-                className={`flex-1 py-1.5 text-center rounded-lg transition ${
-                  registerType === 'standard' && !isForcedEmailReg
-                    ? 'bg-white dark:bg-slate-900 text-rose-600 dark:text-rose-400 shadow-sm'
-                    : isForcedEmailReg
-                    ? 'text-slate-400 cursor-not-allowed opacity-60'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
-                }`}
-              >
-                普通注册 (用户名+密码)
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setRegisterType('email');
-                  setStatusMsg(null);
-                }}
-                className={`flex-1 py-1.5 text-center rounded-lg transition ${
-                  registerType === 'email' || isForcedEmailReg
-                    ? 'bg-white dark:bg-slate-900 text-rose-600 dark:text-rose-400 shadow-sm'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
-                }`}
-              >
-                邮箱注册 (邮箱+密码)
-              </button>
-            </div>
-
-            {isForcedEmailReg && (
-              <p className="text-[11px] text-sky-600 dark:text-sky-400 text-center">
-                * 当前系统开启了强制邮箱注册模式
-              </p>
+                  }}
+                  className={`flex-1 py-1.5 text-center rounded-lg transition ${
+                    registerType === 'standard'
+                      ? 'bg-white dark:bg-slate-900 text-rose-600 dark:text-rose-400 shadow-sm'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                  }`}
+                >
+                  普通注册 (用户名+密码)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRegisterType('email');
+                    setStatusMsg(null);
+                  }}
+                  className={`flex-1 py-1.5 text-center rounded-lg transition ${
+                    registerType === 'email'
+                      ? 'bg-white dark:bg-slate-900 text-rose-600 dark:text-rose-400 shadow-sm'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                  }`}
+                >
+                  邮箱注册 (邮箱+密码)
+                </button>
+              </div>
+            ) : (
+              <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-900/40 text-center">
+                <p className="text-xs font-semibold text-amber-800 dark:text-amber-200">
+                  当前系统已开启【仅限邮箱注册】，普通账号无法注册
+                </p>
+                <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-0.5">
+                  新用户必须通过有效电子邮箱与密码完成实名注册
+                </p>
+              </div>
             )}
 
             <form onSubmit={handleRegister} className="space-y-3">

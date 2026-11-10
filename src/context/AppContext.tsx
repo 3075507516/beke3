@@ -498,7 +498,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   useEffect(() => {
     refreshChannelStatus();
-    const interval = setInterval(refreshChannelStatus, 15000);
+    // Low-frequency heartbeat: probe every 60s instead of flooding network traffic
+    const interval = setInterval(refreshChannelStatus, 60000);
     return () => clearInterval(interval);
   }, [refreshChannelStatus]);
 
@@ -596,65 +597,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }, 600);
   }, []);
 
-  // Sync to local storage
+  // Sync to local storage: save locally without generating network storms
   useEffect(() => saveLocalStorage(STORAGE_KEYS.CURRENT_USER, currentUser), [currentUser]);
   useEffect(() => saveLocalStorage(STORAGE_KEYS.USERS, users), [users]);
-  useEffect(() => {
-    saveLocalStorage(STORAGE_KEYS.POSTS, posts);
-    broadcastSync({ posts });
-  }, [posts]);
-  useEffect(() => {
-    saveLocalStorage(STORAGE_KEYS.BOOKS, books);
-    broadcastSync({ books });
-  }, [books]);
-  useEffect(() => {
-    saveLocalStorage(STORAGE_KEYS.PHOTOS, photos);
-    broadcastSync({ photos });
-  }, [photos]);
-  useEffect(() => {
-    saveLocalStorage(STORAGE_KEYS.MEDIA, media);
-    broadcastSync({ media });
-  }, [media]);
-  useEffect(() => {
-    saveLocalStorage(STORAGE_KEYS.MAILS, mails);
-    broadcastSync({ mails });
-  }, [mails]);
-  useEffect(() => {
-    saveLocalStorage(STORAGE_KEYS.PRODUCTS, products);
-    broadcastSync({ products });
-  }, [products]);
-  useEffect(() => {
-    saveLocalStorage(STORAGE_KEYS.ORDERS, orders);
-    broadcastSync({ orders });
-  }, [orders]);
-  useEffect(() => {
-    saveLocalStorage(STORAGE_KEYS.CHAT_MESSAGES, chatMessages);
-    broadcastSync({ chatMessages });
-  }, [chatMessages]);
-  useEffect(() => {
-    saveLocalStorage(STORAGE_KEYS.SYSTEM_SETTINGS, systemSettings);
-    broadcastSync({ systemSettings });
-  }, [systemSettings]);
-  useEffect(() => {
-    saveLocalStorage(STORAGE_KEYS.EMAIL_SETTINGS, emailSettings);
-    broadcastSync({ emailSettings });
-  }, [emailSettings]);
-  useEffect(() => {
-    saveLocalStorage(STORAGE_KEYS.PAYMENT_SETTINGS, paymentSettings);
-    broadcastSync({ paymentSettings });
-  }, [paymentSettings]);
-  useEffect(() => {
-    saveLocalStorage(STORAGE_KEYS.WEBDAV_CONFIG, webDavConfig);
-    broadcastSync({ webDavConfig });
-  }, [webDavConfig]);
-  useEffect(() => {
-    saveLocalStorage(STORAGE_KEYS.WEBDAV_BACKUPS, webDavBackups);
-    broadcastSync({ webDavBackups });
-  }, [webDavBackups]);
-  useEffect(() => {
-    saveLocalStorage('fox3_trash_items', trashItems);
-    broadcastSync({ trashItems });
-  }, [trashItems]);
+  useEffect(() => saveLocalStorage(STORAGE_KEYS.POSTS, posts), [posts]);
+  useEffect(() => saveLocalStorage(STORAGE_KEYS.BOOKS, books), [books]);
+  useEffect(() => saveLocalStorage(STORAGE_KEYS.PHOTOS, photos), [photos]);
+  useEffect(() => saveLocalStorage(STORAGE_KEYS.MEDIA, media), [media]);
+  useEffect(() => saveLocalStorage(STORAGE_KEYS.MAILS, mails), [mails]);
+  useEffect(() => saveLocalStorage(STORAGE_KEYS.PRODUCTS, products), [products]);
+  useEffect(() => saveLocalStorage(STORAGE_KEYS.ORDERS, orders), [orders]);
+  useEffect(() => saveLocalStorage(STORAGE_KEYS.CHAT_MESSAGES, chatMessages), [chatMessages]);
+  useEffect(() => saveLocalStorage(STORAGE_KEYS.SYSTEM_SETTINGS, systemSettings), [systemSettings]);
+  useEffect(() => saveLocalStorage(STORAGE_KEYS.EMAIL_SETTINGS, emailSettings), [emailSettings]);
+  useEffect(() => saveLocalStorage(STORAGE_KEYS.PAYMENT_SETTINGS, paymentSettings), [paymentSettings]);
+  useEffect(() => saveLocalStorage(STORAGE_KEYS.WEBDAV_CONFIG, webDavConfig), [webDavConfig]);
+  useEffect(() => saveLocalStorage(STORAGE_KEYS.WEBDAV_BACKUPS, webDavBackups), [webDavBackups]);
+  useEffect(() => saveLocalStorage('fox3_trash_items', trashItems), [trashItems]);
 
   const updateSystemSettings = (newSettings: Partial<SystemSettings>) => {
     setSystemSettings(prev => ({ ...prev, ...newSettings }));
@@ -885,12 +844,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch (e) {}
   }, [posts, books, photos, media, products, systemSettings]);
 
-  // Auto-sync timer
+  // Auto-sync timer (gentle interval with minimum threshold to avoid bandwidth consumption)
   useEffect(() => {
     if (!systemSettings.autoSync) return;
+    const intervalMs = Math.max(120, systemSettings.syncIntervalSeconds || 120) * 1000;
     const interval = setInterval(() => {
       triggerManualSync();
-    }, (systemSettings.syncIntervalSeconds || 20) * 1000);
+    }, intervalMs);
     return () => clearInterval(interval);
   }, [systemSettings.autoSync, systemSettings.syncIntervalSeconds, triggerManualSync]);
 
