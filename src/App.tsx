@@ -59,7 +59,9 @@ const MainLayout: React.FC = () => {
         backgroundColor:
           themeMode === 'nostalgic'
             ? '#008080'
-            : systemSettings.customPaletteBg || (darkMode ? '#020617' : '#f8fafc'),
+            : darkMode
+            ? '#020617'
+            : systemSettings.customPaletteBg || '#f8fafc',
         backgroundImage: systemSettings.fullBackgroundUrl
           ? `url(${systemSettings.fullBackgroundUrl})`
           : undefined,

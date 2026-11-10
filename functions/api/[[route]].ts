@@ -270,26 +270,55 @@ export const onRequest = async (context: any) => {
   }
 
   // Health check & genuine connectivity status indicator
-  // Displays online (channelOnline: true) ONLY when DB or R2_BUCKET is actually bound
+  // Displays online (channelOnline: true) when DB or R2_BUCKET is actually bound and live
   if (path === '/status' || path === '') {
-    const hasD1 = Boolean(env.DB);
-    const hasR2 = Boolean(env.R2_BUCKET);
-    const hasKV = Boolean(env.KV);
-    const channelOnline = hasD1 || hasR2;
+    let d1Healthy = false;
+    let r2Healthy = false;
+    let kvHealthy = false;
+
+    // Active live connectivity probing
+    if (env.DB) {
+      try {
+        await env.DB.prepare('SELECT 1').first();
+        d1Healthy = true;
+      } catch {
+        d1Healthy = false;
+      }
+    }
+
+    if (env.R2_BUCKET) {
+      try {
+        await env.R2_BUCKET.list({ limit: 1 });
+        r2Healthy = true;
+      } catch {
+        r2Healthy = false;
+      }
+    }
+
+    if (env.KV) {
+      try {
+        await env.KV.get('__fox3_probe__');
+        kvHealthy = true;
+      } catch {
+        kvHealthy = false;
+      }
+    }
+
+    const channelOnline = d1Healthy || r2Healthy;
 
     return new Response(JSON.stringify({
       success: true,
       status: channelOnline ? 'online' : 'offline',
       channelOnline,
-      version: '3.8.0',
+      version: '3.8.1',
       cloudServices: {
-        d1: hasD1,
-        r2: hasR2,
-        kv: hasKV,
+        d1: d1Healthy,
+        r2: r2Healthy,
+        kv: kvHealthy,
       },
       message: channelOnline
-        ? 'Cloudflare D1/R2 服务通道已正常在线'
-        : '未检测到 D1/R2 绑定，当前运行在本地离线/本地存储模式',
+        ? 'Cloudflare D1/R2 服务通道已正常在线并完成连通探测'
+        : '未检测到活跃 D1/R2 绑定，当前运行在本地离线/本地存储模式',
       timestamp: Date.now(),
     }), {
       headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
@@ -436,7 +465,7 @@ export const onRequest = async (context: any) => {
     }
   }
 
-  // Cloudflare R2 File Access & Stream (with accurate Content-Type, Range & caching headers)
+  // Cloudflare R2 File Access & Stream (with accurate Content-Type, Range & caching headers, supporting inline view & attachment download)
   if (path.startsWith('/files/')) {
     const key = path.replace('/files/', '');
     if (!env.R2_BUCKET) {
@@ -450,6 +479,14 @@ export const onRequest = async (context: any) => {
     object.writeHttpMetadata(responseHeaders);
     responseHeaders.set('etag', object.httpEtag);
     responseHeaders.set('Cache-Control', 'public, max-age=31536000, immutable');
+
+    // Check if client explicitly requests download via query param
+    const isDownload = url.searchParams.get('download') === '1';
+    if (isDownload) {
+      const originalName = object.customMetadata?.originalName || key;
+      responseHeaders.set('Content-Disposition', `attachment; filename="${originalName}"; filename*=UTF-8''${originalName}`);
+    }
+
     return new Response(object.body, { headers: responseHeaders });
   }
 
