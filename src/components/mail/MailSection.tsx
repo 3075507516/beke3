@@ -106,14 +106,15 @@ export const MailSection: React.FC = () => {
     setSelectedIds([]);
   };
 
-  const handleSendMail = (e: React.FormEvent) => {
+  const handleSendMail = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!recipient || !subject || !body) return;
 
+    const sender = emailSettings.senderEmail || 'service@whitefox.blog';
     const newMail: MailMessage = {
       id: `mail-${Date.now()}`,
       folder: 'sent',
-      sender: emailSettings.senderEmail || 'service@whitefox.blog',
+      sender,
       recipient,
       subject,
       body,
@@ -130,6 +131,22 @@ export const MailSection: React.FC = () => {
     setSubject('');
     setBody('');
     setActiveFolder('sent');
+
+    // Call backend API for real third-party/Cloudflare dispatch
+    try {
+      await fetch('/api/mail/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to: recipient,
+          subject,
+          text: body,
+          type: 'admin_reply',
+        })
+      });
+    } catch (err) {
+      console.warn('[MailSection] Backend dispatch fallback:', err);
+    }
   };
 
   const handleReplyMail = () => {

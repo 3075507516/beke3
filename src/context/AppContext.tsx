@@ -130,9 +130,11 @@ interface AppContextType {
   viewModes: Record<string, ViewMode>;
   setViewMode: (section: string, mode: ViewMode) => void;
 
-  // Admin password management & uniqueness
+  // Admin credentials management & single admin uniqueness
+  adminUsername: string;
   adminPassword: string;
   updateAdminPassword: (newPass: string) => boolean;
+  updateAdminUsername: (newName: string) => boolean;
 
   // Universal Recycle Bin (Trash)
   trashItems: Array<{
@@ -180,19 +182,47 @@ interface AppContextType {
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Admin password with uniqueness & persistence
+  // Admin credentials with uniqueness & persistence (default 'fox', configurable via backend variable or dashboard)
+  const [adminUsername, setAdminUsernameState] = useState<string>(() =>
+    loadLocalStorage<string>(STORAGE_KEYS.ADMIN_USERNAME, 'fox')
+  );
   const [adminPassword, setAdminPasswordState] = useState<string>(() =>
     loadLocalStorage<string>(STORAGE_KEYS.ADMIN_PASSWORD, 'fox3admin2026')
   );
+
+  // Probe backend environment variable for admin config on startup
+  useEffect(() => {
+    fetch('/api/admin/config')
+      .then(r => r.ok && r.json())
+      .then(data => {
+        if (data && data.success && data.adminUsername) {
+          setAdminUsernameState(data.adminUsername);
+          saveLocalStorage(STORAGE_KEYS.ADMIN_USERNAME, data.adminUsername);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const updateAdminPassword = (newPass: string): boolean => {
     if (!newPass || newPass.length < 6) return false;
     setAdminPasswordState(newPass);
     saveLocalStorage(STORAGE_KEYS.ADMIN_PASSWORD, newPass);
-    // Broadcast immediately
     try {
       const bc = new BroadcastChannel('fox3_realtime_sync');
       bc.postMessage({ type: 'SYNC_ALL', payload: { adminPassword: newPass } });
+      bc.close();
+    } catch (e) {}
+    return true;
+  };
+
+  const updateAdminUsername = (newName: string): boolean => {
+    if (!newName || newName.trim().length < 2) return false;
+    const sanitized = newName.trim().toLowerCase();
+    setAdminUsernameState(sanitized);
+    saveLocalStorage(STORAGE_KEYS.ADMIN_USERNAME, sanitized);
+    try {
+      const bc = new BroadcastChannel('fox3_realtime_sync');
+      bc.postMessage({ type: 'SYNC_ALL', payload: { adminUsername: sanitized } });
       bc.close();
     } catch (e) {}
     return true;
@@ -1066,8 +1096,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         channelConnected,
         cloudServicesStatus,
         refreshChannelStatus,
+        adminUsername,
         adminPassword,
         updateAdminPassword,
+        updateAdminUsername,
       }}
     >
       {children}

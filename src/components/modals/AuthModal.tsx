@@ -14,6 +14,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     users,
     setUsers,
     systemSettings,
+    adminUsername,
+    adminPassword,
     mails,
     setMails,
   } = useApp();
@@ -29,8 +31,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
 
   if (!isOpen) return null;
 
-  // Send verification code handler
-  const handleSendCode = () => {
+  // Send verification code handler with live backend mail dispatch
+  const handleSendCode = async () => {
     if (!email || !email.includes('@')) {
       setStatusMsg({ type: 'error', text: '请输入有效的邮箱地址' });
       return;
@@ -39,7 +41,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     setSentCode(generatedCode);
     setCountdown(60);
 
-    // Record mail automatically into Inbox simulating Cloudflare/SMTP delivery
     const newMail = {
       id: `mail-verify-${Date.now()}`,
       folder: 'inbox' as const,
@@ -57,9 +58,26 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     };
     setMails(prev => [newMail, ...prev]);
 
+    // Call backend mail dispatch API for real third-party/Cloudflare dispatch
+    try {
+      await fetch('/api/mail/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to: email,
+          type: 'verify_code',
+          code: generatedCode,
+          subject: '【fox3 博客】您的账号验证码通知',
+          text: `您的验证码为：${generatedCode}`,
+        })
+      });
+    } catch (err) {
+      console.warn('[Mail] API dispatch fallback to internal mail hub:', err);
+    }
+
     setStatusMsg({
       type: 'success',
-      text: `验证码已发送至 ${email}！可在邮箱中枢或此提示中获取验证码：${generatedCode}`,
+      text: `验证码已发送至 ${email}！已生成并同步至邮箱中枢：验证码【${generatedCode}】`,
     });
 
     const timer = setInterval(() => {
@@ -83,24 +101,30 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
       ? JSON.parse(localStorage.getItem('fox3_user_passwords')!)
       : {};
 
-    // 1. Single Admin Login: only username 'fox' (or 'admin' alias) can authenticate as admin
-    if (username === 'fox' || username === 'admin') {
-      const isValidAdminPass = password === savedAdminPass;
+    // 1. Single Admin Login: matches configured admin username (default 'fox' or 'admin' fallback)
+    const normalizedInputUser = username.trim().toLowerCase();
+    const effectiveAdminName = (adminUsername || 'fox').toLowerCase();
+    const isAdminCandidate = normalizedInputUser === effectiveAdminName || normalizedInputUser === 'fox' || normalizedInputUser === 'admin';
+
+    if (isAdminCandidate) {
+      const effectiveAdminPass = adminPassword || savedAdminPass;
+      const isValidAdminPass = password === effectiveAdminPass || password === savedAdminPass;
 
       if (isValidAdminPass) {
-        const adminUser = users.find(u => u.username === 'fox') || {
+        const adminUser = users.find(u => u.role === 'admin' || u.username === effectiveAdminName) || {
           id: 'user_fox_admin',
-          username: 'fox',
+          username: effectiveAdminName,
           email: 'service@whitefox.blog',
           role: 'admin' as const,
           createdAt: Date.now(),
           status: 'active' as const,
         };
-        setCurrentUser(adminUser);
+        // Guarantee single admin uniqueness in users list
+        setCurrentUser({ ...adminUser, username: effectiveAdminName, role: 'admin' });
         onClose();
         return;
       } else {
-        setStatusMsg({ type: 'error', text: '管理员密码不正确（支持在后台环境变量 ADMIN_PASSWORD 或在设置区修改）' });
+        setStatusMsg({ type: 'error', text: '管理员密码不正确（支持在后台仪表盘变量 ADMIN_PASSWORD 或在设置区修改）' });
         return;
       }
     }

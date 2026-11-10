@@ -307,13 +307,18 @@ export const SettingsSection: React.FC = () => {
   const fullBgInputRef = useRef<HTMLInputElement>(null);
   const heroBgInputRef = useRef<HTMLInputElement>(null);
 
-  const { adminPassword, updateAdminPassword } = useApp();
+  const { adminUsername, adminPassword, updateAdminPassword, updateAdminUsername } = useApp();
 
-  // Password change state
+  // Password & Username change state
+  const [customAdminName, setCustomAdminName] = useState(adminUsername);
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordMsg, setPasswordMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    setCustomAdminName(adminUsername);
+  }, [adminUsername]);
 
   // Expanded Rich Theme Presets
   const themePresets = [
@@ -389,7 +394,10 @@ export const SettingsSection: React.FC = () => {
 
     // Apply update and guarantee uniqueness
     updateAdminPassword(newPassword);
-    setPasswordMsg('✅ 管理员密码已在前端成功修改并加密保存！全站唯一超级管理员【fox】最高控制权已更新。');
+    if (customAdminName && customAdminName.trim() !== adminUsername) {
+      updateAdminUsername(customAdminName.trim());
+    }
+    setPasswordMsg(`✅ 管理员凭据已成功修改并持久化！全站唯一超级管理员【${customAdminName || adminUsername}】最高控制权已生效。`);
     setCurrentPassword('');
     setNewPassword('');
     setConfirmPassword('');
@@ -1428,6 +1436,19 @@ export const SettingsSection: React.FC = () => {
                 {passwordMsg}
               </div>
             )}
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
+                管理员用户名 (系统全局唯一，默认 fox，支持前端修改或后台变量 ADMIN_USERNAME 覆盖)
+              </label>
+              <input
+                type="text"
+                value={customAdminName}
+                onChange={e => setCustomAdminName(e.target.value)}
+                placeholder="fox"
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 font-mono"
+              />
+            </div>
 
             <div>
               <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
