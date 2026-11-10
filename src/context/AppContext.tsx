@@ -182,7 +182,7 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // Admin password with uniqueness & persistence
   const [adminPassword, setAdminPasswordState] = useState<string>(() =>
-    loadLocalStorage<string>(STORAGE_KEYS.ADMIN_PASSWORD, 'whitefox2025')
+    loadLocalStorage<string>(STORAGE_KEYS.ADMIN_PASSWORD, 'fox3admin2026')
   );
 
   const updateAdminPassword = (newPass: string): boolean => {
@@ -551,19 +551,62 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Sync to local storage
   useEffect(() => saveLocalStorage(STORAGE_KEYS.CURRENT_USER, currentUser), [currentUser]);
   useEffect(() => saveLocalStorage(STORAGE_KEYS.USERS, users), [users]);
-  useEffect(() => saveLocalStorage(STORAGE_KEYS.POSTS, posts), [posts]);
-  useEffect(() => saveLocalStorage(STORAGE_KEYS.BOOKS, books), [books]);
-  useEffect(() => saveLocalStorage(STORAGE_KEYS.PHOTOS, photos), [photos]);
-  useEffect(() => saveLocalStorage(STORAGE_KEYS.MEDIA, media), [media]);
-  useEffect(() => saveLocalStorage(STORAGE_KEYS.MAILS, mails), [mails]);
-  useEffect(() => saveLocalStorage(STORAGE_KEYS.PRODUCTS, products), [products]);
-  useEffect(() => saveLocalStorage(STORAGE_KEYS.ORDERS, orders), [orders]);
-  useEffect(() => saveLocalStorage(STORAGE_KEYS.CHAT_MESSAGES, chatMessages), [chatMessages]);
-  useEffect(() => saveLocalStorage(STORAGE_KEYS.SYSTEM_SETTINGS, systemSettings), [systemSettings]);
-  useEffect(() => saveLocalStorage(STORAGE_KEYS.EMAIL_SETTINGS, emailSettings), [emailSettings]);
-  useEffect(() => saveLocalStorage(STORAGE_KEYS.PAYMENT_SETTINGS, paymentSettings), [paymentSettings]);
-  useEffect(() => saveLocalStorage(STORAGE_KEYS.WEBDAV_CONFIG, webDavConfig), [webDavConfig]);
-  useEffect(() => saveLocalStorage(STORAGE_KEYS.WEBDAV_BACKUPS, webDavBackups), [webDavBackups]);
+  useEffect(() => {
+    saveLocalStorage(STORAGE_KEYS.POSTS, posts);
+    broadcastSync({ posts });
+  }, [posts]);
+  useEffect(() => {
+    saveLocalStorage(STORAGE_KEYS.BOOKS, books);
+    broadcastSync({ books });
+  }, [books]);
+  useEffect(() => {
+    saveLocalStorage(STORAGE_KEYS.PHOTOS, photos);
+    broadcastSync({ photos });
+  }, [photos]);
+  useEffect(() => {
+    saveLocalStorage(STORAGE_KEYS.MEDIA, media);
+    broadcastSync({ media });
+  }, [media]);
+  useEffect(() => {
+    saveLocalStorage(STORAGE_KEYS.MAILS, mails);
+    broadcastSync({ mails });
+  }, [mails]);
+  useEffect(() => {
+    saveLocalStorage(STORAGE_KEYS.PRODUCTS, products);
+    broadcastSync({ products });
+  }, [products]);
+  useEffect(() => {
+    saveLocalStorage(STORAGE_KEYS.ORDERS, orders);
+    broadcastSync({ orders });
+  }, [orders]);
+  useEffect(() => {
+    saveLocalStorage(STORAGE_KEYS.CHAT_MESSAGES, chatMessages);
+    broadcastSync({ chatMessages });
+  }, [chatMessages]);
+  useEffect(() => {
+    saveLocalStorage(STORAGE_KEYS.SYSTEM_SETTINGS, systemSettings);
+    broadcastSync({ systemSettings });
+  }, [systemSettings]);
+  useEffect(() => {
+    saveLocalStorage(STORAGE_KEYS.EMAIL_SETTINGS, emailSettings);
+    broadcastSync({ emailSettings });
+  }, [emailSettings]);
+  useEffect(() => {
+    saveLocalStorage(STORAGE_KEYS.PAYMENT_SETTINGS, paymentSettings);
+    broadcastSync({ paymentSettings });
+  }, [paymentSettings]);
+  useEffect(() => {
+    saveLocalStorage(STORAGE_KEYS.WEBDAV_CONFIG, webDavConfig);
+    broadcastSync({ webDavConfig });
+  }, [webDavConfig]);
+  useEffect(() => {
+    saveLocalStorage(STORAGE_KEYS.WEBDAV_BACKUPS, webDavBackups);
+    broadcastSync({ webDavBackups });
+  }, [webDavBackups]);
+  useEffect(() => {
+    saveLocalStorage('fox3_trash_items', trashItems);
+    broadcastSync({ trashItems });
+  }, [trashItems]);
 
   const updateSystemSettings = (newSettings: Partial<SystemSettings>) => {
     setSystemSettings(prev => ({ ...prev, ...newSettings }));

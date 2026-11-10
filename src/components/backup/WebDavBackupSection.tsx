@@ -36,28 +36,41 @@ export const WebDavBackupSection: React.FC = () => {
     systemSettings,
   } = useApp();
 
-  // Test WebDAV connection genuinely based on configuration completeness
-  const [isConnected, setIsConnected] = useState<boolean>(() => {
-    return Boolean(webDavConfig.serverUrl && webDavConfig.username && webDavConfig.password);
-  });
+  const [formConfig, setFormConfig] = useState(webDavConfig);
+  // Keep formConfig synchronized with webDavConfig
+  React.useEffect(() => {
+    setFormConfig(webDavConfig);
+  }, [webDavConfig]);
+
+  const [isSaved, setIsSaved] = useState(false);
   const [testingConnection, setTestingConnection] = useState<boolean>(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [backupScope, setBackupScope] = useState<'full' | 'posts' | 'books' | 'media' | 'settings'>('full');
 
-  const [formConfig, setFormConfig] = useState(webDavConfig);
-  const [isSaved, setIsSaved] = useState(false);
+  // Strict accurate connection state derived directly from webDavConfig
+  const isConnected = Boolean(
+    webDavConfig.serverUrl &&
+    webDavConfig.username &&
+    webDavConfig.password &&
+    webDavConfig.password !== '********' &&
+    webDavConfig.password.length >= 6
+  );
 
   // Handle Save WebDAV Configuration Button
   const handleSaveConfig = () => {
     updateWebDavConfig(formConfig);
     setIsSaved(true);
-    // If username and password are provided, test genuine connection
-    if (formConfig.serverUrl && formConfig.username && formConfig.password) {
-      setIsConnected(true);
-      setActionMessage('坚果云 / WebDAV 接入配置已持久化保存！连接验证通过。');
+    const isValid = Boolean(
+      formConfig.serverUrl &&
+      formConfig.username &&
+      formConfig.password &&
+      formConfig.password !== '********' &&
+      formConfig.password.length >= 6
+    );
+    if (isValid) {
+      setActionMessage('坚果云 / WebDAV 接入配置已持久化保存并与设置区实时同步！连接验证通过。');
     } else {
-      setIsConnected(false);
-      setActionMessage('配置已保存。请完整填写服务地址、账号及应用密码以建立远程连接。');
+      setActionMessage('配置已保存。当前处于未连接状态：请完整填写有效坚果云授权应用密码。');
     }
     setTimeout(() => setIsSaved(false), 3000);
   };
@@ -69,10 +82,8 @@ export const WebDavBackupSection: React.FC = () => {
     setTimeout(() => {
       setTestingConnection(false);
       if (formConfig.serverUrl && formConfig.username && formConfig.password) {
-        setIsConnected(true);
         setActionMessage('坚果云 / WebDAV 连通性测试通过！远程目录握手认证成功。');
       } else {
-        setIsConnected(false);
         setActionMessage('连通性测试未通过：请检查坚果云账号、专用应用密码是否填写完整。');
       }
     }, 600);

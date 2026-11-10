@@ -78,18 +78,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     setStatusMsg(null);
 
     // Read saved admin password and user passwords
-    const savedAdminPass = localStorage.getItem('fox3_admin_password') ? JSON.parse(localStorage.getItem('fox3_admin_password')!) : 'whitefox2025';
+    const savedAdminPass = localStorage.getItem('fox3_admin_password') ? JSON.parse(localStorage.getItem('fox3_admin_password')!) : 'fox3admin2026';
     const userPasswords: Record<string, string> = localStorage.getItem('fox3_user_passwords')
       ? JSON.parse(localStorage.getItem('fox3_user_passwords')!)
       : {};
 
     // 1. Single Admin Login: only username 'fox' (or 'admin' alias) can authenticate as admin
     if (username === 'fox' || username === 'admin') {
-      const isValidAdminPass =
-        password === savedAdminPass ||
-        password === 'whitefox2025' ||
-        password === 'admin' ||
-        password === 'Wgl+861120';
+      const isValidAdminPass = password === savedAdminPass;
 
       if (isValidAdminPass) {
         const adminUser = users.find(u => u.username === 'fox') || {
@@ -263,7 +259,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                   type="password"
                   value={password}
                   onChange={e => setPassword(e.target.value)}
-                  placeholder="默认密码: whitefox2025"
+                  placeholder="管理员密码 (初始默认: fox3admin2026)"
                   className="w-full pl-9 pr-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500 text-slate-800 dark:text-slate-100"
                   required
                 />

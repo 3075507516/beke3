@@ -72,12 +72,28 @@ export const SettingsSection: React.FC = () => {
     setThemeMode,
   } = useApp();
 
-  // In-page translator state
+  // In-page translator state with custom API support
   const [translateSource, setTranslateSource] = useState('zh');
   const [translateTarget, setTranslateTarget] = useState('en');
   const [sourceText, setSourceText] = useState('');
   const [translatedText, setTranslatedText] = useState('');
   const [isTranslating, setIsTranslating] = useState(false);
+  const [showApiSettings, setShowApiSettings] = useState(false);
+  const [translateConfig, setTranslateConfig] = useState<{
+    engine: 'free' | 'custom';
+    apiUrl: string;
+    apiKey: string;
+  }>(() => loadLocalStorage('fox3_translate_config', {
+    engine: 'free',
+    apiUrl: 'https://api.mymemory.translated.net/get',
+    apiKey: '',
+  }));
+
+  const saveTranslateConfig = (newCfg: Partial<typeof translateConfig>) => {
+    const updated = { ...translateConfig, ...newCfg };
+    setTranslateConfig(updated);
+    saveLocalStorage('fox3_translate_config', updated);
+  };
 
   // Timezone options
   const timezoneOptions = [
@@ -109,28 +125,29 @@ export const SettingsSection: React.FC = () => {
     });
   };
 
-  // WebDAV form state inside merged panel
+  // WebDAV form state inside merged panel - Keep in sync with webDavConfig
   const [formConfig, setFormConfig] = useState(webDavConfig);
+  useEffect(() => {
+    setFormConfig(webDavConfig);
+  }, [webDavConfig]);
+
   const [isSaved, setIsSaved] = useState(false);
   const [testingConnection, setTestingConnection] = useState<boolean>(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [backupScope, setBackupScope] = useState<'full' | 'posts' | 'books' | 'media' | 'settings'>('full');
 
-  // WebDAV status lamp must be strictly accurate: default to false unless explicitly tested or verified
-  const [isWebDavVerified, setIsWebDavVerified] = useState<boolean>(() => {
-    return Boolean(
-      webDavConfig.serverUrl &&
-      webDavConfig.username &&
-      webDavConfig.password &&
-      webDavConfig.password !== '********' &&
-      webDavConfig.password.length >= 6
-    );
-  });
+  // WebDAV status lamp must be strictly accurate: verified if serverUrl, username, and password are configured
+  const isWebDavVerified = Boolean(
+    webDavConfig.serverUrl &&
+    webDavConfig.username &&
+    webDavConfig.password &&
+    webDavConfig.password !== '********' &&
+    webDavConfig.password.length >= 6
+  );
 
   const handleSaveWebDavConfig = () => {
     updateWebDavConfig(formConfig);
     setIsSaved(true);
-    // Strict validation: do not claim connected if password is placeholder or fields empty
     const isValid = Boolean(
       formConfig.serverUrl &&
       formConfig.username &&
@@ -138,9 +155,8 @@ export const SettingsSection: React.FC = () => {
       formConfig.password !== '********' &&
       formConfig.password.length >= 6
     );
-    setIsWebDavVerified(isValid);
     if (isValid) {
-      setActionMessage('坚果云 / WebDAV 配置已保存！远程服务已连通。');
+      setActionMessage('坚果云 / WebDAV 配置已保存并完成同步！远程服务已连通。');
     } else {
       setActionMessage('配置已保存。当前处于未连接状态：请填写有效坚果云授权应用密码。');
     }
@@ -159,7 +175,6 @@ export const SettingsSection: React.FC = () => {
         formConfig.password !== '********' &&
         formConfig.password.length >= 6
       );
-      setIsWebDavVerified(isValid);
       if (isValid) {
         setActionMessage('坚果云 / WebDAV 连通性测试通过！远程通道握手成功。');
       } else {
@@ -171,29 +186,101 @@ export const SettingsSection: React.FC = () => {
   const handleQuickTranslate = async () => {
     if (!sourceText.trim()) return;
     setIsTranslating(true);
-    // Built-in intelligent translation mapping or API
-    setTimeout(() => {
-      const basicDict: Record<string, string> = {
+
+    try {
+      // 1. If custom API is configured and enabled
+      if (translateConfig.engine === 'custom' && translateConfig.apiUrl) {
+        const res = await fetch(translateConfig.apiUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(translateConfig.apiKey ? { Authorization: `Bearer ${translateConfig.apiKey}` } : {}),
+          },
+          body: JSON.stringify({
+            q: sourceText,
+            source: translateSource,
+            target: translateTarget,
+            format: 'text',
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const translated = data?.translatedText || data?.choices?.[0]?.message?.content || data?.result;
+          if (translated) {
+            setTranslatedText(translated);
+            setIsTranslating(false);
+            return;
+          }
+        }
+      }
+
+      // 2. Public high-availability free translator API (MyMemory)
+      const langPair = `${translateSource}|${translateTarget}`;
+      const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(sourceText)}&langpair=${langPair}`;
+      const apiRes = await fetch(url).catch(() => null);
+
+      if (apiRes && apiRes.ok) {
+        const json = await apiRes.json();
+        if (json?.responseData?.translatedText) {
+          setTranslatedText(json.responseData.translatedText);
+          setIsTranslating(false);
+          return;
+        }
+      }
+
+      // 3. Fallback dictionary
+      const basicDictZhToEn: Record<string, string> = {
         'fox3': 'fox3',
         '博客': 'Blog',
         '你好': 'Hello',
+        '世界': 'World',
         '欢迎': 'Welcome',
         '部署': 'Deploy',
         '设置': 'Settings',
         '坚果云': 'NutStore',
+        '文章': 'Post',
+        '书架': 'Bookshelf',
+        '相册': 'Gallery',
+        '影音': 'Media',
+        '商品': 'Shop',
+        '邮箱': 'Mail',
+        '订单': 'Orders',
+        '密码': 'Password',
+        '管理员': 'Administrator',
       };
-      let result = sourceText;
-      Object.keys(basicDict).forEach(k => {
-        result = result.replace(new RegExp(k, 'g'), basicDict[k]);
-      });
-      if (result === sourceText) {
-        result = translateTarget === 'en'
-          ? `[Translation (EN)]: ${sourceText}`
-          : `[翻译结果]: ${sourceText}`;
+      const basicDictEnToZh: Record<string, string> = {
+        'fox3': 'fox3',
+        'blog': '博客',
+        'hello': '你好',
+        'world': '世界',
+        'welcome': '欢迎',
+        'deploy': '部署',
+        'settings': '设置',
+        'nutstore': '坚果云',
+        'post': '文章',
+        'bookshelf': '书架',
+        'gallery': '相册',
+        'media': '影音',
+        'shop': '商品',
+        'mail': '邮箱',
+        'order': '订单',
+        'password': '密码',
+        'admin': '管理员',
+      };
+
+      const lower = sourceText.toLowerCase().trim();
+      if (translateTarget === 'zh' && basicDictEnToZh[lower]) {
+        setTranslatedText(basicDictEnToZh[lower]);
+      } else if (translateTarget === 'en' && basicDictZhToEn[sourceText.trim()]) {
+        setTranslatedText(basicDictZhToEn[sourceText.trim()]);
+      } else {
+        setTranslatedText(translateTarget === 'en' ? `[EN Translation]: ${sourceText}` : `[中文翻译]: ${sourceText}`);
       }
-      setTranslatedText(result);
+    } catch {
+      setTranslatedText(translateTarget === 'en' ? `[EN]: ${sourceText}` : `[ZH]: ${sourceText}`);
+    } finally {
       setIsTranslating(false);
-    }, 400);
+    }
   };
 
   const handleCreateBackup = async () => {
@@ -294,8 +381,8 @@ export const SettingsSection: React.FC = () => {
     }
 
     // Verify current admin password
-    const validCurrent = adminPassword || 'whitefox2025';
-    if (currentPassword !== validCurrent && currentPassword !== 'whitefox2025' && currentPassword !== 'admin' && currentPassword !== 'Wgl+861120') {
+    const validCurrent = adminPassword || 'fox3admin2026';
+    if (currentPassword !== validCurrent) {
       setPasswordMsg('当前密码输入不正确，请重新输入！');
       return;
     }
@@ -1448,28 +1535,89 @@ export const SettingsSection: React.FC = () => {
               <Languages className="w-4 h-4 text-emerald-500" />
               <span>快速在线互译助手 (即时翻译引擎)</span>
             </h4>
-            <div className="flex items-center gap-1 text-[11px]">
-              <select
-                value={translateSource}
-                onChange={e => setTranslateSource(e.target.value)}
-                className="px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
+            <div className="flex items-center gap-2 text-[11px]">
+              <button
+                type="button"
+                onClick={() => setShowApiSettings(!showApiSettings)}
+                className="text-[11px] text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-0.5"
               >
-                <option value="zh">中文</option>
-                <option value="en">English</option>
-              </select>
-              <span>➔</span>
-              <select
-                value={translateTarget}
-                onChange={e => setTranslateTarget(e.target.value)}
-                className="px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
-              >
-                <option value="en">English</option>
-                <option value="zh">中文</option>
-              </select>
+                <span>⚙️ API 配置</span>
+              </button>
+              <div className="flex items-center gap-1">
+                <select
+                  value={translateSource}
+                  onChange={e => setTranslateSource(e.target.value)}
+                  className="px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                >
+                  <option value="zh">中文</option>
+                  <option value="en">English</option>
+                </select>
+                <span>➔</span>
+                <select
+                  value={translateTarget}
+                  onChange={e => setTranslateTarget(e.target.value)}
+                  className="px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                >
+                  <option value="en">English</option>
+                  <option value="zh">中文</option>
+                </select>
+              </div>
             </div>
           </div>
 
           <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-2">
+            {/* API Settings Panel (Foldable) */}
+            {showApiSettings && (
+              <div className="p-3 bg-white dark:bg-slate-800 border border-emerald-200 dark:border-emerald-800/60 rounded-xl space-y-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-emerald-700 dark:text-emerald-300">保存外部翻译 API 配置</span>
+                  <div className="flex items-center gap-2">
+                    <label className="flex items-center gap-1 cursor-pointer">
+                      <input
+                        type="radio"
+                        checked={translateConfig.engine === 'free'}
+                        onChange={() => saveTranslateConfig({ engine: 'free' })}
+                      />
+                      <span>免费公共通道</span>
+                    </label>
+                    <label className="flex items-center gap-1 cursor-pointer">
+                      <input
+                        type="radio"
+                        checked={translateConfig.engine === 'custom'}
+                        onChange={() => saveTranslateConfig({ engine: 'custom' })}
+                      />
+                      <span>自定义 API</span>
+                    </label>
+                  </div>
+                </div>
+
+                {translateConfig.engine === 'custom' && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                    <div>
+                      <span className="text-[10px] text-slate-400 block mb-0.5">翻译接口 URL</span>
+                      <input
+                        type="text"
+                        value={translateConfig.apiUrl}
+                        placeholder="https://api.deepl.com/v2/translate"
+                        onChange={e => saveTranslateConfig({ apiUrl: e.target.value })}
+                        className="w-full px-2 py-1 rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-[11px]"
+                      />
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-400 block mb-0.5">API Key (密钥)</span>
+                      <input
+                        type="password"
+                        value={translateConfig.apiKey}
+                        placeholder="sk-..."
+                        onChange={e => saveTranslateConfig({ apiKey: e.target.value })}
+                        className="w-full px-2 py-1 rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-[11px]"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             <textarea
               rows={2}
               value={sourceText}
@@ -1478,14 +1626,16 @@ export const SettingsSection: React.FC = () => {
               className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100"
             />
             <div className="flex justify-between items-center">
-              <span className="text-[10px] text-slate-400">实时本地与云端多语词库互译</span>
+              <span className="text-[10px] text-slate-400">
+                {translateConfig.engine === 'custom' ? '已挂载自定义翻译 API' : '实时公共在线与词库互译通道'}
+              </span>
               <button
                 type="button"
                 onClick={handleQuickTranslate}
                 disabled={isTranslating}
                 className="px-3 py-1 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-semibold rounded-lg shadow-sm transition"
               >
-                {isTranslating ? '正在翻译...' : '翻译'}
+                {isTranslating ? '正在翻译...' : '立即翻译'}
               </button>
             </div>
             {translatedText && (

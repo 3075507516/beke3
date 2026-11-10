@@ -134,9 +134,12 @@ http://<你的服务器IP>:8080
 | `TENCENT_COS_SECRET_KEY`| 腾讯云环境变量 | 腾讯云 COS 访问 SecretKey | 腾讯云环境可选 |
 | `ALIYUN_OSS_ACCESS_KEY_ID` | 阿里云环境变量 | 阿里云 OSS 访问 Key ID | 阿里云环境可选 |
 | `ALIYUN_OSS_ACCESS_KEY_SECRET` | 阿里云环境变量 | 阿里云 OSS 访问 Key Secret | 阿里云环境可选 |
-| `ADMIN_USERNAME` | Cloudflare / 环境变量 | 管理员用户名 (项目仅单一管理员，默认为 `fox`) | 唯一性保证 |
-| `ADMIN_PASSWORD` | Cloudflare / 环境变量 | 管理员密码 (以后台变量为准，亦支持前端修改) | 最高安全控制权 |
+| `ADMIN_USERNAME` | Cloudflare / 环境变量 | 管理员用户名 (项目仅单一管理员，默认为 `fox`，全局保留阻止普通注册) | 唯一性保证 |
+| `ADMIN_PASSWORD` | Cloudflare / 环境变量 | 部署密码 / 管理员密码 (后台环境变量优先鉴权，前端设置区亦可实时修改同步) | 最高安全控制权 |
 | `MAIL_API_KEY` | 邮件服务密钥 (可选) | Resend 或 SendGrid 接口秘钥 | 邮件发信通道 |
+| `CF_EMAIL_ROUTING_ADDRESS` | 邮件路由环境变量 | Cloudflare Email Routing 路由前缀地址 (`contact@...`) | 邮件中枢收信 |
+| `CF_EMAIL_DESTINATION` | 邮件路由环境变量 | 管理员私人接收转发展信箱 (`admin@...`) | 邮件中枢转发 |
+| `TRANSLATE_API_KEY` | 翻译服务环境变量 | 自定义翻译引擎秘钥 (DeepL / OpenAI / 自定义接口) | 在线互译助手 |
 
 ---
 

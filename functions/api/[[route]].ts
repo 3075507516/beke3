@@ -47,11 +47,11 @@ export const onRequest = async (context: any) => {
         const { username, password } = body;
 
         // If backend environment variable ADMIN_PASSWORD is set, verify against it
-        const validPassword = env.ADMIN_PASSWORD || 'whitefox2025';
+        const validPassword = env.ADMIN_PASSWORD || 'fox3admin2026';
         const validUser = defaultAdminName;
 
-        const isMatch = (username === validUser || username === 'admin') &&
-          (password === validPassword || password === 'whitefox2025' || password === 'Wgl+861120');
+        const isMatch = (username === validUser || (validUser === 'fox' && username === 'admin')) &&
+          (password === validPassword);
 
         return new Response(JSON.stringify({
           success: isMatch,
@@ -254,26 +254,15 @@ export const onRequest = async (context: any) => {
     return new Response(object.body, { headers: responseHeaders });
   }
 
-  // D1 Database query proxy
-  if (path === '/d1/query' && request.method === 'POST') {
-    if (!env.DB) {
-      return new Response(JSON.stringify({ success: false, fallbackToLocal: true }), {
-        headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
-      });
-    }
-    try {
-      const { sql, params = [] } = await request.json() as any;
-      const stmt = env.DB.prepare(sql).bind(...params);
-      const result = await stmt.all();
-      return new Response(JSON.stringify({ success: true, result }), {
-        headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
-      });
-    } catch (err: any) {
-      return new Response(JSON.stringify({ success: false, error: err.message }), {
-        status: 500,
-        headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
-      });
-    }
+  // D1 Database status & health indicator (secure - no raw SQL execution)
+  if (path === '/d1/status' && request.method === 'GET') {
+    return new Response(JSON.stringify({
+      available: Boolean(env.DB),
+      type: 'Cloudflare D1 SQLite',
+      time: new Date().toISOString()
+    }), {
+      headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
+    });
   }
 
   // Mail Service API Status & Configuration Endpoint

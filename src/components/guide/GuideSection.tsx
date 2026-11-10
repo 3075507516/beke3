@@ -210,6 +210,30 @@ export const GuideSection: React.FC = () => {
                 </button>
               </div>
             </div>
+
+            {/* Admin Environment Variables */}
+            <div className="pt-3 border-t border-slate-200 dark:border-slate-700">
+              <h5 className="text-xs font-bold text-slate-800 dark:text-slate-200 mb-2">
+                4. 部署密码与管理员账号环境变量 (Environment Variables)
+              </h5>
+              <p className="text-xs text-slate-500 mb-2">
+                在 <b>Settings</b> -&gt; <b>Environment variables</b> 中添加生产部署密码与管理员用户名：
+              </p>
+              <div className="space-y-2 text-xs">
+                <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-between">
+                  <div>
+                    <code className="text-rose-500 font-mono font-bold">ADMIN_USERNAME</code>
+                    <span className="text-slate-500 dark:text-slate-400 ml-2">唯一超级管理员用户名（默认为 <code>fox</code>，受系统级唯一性严格保护）</span>
+                  </div>
+                </div>
+                <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-between">
+                  <div>
+                    <code className="text-rose-500 font-mono font-bold">ADMIN_PASSWORD</code>
+                    <span className="text-slate-500 dark:text-slate-400 ml-2">生产环境唯一超级管理员登录密码（建议配置强密码，部署时后台环境变量优先鉴权，前端设置区亦可实时修改）</span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}

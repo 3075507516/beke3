@@ -36,6 +36,7 @@ export const STORAGE_KEYS = {
   VIEW_MODES: 'fox3_view_modes',
   ADMIN_PASSWORD: 'fox3_admin_password',
   USER_PASSWORDS: 'fox3_user_passwords',
+  TRANSLATE_CONFIG: 'fox3_translate_config',
 };
 
 // Safe LocalStorage Reader / Writer
