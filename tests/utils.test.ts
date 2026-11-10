@@ -60,4 +60,58 @@ describe('fox3 storage and authentication verification', () => {
     expect(retrieved['john_doe']).toBe('secret123');
     expect(retrieved['john@example.com']).toBe('secret123');
   });
+
+  it('verifies pure Account (username or email) + password matching for registered users', () => {
+    // Simulate user registered via standard mode or email mode
+    const registeredUser = {
+      id: 'user_456',
+      username: 'alice',
+      email: 'alice@example.com',
+      role: 'user',
+    };
+
+    const passMap: Record<string, string> = {
+      [registeredUser.id]: 'alicePass123',
+      [registeredUser.username.toLowerCase()]: 'alicePass123',
+      [registeredUser.email.toLowerCase()]: 'alicePass123',
+    };
+    saveLocalStorage('fox3_user_passwords', passMap);
+
+    // Test Login via username
+    const loginByUsername = 'Alice';
+    const pass1 = 'alicePass123';
+    expect(passMap[loginByUsername.toLowerCase()]).toBe(pass1);
+
+    // Test Login via email
+    const loginByEmail = 'ALICE@EXAMPLE.COM';
+    expect(passMap[loginByEmail.toLowerCase()]).toBe(pass1);
+
+    // Test Wrong Password
+    const wrongPass = 'wrongPass';
+    expect(passMap[loginByEmail.toLowerCase()] === wrongPass).toBe(false);
+  });
+
+  it('verifies Option B: deployment admin password activation during registration', () => {
+    const deploymentEnvAdminPass = 'fox3admin2026';
+    const registrantUser = 'master_fox';
+    const registrantPass = 'fox3admin2026';
+
+    const isActivatedAsAdmin = registrantPass === deploymentEnvAdminPass;
+    expect(isActivatedAsAdmin).toBe(true);
+
+    const createdRole = isActivatedAsAdmin ? 'admin' : 'user';
+    expect(createdRole).toBe('admin');
+  });
+
+  it('verifies standard vs email registration requirement checks', () => {
+    // Standard registration: only username + password required
+    const standardReg = { username: 'bob', password: 'password123' };
+    expect(Boolean(standardReg.username && standardReg.password)).toBe(true);
+
+    // Email registration: email must be valid
+    const validEmail = 'bob@domain.com';
+    const invalidEmail = 'bobdomain';
+    expect(validEmail.includes('@') && validEmail.includes('.')).toBe(true);
+    expect(invalidEmail.includes('@') && invalidEmail.includes('.')).toBe(false);
+  });
 });

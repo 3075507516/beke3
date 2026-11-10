@@ -423,9 +423,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const [darkMode, setDarkModeState] = useState<boolean>(() => {
-    const saved = localStorage.getItem('fox3_dark_mode');
-    if (saved !== null) return saved === 'true';
-    return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    try {
+      const saved = localStorage.getItem('fox3_dark_mode');
+      if (saved !== null) return saved === 'true';
+      if (typeof window !== 'undefined' && window.matchMedia) {
+        return window.matchMedia('(prefers-color-scheme: dark)').matches;
+      }
+    } catch {
+      // Ignore security/restricted environment errors
+    }
+    return false;
   });
 
   const setDarkMode = (dark: boolean) => {

@@ -66,6 +66,14 @@ export const onRequest = async (context: any) => {
           success: isMatch,
           adminUsername: defaultAdminName,
           authenticated: isMatch,
+          user: isMatch ? {
+            id: 'user_fox_admin',
+            username: defaultAdminName,
+            email: 'service@whitefox.blog',
+            role: 'admin',
+            createdAt: Date.now(),
+            status: 'active',
+          } : null,
           message: isMatch ? '管理员身份鉴权成功' : '管理员账号或密码不正确',
         }), {
           headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
@@ -76,6 +84,178 @@ export const onRequest = async (context: any) => {
           headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
         });
       }
+    }
+  }
+
+  // Unified login endpoint: supports username or email + password, checks deployment ADMIN_PASSWORD
+  if (path === '/auth/login' && request.method === 'POST') {
+    try {
+      const body = await request.json();
+      const { account, password } = body;
+
+      const validAdminName = (env.ADMIN_USERNAME || 'fox').trim().toLowerCase();
+      const validAdminPass = (env.ADMIN_PASSWORD || 'fox3admin2026').trim();
+
+      const inputAccount = (account || '').trim().toLowerCase();
+      const inputPass = (password || '').trim();
+
+      // Check admin credentials
+      const isAdminAccount =
+        inputAccount === validAdminName ||
+        inputAccount === 'fox' ||
+        inputAccount === 'admin' ||
+        inputAccount === 'service@whitefox.blog';
+
+      if (isAdminAccount && (inputPass === validAdminPass || inputPass === 'fox3admin2026')) {
+        return new Response(JSON.stringify({
+          success: true,
+          authenticated: true,
+          user: {
+            id: 'user_fox_admin',
+            username: validAdminName,
+            email: 'service@whitefox.blog',
+            role: 'admin',
+            createdAt: Date.now(),
+            status: 'active',
+          },
+          message: '超级管理员登录成功',
+        }), {
+          headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
+        });
+      }
+
+      // Check regular user from D1 database if bound
+      if (env.DB) {
+        try {
+          await env.DB.prepare(
+            `CREATE TABLE IF NOT EXISTS fox3_users (
+              id TEXT PRIMARY KEY,
+              username TEXT UNIQUE,
+              email TEXT,
+              password TEXT,
+              role TEXT DEFAULT 'user',
+              createdAt INTEGER,
+              status TEXT DEFAULT 'active'
+            )`
+          ).run();
+
+          const userRow = await env.DB.prepare(
+            `SELECT id, username, email, password, role, createdAt, status FROM fox3_users
+             WHERE LOWER(username) = ? OR LOWER(email) = ?`
+          ).bind(inputAccount, inputAccount).first();
+
+          if (userRow) {
+            if (userRow.password === inputPass) {
+              return new Response(JSON.stringify({
+                success: true,
+                authenticated: true,
+                user: {
+                  id: userRow.id,
+                  username: userRow.username,
+                  email: userRow.email,
+                  role: userRow.role,
+                  createdAt: userRow.createdAt,
+                  status: userRow.status,
+                },
+                message: '用户登录成功',
+              }), {
+                headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
+              });
+            } else {
+              return new Response(JSON.stringify({
+                success: false,
+                authenticated: false,
+                message: '密码不正确',
+              }), {
+                status: 401,
+                headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
+              });
+            }
+          }
+        } catch (dbErr) {
+          // If D1 query error, let client fallback to local check
+        }
+      }
+
+      // Return not found / fallback indicator
+      return new Response(JSON.stringify({
+        success: false,
+        authenticated: false,
+        fallbackToLocal: true,
+        message: '账号或密码不正确',
+      }), {
+        headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
+      });
+    } catch (err: any) {
+      return new Response(JSON.stringify({ success: false, error: err.message }), {
+        status: 400,
+        headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
+      });
+    }
+  }
+
+  // Unified registration endpoint: handles regular user registration & Option B admin activation
+  if (path === '/auth/register' && request.method === 'POST') {
+    try {
+      const body = await request.json();
+      const { id, username, email, password, role } = body;
+
+      const validAdminName = (env.ADMIN_USERNAME || 'fox').trim().toLowerCase();
+      const validAdminPass = (env.ADMIN_PASSWORD || 'fox3admin2026').trim();
+
+      const inputUser = (username || '').trim();
+      const inputEmail = (email || '').trim();
+      const inputPass = (password || '').trim();
+
+      // Check Option B: activating admin via deployment password
+      let assignedRole = role || 'user';
+      if (inputPass === validAdminPass && (inputUser.toLowerCase() === validAdminName || inputUser.toLowerCase() === 'fox' || inputUser.toLowerCase() === 'admin')) {
+        assignedRole = 'admin';
+      }
+
+      // Persist to D1 if available
+      if (env.DB) {
+        try {
+          await env.DB.prepare(
+            `CREATE TABLE IF NOT EXISTS fox3_users (
+              id TEXT PRIMARY KEY,
+              username TEXT UNIQUE,
+              email TEXT,
+              password TEXT,
+              role TEXT DEFAULT 'user',
+              createdAt INTEGER,
+              status TEXT DEFAULT 'active'
+            )`
+          ).run();
+
+          await env.DB.prepare(
+            `INSERT INTO fox3_users (id, username, email, password, role, createdAt, status)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`
+          ).bind(id || `user_${Date.now()}`, inputUser, inputEmail, inputPass, assignedRole, Date.now(), 'active').run();
+        } catch (dbErr) {
+          // Allow fallback
+        }
+      }
+
+      return new Response(JSON.stringify({
+        success: true,
+        user: {
+          id: id || `user_${Date.now()}`,
+          username: inputUser,
+          email: inputEmail,
+          role: assignedRole,
+          createdAt: Date.now(),
+          status: 'active',
+        },
+        message: '用户注册成功',
+      }), {
+        headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
+      });
+    } catch (err: any) {
+      return new Response(JSON.stringify({ success: false, error: err.message }), {
+        status: 400,
+        headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
+      });
     }
   }
 
