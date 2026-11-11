@@ -133,7 +133,7 @@ export const WebDavBackupSection: React.FC = () => {
         <div>
           <h2 className="text-xl font-bold font-serif-sc text-slate-800 dark:text-slate-100 flex items-center gap-2">
             <Cloud className="w-5 h-5 text-sky-500" />
-            <span>WebDAV 容灾备份与恢复中心</span>
+            <span>备份区 (WebDAV 容灾备份与恢复中心)</span>
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
             外接通用 WebDAV 网盘，可视化管理远程备份文件，支持选择性备份与精准灾难恢复，预防服务器运营风险

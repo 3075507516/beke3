@@ -374,6 +374,25 @@ export const SettingsSection: React.FC = () => {
     );
   };
 
+  const handleDeleteUser = (userId: string, username: string) => {
+    if (window.confirm(`确定彻底删除注册用户【${username}】吗？删除后该用户将无法再登录。`)) {
+      setUsers(prev => prev.filter(u => u.id !== userId));
+      // Remove local password record
+      try {
+        const rawPasswords = localStorage.getItem('fox3_user_passwords');
+        if (rawPasswords) {
+          const map = JSON.parse(rawPasswords);
+          delete map[userId];
+          delete map[username];
+          delete map[username.toLowerCase()];
+          localStorage.setItem('fox3_user_passwords', JSON.stringify(map));
+        }
+      } catch (err) {
+        console.warn('Failed to clear user password from storage:', err);
+      }
+    }
+  };
+
   const handleChangePassword = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newPassword || newPassword !== confirmPassword) {
@@ -386,7 +405,7 @@ export const SettingsSection: React.FC = () => {
     }
 
     // Verify current admin password
-    const validCurrent = adminPassword || 'fox3admin2026';
+    const validCurrent = adminPassword || '123456';
     if (currentPassword !== validCurrent) {
       setPasswordMsg('当前密码输入不正确，请重新输入！');
       return;
@@ -517,38 +536,49 @@ export const SettingsSection: React.FC = () => {
               </div>
             </div>
 
-            {/* 2. 主题调色按键 (一键快速配色) & 微软经典怀旧主题切换 */}
+            {/* 2. 深度定制与全站 12 种精品主题系统 */}
             <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">
-                2. {t('settings.themeColor')} 与 经典微软怀旧主题
-              </label>
-              <div className="flex flex-wrap gap-2.5 mb-3">
-                {themePresets.map(preset => (
-                  <button
-                    key={preset.name}
-                    onClick={() => {
-                      setThemeMode('modern');
-                      updateSystemSettings({
-                        themeColor: preset.color,
-                        customPaletteBg: preset.bg,
-                      });
-                    }}
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border transition ${
-                      themeMode === 'modern' && systemSettings.themeColor === preset.color
-                        ? 'border-sky-500 ring-2 ring-sky-500/20 bg-sky-50/50 dark:bg-sky-950/30'
-                        : 'border-slate-200 dark:border-slate-700 hover:border-sky-400 text-xs font-medium'
-                    }`}
-                  >
-                    <span
-                      className="w-3.5 h-3.5 rounded-full shrink-0 shadow-xs"
-                      style={{ backgroundColor: preset.color }}
-                    />
-                    <span>{preset.name}</span>
-                    {themeMode === 'modern' && systemSettings.themeColor === preset.color && (
-                      <Check className="w-3.5 h-3.5 text-sky-500" />
-                    )}
-                  </button>
-                ))}
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+                  <Palette className="w-4 h-4 text-sky-500" />
+                  <span>2. 全站主题中心 (已内置 12 款精美主题)</span>
+                </label>
+                <span className="text-[11px] text-slate-400">一键切换主色调与全局背景</span>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5 mb-3">
+                {themePresets.map(preset => {
+                  const isCurrent = themeMode === 'modern' && systemSettings.themeColor === preset.color;
+                  return (
+                    <button
+                      key={preset.name}
+                      type="button"
+                      onClick={() => {
+                        setThemeMode('modern');
+                        updateSystemSettings({
+                          themeColor: preset.color,
+                          customPaletteBg: preset.bg,
+                        });
+                      }}
+                      className={`flex items-center justify-between p-2.5 rounded-2xl border text-left transition cursor-pointer ${
+                        isCurrent
+                          ? 'border-sky-500 ring-2 ring-sky-500/20 bg-sky-50/70 dark:bg-sky-950/40 shadow-sm'
+                          : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-sky-400'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span
+                          className="w-4 h-4 rounded-full shrink-0 shadow-sm border border-black/10"
+                          style={{ backgroundColor: preset.color }}
+                        />
+                        <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate">
+                          {preset.name}
+                        </span>
+                      </div>
+                      {isCurrent && <Check className="w-3.5 h-3.5 text-sky-500 shrink-0" />}
+                    </button>
+                  );
+                })}
               </div>
 
               {/* Microsoft Classic Windows Retro Preset */}
@@ -585,7 +615,7 @@ export const SettingsSection: React.FC = () => {
                       });
                     }
                   }}
-                  className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
                     themeMode === 'nostalgic'
                       ? 'bg-[#000080] text-white shadow-lg border-2 border-white/60'
                       : 'bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-600 hover:border-sky-500'
@@ -685,23 +715,6 @@ export const SettingsSection: React.FC = () => {
               </div>
 
               {/* Bottom Buttons Master Switch */}
-              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 flex items-center justify-between gap-4">
-                <div>
-                  <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
-                    <Layers className="w-3.5 h-3.5 text-sky-500" />
-                    全站悬浮底部功能按键总开关 (置顶/快捷工具)
-                  </h4>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                    控制页面右下角悬浮的一键返回顶部、快速导航等按键的全局显示或隐藏（默认开启）。
-                  </p>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={systemSettings.bottomButtonsEnabled !== false}
-                  onChange={e => updateSystemSettings({ bottomButtonsEnabled: e.target.checked })}
-                  className="w-5 h-5 text-sky-500 rounded cursor-pointer"
-                />
-              </div>
             </div>
 
             {/* 4. 自定义头像 */}
@@ -918,18 +931,26 @@ export const SettingsSection: React.FC = () => {
                       </div>
                     </div>
 
-                    <div>
+                    <div className="flex items-center gap-2">
                       {u.role !== 'admin' && (
-                        <button
-                          onClick={() => toggleUserStatus(u.id)}
-                          className={`px-3 py-1 rounded-xl text-xs font-medium transition ${
-                            u.status === 'active'
-                              ? 'bg-rose-50 dark:bg-rose-950/40 text-rose-600 hover:bg-rose-100'
-                              : 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 hover:bg-emerald-100'
-                          }`}
-                        >
-                          {u.status === 'active' ? '禁用账号' : '启用账号'}
-                        </button>
+                        <>
+                          <button
+                            onClick={() => toggleUserStatus(u.id)}
+                            className={`px-2.5 py-1 rounded-xl text-xs font-medium transition ${
+                              u.status === 'active'
+                                ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-600 hover:bg-amber-100'
+                                : 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 hover:bg-emerald-100'
+                            }`}
+                          >
+                            {u.status === 'active' ? '禁用账号' : '启用账号'}
+                          </button>
+                          <button
+                            onClick={() => handleDeleteUser(u.id, u.username)}
+                            className="px-2.5 py-1 rounded-xl text-xs font-medium bg-rose-50 dark:bg-rose-950/40 text-rose-600 hover:bg-rose-100 transition"
+                          >
+                            删除用户
+                          </button>
+                        </>
                       )}
                     </div>
                   </div>

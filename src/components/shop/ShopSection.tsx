@@ -831,22 +831,24 @@ export const ShopSection: React.FC = () => {
                     </span>
 
                     {currentUser?.role === 'admin' && (
-                      <div className="absolute top-3 right-3 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition">
+                      <div className="absolute top-3 right-3 flex items-center gap-1.5 z-10">
                         <button
                           onClick={e => {
                             e.stopPropagation();
                             setEditingProduct(product);
                             setIsEditingProduct(true);
                           }}
-                          className="p-1.5 bg-black/60 hover:bg-black/90 text-white rounded-lg"
+                          title="编辑商品与多图"
+                          className="p-2 bg-black/75 hover:bg-black text-white rounded-xl shadow transition"
                         >
-                          <Edit3 className="w-3.5 h-3.5" />
+                          <Edit3 className="w-4 h-4" />
                         </button>
                         <button
                           onClick={e => handleDeleteProduct(product.id, e)}
-                          className="p-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg"
+                          title="删除商品"
+                          className="p-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl shadow transition"
                         >
-                          <Trash2 className="w-3.5 h-3.5" />
+                          <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
                     )}

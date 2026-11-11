@@ -23,7 +23,7 @@ describe('fox3 storage and authentication verification', () => {
   });
 
   it('verifies admin password matching logic and fallback', () => {
-    const defaultPass = 'fox3admin2026';
+    const defaultPass = '123456';
     saveLocalStorage('fox3_admin_password', 'CustomAdminPass2026');
     const stored = loadLocalStorage('fox3_admin_password', defaultPass);
     expect(stored).toBe('CustomAdminPass2026');
@@ -31,6 +31,11 @@ describe('fox3 storage and authentication verification', () => {
     // Test trimming and whitespace resilience
     const inputPass = '  CustomAdminPass2026  ';
     expect(inputPass.trim()).toBe(stored);
+
+    // Verify default fallback is 123456
+    localStorage.clear();
+    const fallback = loadLocalStorage('fox3_admin_password', defaultPass);
+    expect(fallback).toBe('123456');
   });
 
   it('verifies case-insensitive username matching for admin and users', () => {

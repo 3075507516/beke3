@@ -269,8 +269,9 @@ export const BlogSection: React.FC = () => {
 
   const canEditPost = (post: Post) => {
     if (!currentUser) return false;
+    // Requirements: Registered users cannot edit any posts (even their own). Only admin can edit posts.
     if (currentUser.role === 'admin') return true;
-    return post.author === currentUser.username;
+    return false;
   };
 
   const handleDelete = (id: string, e: React.MouseEvent) => {
@@ -373,7 +374,18 @@ export const BlogSection: React.FC = () => {
 
             <div className="flex items-center justify-between text-xs text-slate-400 pt-2">
               <div className="flex items-center gap-4">
-                <span>作者: {activePost.author}</span>
+                <span>
+                  作者: {activePost.author}{' '}
+                  {activePost.author === 'fox' || activePost.author === (currentUser?.role === 'admin' ? currentUser.username : 'fox') ? (
+                    <span className="ml-1 px-1.5 py-0.5 rounded text-[10px] bg-rose-50 dark:bg-rose-950/40 text-rose-500 border border-rose-200 dark:border-rose-900/50">
+                      管理员
+                    </span>
+                  ) : (
+                    <span className="ml-1 px-1.5 py-0.5 rounded text-[10px] bg-sky-50 dark:bg-sky-950/40 text-sky-500 border border-sky-200 dark:border-sky-900/50">
+                      注册用户
+                    </span>
+                  )}
+                </span>
                 <span>
                   发布于:{' '}
                   {new Date(activePost.createdAt).toLocaleDateString('zh-CN', {
@@ -716,6 +728,15 @@ export const BlogSection: React.FC = () => {
                     </span>
                     <span>•</span>
                     <span>{post.author}</span>
+                    {post.author === 'fox' ? (
+                      <span className="px-1.5 py-0.2 rounded text-[10px] bg-rose-50 dark:bg-rose-950/40 text-rose-500 font-medium border border-rose-200/50">
+                        管理员
+                      </span>
+                    ) : (
+                      <span className="px-1.5 py-0.2 rounded text-[10px] bg-sky-50 dark:bg-sky-950/40 text-sky-500 font-medium border border-sky-200/50">
+                        注册用户
+                      </span>
+                    )}
                   </div>
 
                   <h3 className="text-base font-bold font-serif-sc text-slate-800 dark:text-slate-100 group-hover:text-sky-500 transition line-clamp-2">
@@ -786,9 +807,26 @@ export const BlogSection: React.FC = () => {
       {isEditing && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
           <div className="relative w-full max-w-2xl bg-white dark:bg-slate-900 rounded-3xl p-6 md:p-8 shadow-2xl border border-slate-200 dark:border-slate-800 max-h-[90vh] overflow-y-auto">
-            <h3 className="text-xl font-bold font-serif-sc text-slate-900 dark:text-slate-100 mb-6">
-              {editingPost.id ? '编辑博文' : '撰写全新博文'}
-            </h3>
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-xl font-bold font-serif-sc text-slate-900 dark:text-slate-100">
+                {editingPost.id ? '编辑博文' : '撰写全新博文'}
+              </h3>
+              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-slate-100 dark:bg-slate-800 text-xs">
+                <span className="text-slate-400">当前发布者:</span>
+                <span className="font-semibold text-slate-700 dark:text-slate-200">
+                  {currentUser?.username}
+                </span>
+                {currentUser?.role === 'admin' ? (
+                  <span className="px-1.5 py-0.5 rounded text-[10px] bg-rose-500 text-white font-medium">
+                    管理员
+                  </span>
+                ) : (
+                  <span className="px-1.5 py-0.5 rounded text-[10px] bg-sky-500 text-white font-medium">
+                    注册用户
+                  </span>
+                )}
+              </div>
+            </div>
 
             <form onSubmit={handleSavePost} className="space-y-4">
               <div>

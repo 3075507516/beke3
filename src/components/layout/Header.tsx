@@ -72,7 +72,7 @@ export const Header: React.FC<HeaderProps> = ({
     { id: 'gallery', label: t('nav.gallery'), icon: Image, restricted: true },
     { id: 'media', label: t('nav.media'), icon: Film, restricted: true },
     { id: 'shop', label: t('nav.shop'), icon: ShoppingBag, restricted: true },
-    { id: 'backup', label: t('nav.backup'), icon: Cloud, adminOnly: true },
+    { id: 'backup', label: '备份区', icon: Cloud, adminOnly: true },
     { id: 'mail', label: t('nav.mail'), icon: Mail, adminOnly: true },
     { id: 'settings', label: t('nav.settings'), icon: Settings, adminOnly: true },
     { id: 'guide', label: t('nav.guide'), icon: HelpCircle },

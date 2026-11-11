@@ -192,7 +192,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     loadLocalStorage<string>(STORAGE_KEYS.ADMIN_USERNAME, 'fox')
   );
   const [adminPassword, setAdminPasswordState] = useState<string>(() =>
-    loadLocalStorage<string>(STORAGE_KEYS.ADMIN_PASSWORD, 'fox3admin2026')
+    loadLocalStorage<string>(STORAGE_KEYS.ADMIN_PASSWORD, '123456')
   );
 
   // Probe backend environment variable for admin config on startup
@@ -895,14 +895,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, [posts, books, photos, media, products, websites, systemSettings]);
 
-  // Auto-sync timer (gentle interval with minimum threshold to avoid bandwidth consumption)
+  // Auto-sync timer: disabled continuous background pinging by default, only sync on user action or window visibility change
   useEffect(() => {
     if (!systemSettings.autoSync) return;
-    const intervalMs = Math.max(120, systemSettings.syncIntervalSeconds || 120) * 1000;
+
+    // Only sync when user returns to tab, avoiding continuous data stream consumption in background
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        triggerManualSync();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // Minimum interval 10 minutes (600s) to eliminate traffic drain
+    const intervalMs = Math.max(600, (systemSettings.syncIntervalSeconds || 600)) * 1000;
     const interval = setInterval(() => {
-      triggerManualSync();
+      if (document.visibilityState === 'visible') {
+        triggerManualSync();
+      }
     }, intervalMs);
-    return () => clearInterval(interval);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      clearInterval(interval);
+    };
   }, [systemSettings.autoSync, systemSettings.syncIntervalSeconds, triggerManualSync]);
 
   // Robust file upload

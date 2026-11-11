@@ -229,7 +229,7 @@ export const i18nDict: Record<Locale, Translations> = {
       gallery: '相册',
       media: '影音',
       shop: '商品',
-      backup: 'WebDAV容灾',
+      backup: '备份区',
       mail: '邮箱中枢',
       settings: '设置',
       guide: '部署指南',

@@ -113,7 +113,7 @@ const MainLayout: React.FC = () => {
             <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3 text-left sm:text-left">
               <span>&copy; {new Date().getFullYear()} <b>{systemSettings.siteName}</b> (fox3). All rights reserved.</span>
               <span className="text-[11px] text-amber-600/90 dark:text-amber-400/90">
-                (系统权限说明：WebDAV容灾备份、邮箱中枢、系统设置、网站图床专区仅管理员可见)
+                (系统权限说明：备份区、邮箱中枢、系统设置、网站图床专区仅管理员可见)
               </span>
             </div>
             <div className="flex items-center gap-4 text-[11px] shrink-0">
@@ -130,56 +130,6 @@ const MainLayout: React.FC = () => {
         </footer>
       </div>
 
-      {/* Floating Bottom Quick Section Selector Bar (matching top quick jump tabs) */}
-      {systemSettings.bottomButtonsEnabled !== false && (
-        <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-40 max-w-xl w-[92%] sm:w-auto">
-          <div className="flex items-center gap-1.5 p-1.5 rounded-2xl bg-white/90 dark:bg-slate-900/90 backdrop-blur-xl border border-slate-200/80 dark:border-slate-800 shadow-2xl overflow-x-auto no-scrollbar">
-            <button
-              onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-              title="回到顶部"
-              className="p-2 rounded-xl text-slate-500 hover:text-sky-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition shrink-0"
-            >
-              <ArrowUp className="w-4 h-4" />
-            </button>
-            <div className="w-[1px] h-5 bg-slate-200 dark:bg-slate-700 mx-0.5 shrink-0" />
-            {[
-              { id: 'blog', label: t('nav.blog') },
-              { id: 'bookmarks', label: t('nav.bookmarks') },
-              ...(!isGuestRestricted ? [
-                { id: 'books', label: t('nav.books') },
-                { id: 'gallery', label: t('nav.gallery') },
-                { id: 'media', label: t('nav.media') },
-                { id: 'shop', label: t('nav.shop') },
-              ] : []),
-              ...(isAdmin ? [
-                { id: 'sites', label: t('nav.sites') || '网站图床' },
-                { id: 'backup', label: t('nav.backup') },
-                { id: 'mail', label: t('nav.mail') },
-                { id: 'settings', label: t('nav.settings') },
-              ] : []),
-              { id: 'guide', label: t('nav.guide') },
-            ].map(sec => {
-              const isActive = currentTab === sec.id;
-              return (
-                <button
-                  key={`bottom-sec-${sec.id}`}
-                  onClick={() => {
-                    setCurrentTab(sec.id);
-                    window.scrollTo({ top: 0, behavior: 'smooth' });
-                  }}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
-                    isActive
-                      ? 'bg-sky-500 text-white shadow-sm'
-                      : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-                  }`}
-                >
-                  {sec.label}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
 
       {/* Global Modals & Notifications */}
       <AuthModal isOpen={isAuthOpen} onClose={() => setIsAuthOpen(false)} />
