@@ -72,10 +72,12 @@ export const MediaSection: React.FC = () => {
   const [isUploading, setIsUploading] = useState(false);
 
   // New Media Form state
-  const [newTitle, setNewTitle] = useState('');
-  const [newArtist, setNewArtist] = useState('');
-  const [newType, setNewType] = useState<'audio' | 'video'>('audio');
-  const [mediaFile, setMediaFile] = useState<File | null>(null);
+  const [uploadTab, setUploadTab] = useState<'file' | 'link'>('file');
+  const [onlineUrl, setOnlineUrl] = useState('');
+  const [onlineTitle, setOnlineTitle] = useState('');
+  const [onlineArtist, setOnlineArtist] = useState('');
+  const [onlineType, setOnlineType] = useState<'audio' | 'video'>('audio');
+  const [onlineCover, setOnlineCover] = useState('');
 
   // Batch operations
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -294,8 +296,8 @@ export const MediaSection: React.FC = () => {
               onClick={() => setIsUploading(true)}
               className="flex items-center gap-1.5 px-4 py-2 bg-sky-500 hover:bg-sky-600 text-white text-xs font-semibold rounded-xl shadow-md transition"
             >
-              <Upload className="w-4 h-4" />
-              <span>上传音视频</span>
+              <Plus className="w-4 h-4" />
+              <span>添加音视频</span>
             </button>
           )}
         </div>
@@ -513,46 +515,204 @@ export const MediaSection: React.FC = () => {
         })}
       </div>
 
-      {/* Upload Media Modal */}
+      {/* Upload / Online Media Modal */}
       {isUploading && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 max-w-md w-full border border-slate-200 dark:border-slate-800 shadow-2xl">
-            <h3 className="text-lg font-bold font-serif-sc text-slate-900 dark:text-slate-100 mb-4">
-              上传音频或视频文件
-            </h3>
-            <p className="text-xs text-slate-500 mb-4">
-              支持 MP3, WAV, MP4, WebM 等流媒体格式，直传 Cloudflare R2 对象存储与本地安全缓存。
-            </p>
-
-            <div
-              onClick={() => fileInputRef.current?.click()}
-              className="border-2 border-dashed border-sky-300 dark:border-sky-900/60 rounded-2xl p-8 text-center cursor-pointer hover:bg-sky-50/50 dark:hover:bg-sky-950/20 transition flex flex-col items-center justify-center gap-2"
-            >
-              <Upload className="w-8 h-8 text-sky-500" />
-              <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">
-                点击选择音视频文件
-              </span>
-              <span className="text-[10px] text-slate-400">
-                .mp3, .wav, .mp4, .webm
-              </span>
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 max-w-md w-full border border-slate-200 dark:border-slate-800 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-bold font-serif-sc text-slate-900 dark:text-slate-100">
+                添加音视频媒体
+              </h3>
+              <div className="flex p-1 bg-slate-100 dark:bg-slate-800 rounded-xl text-xs font-semibold">
+                <button
+                  type="button"
+                  onClick={() => setUploadTab('file')}
+                  className={`px-3 py-1 rounded-lg transition ${
+                    uploadTab === 'file'
+                      ? 'bg-white dark:bg-slate-900 text-sky-600 dark:text-sky-400 shadow-xs'
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  本地文件上传
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setUploadTab('link')}
+                  className={`px-3 py-1 rounded-lg transition ${
+                    uploadTab === 'link'
+                      ? 'bg-white dark:bg-slate-900 text-sky-600 dark:text-sky-400 shadow-xs'
+                      : 'text-slate-500 hover:text-slate-800'
+                  }`}
+                >
+                  在线直链流媒体
+                </button>
+              </div>
             </div>
 
-            <input
-              type="file"
-              ref={fileInputRef}
-              onChange={handleMediaFileUpload}
-              accept="audio/*,video/*,.mp4,.webm,.mov,.mkv,.m4v,.avi,.mp3,.wav,.ogg,.aac,.flac"
-              className="hidden"
-            />
+            {uploadTab === 'file' ? (
+              <div className="space-y-4">
+                <p className="text-xs text-slate-500">
+                  支持 MP3, WAV, MP4, WebM 等流媒体格式，直传 Cloudflare R2 对象存储与跨端持久化。
+                </p>
 
-            <div className="flex justify-end gap-2 mt-4">
-              <button
-                onClick={() => setIsUploading(false)}
-                className="px-4 py-2 text-xs text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl"
+                <div
+                  onClick={() => fileInputRef.current?.click()}
+                  className="border-2 border-dashed border-sky-300 dark:border-sky-900/60 rounded-2xl p-8 text-center cursor-pointer hover:bg-sky-50/50 dark:hover:bg-sky-950/20 transition flex flex-col items-center justify-center gap-2"
+                >
+                  <Upload className="w-8 h-8 text-sky-500" />
+                  <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+                    点击选择音视频文件
+                  </span>
+                  <span className="text-[10px] text-slate-400">
+                    .mp3, .wav, .mp4, .webm, .mkv
+                  </span>
+                </div>
+
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleMediaFileUpload}
+                  accept="audio/*,video/*,.mp4,.webm,.mov,.mkv,.m4v,.avi,.mp3,.wav,.ogg,.aac,.flac"
+                  className="hidden"
+                />
+              </div>
+            ) : (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (!onlineUrl.trim()) return;
+                  const newItem: MediaItem = {
+                    id: `media-${Date.now()}`,
+                    type: onlineType,
+                    title: onlineTitle.trim() || '未命名网络音视频',
+                    artist: onlineArtist.trim() || currentUser?.username || 'fox',
+                    src: onlineUrl.trim(),
+                    cover:
+                      onlineCover.trim() ||
+                      (onlineType === 'video'
+                        ? 'https://images.unsplash.com/photo-1470240731273-7821a6eeb6bd?auto=format&fit=crop&w=800&q=80'
+                        : 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?auto=format&fit=crop&w=400&q=80'),
+                    duration: '在线流媒体',
+                    uploadedAt: Date.now(),
+                    createdAt: Date.now(),
+                    updatedAt: Date.now(),
+                  };
+                  setMedia(prev => [newItem, ...prev]);
+                  setOnlineUrl('');
+                  setOnlineTitle('');
+                  setOnlineArtist('');
+                  setOnlineCover('');
+                  setIsUploading(false);
+                }}
+                className="space-y-3"
               >
-                取消
-              </button>
-            </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">
+                    媒体类型
+                  </label>
+                  <div className="flex gap-4 text-xs">
+                    <label className="flex items-center gap-1.5 cursor-pointer">
+                      <input
+                        type="radio"
+                        checked={onlineType === 'audio'}
+                        onChange={() => setOnlineType('audio')}
+                        name="onlineType"
+                      />
+                      <span>音频 (Music/Audio)</span>
+                    </label>
+                    <label className="flex items-center gap-1.5 cursor-pointer">
+                      <input
+                        type="radio"
+                        checked={onlineType === 'video'}
+                        onChange={() => setOnlineType('video')}
+                        name="onlineType"
+                      />
+                      <span>视频 (Video/Stream)</span>
+                    </label>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">
+                    流媒体直链 URL <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="url"
+                    value={onlineUrl}
+                    onChange={(e) => setOnlineUrl(e.target.value)}
+                    placeholder="https://example.com/audio.mp3 或 .mp4 直链"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-xs font-mono text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-sky-500 focus:outline-none"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">
+                    标题
+                  </label>
+                  <input
+                    type="text"
+                    value={onlineTitle}
+                    onChange={(e) => setOnlineTitle(e.target.value)}
+                    placeholder="例如: 晨曦纯音乐 / 精彩视频"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-sky-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">
+                    艺术家 / 创作者
+                  </label>
+                  <input
+                    type="text"
+                    value={onlineArtist}
+                    onChange={(e) => setOnlineArtist(e.target.value)}
+                    placeholder="例如: WhiteFox 或 艺术家名字"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-sky-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">
+                    封面图片 URL (可选)
+                  </label>
+                  <input
+                    type="url"
+                    value={onlineCover}
+                    onChange={(e) => setOnlineCover(e.target.value)}
+                    placeholder="https://images.unsplash.com/..."
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-sky-500 focus:outline-none"
+                  />
+                </div>
+
+                <div className="pt-2 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsUploading(false)}
+                    className="px-4 py-2 text-xs text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl"
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 text-xs bg-sky-500 hover:bg-sky-600 text-white font-semibold rounded-xl shadow-xs transition"
+                  >
+                    保存并立即在线播放
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {uploadTab === 'file' && (
+              <div className="flex justify-end gap-2">
+                <button
+                  onClick={() => setIsUploading(false)}
+                  className="px-4 py-2 text-xs text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl"
+                >
+                  取消
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

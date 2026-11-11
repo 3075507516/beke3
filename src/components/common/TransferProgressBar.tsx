@@ -28,7 +28,7 @@ export const TransferProgressBar: React.FC = () => {
       case 'download':
         return '文件下载中...';
       case 'backup':
-        return '备份至坚果云中...';
+        return '备份至 WebDAV 中...';
       case 'restore':
         return '备份还原中...';
     }

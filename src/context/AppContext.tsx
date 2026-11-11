@@ -14,6 +14,7 @@ import {
   WebDavConfig,
   WebDavBackupItem,
   User,
+  WebSiteItem,
   ViewMode,
   GlobalThemeMode,
   DeviceViewMode,
@@ -33,6 +34,7 @@ import {
   DEFAULT_MAILS,
   DEFAULT_PRODUCTS,
   DEFAULT_ORDERS,
+  DEFAULT_WEBSITES,
   DEFAULT_PAYMENT_SETTINGS,
   DEFAULT_EMAIL_SETTINGS,
   DEFAULT_WEBDAV_CONFIG,
@@ -78,6 +80,9 @@ interface AppContextType {
   setOrders: React.Dispatch<React.SetStateAction<Order[]>>;
   chatMessages: ChatMessage[];
   setChatMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
+
+  websites: WebSiteItem[];
+  setWebsites: React.Dispatch<React.SetStateAction<WebSiteItem[]>>;
 
   webDavBackups: WebDavBackupItem[];
   setWebDavBackups: React.Dispatch<React.SetStateAction<WebDavBackupItem[]>>;
@@ -302,6 +307,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     ])
   );
+
+  const [websites, setWebsites] = useState<WebSiteItem[]>(() =>
+    loadLocalStorage<WebSiteItem[]>(STORAGE_KEYS.WEBSITES, DEFAULT_WEBSITES)
+  );
+  useEffect(() => saveLocalStorage(STORAGE_KEYS.WEBSITES, websites), [websites]);
 
   const [webDavBackups, setWebDavBackups] = useState<WebDavBackupItem[]>(() =>
     loadLocalStorage<WebDavBackupItem[]>(STORAGE_KEYS.WEBDAV_BACKUPS, DEFAULT_WEBDAV_BACKUPS)
@@ -826,9 +836,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             if (Array.isArray(remote.products)) {
               setProducts(prev => mergeById(prev, remote.products));
             }
+            if (Array.isArray(remote.websites)) {
+              setWebsites(prev => mergeById(prev, remote.websites));
+            }
+            if (remote.systemSettings && typeof remote.systemSettings === 'object') {
+              setSystemSettings(prev => ({
+                ...prev,
+                ...remote.systemSettings,
+                fullBackgroundUrl: remote.systemSettings.fullBackgroundUrl ?? prev.fullBackgroundUrl,
+                avatarUrl: remote.systemSettings.avatarUrl ?? prev.avatarUrl,
+                heroIntroImage: remote.systemSettings.heroIntroImage ?? prev.heroIntroImage,
+                heroTitle: remote.systemSettings.heroTitle ?? prev.heroTitle,
+                heroSubtitle: remote.systemSettings.heroSubtitle ?? prev.heroSubtitle,
+                heroBadge: remote.systemSettings.heroBadge ?? prev.heroBadge,
+              }));
+            }
           }
         }
-      } catch (e) {}
+      } catch (e) {
+        console.warn('Initial sync error:', e);
+      }
     };
     fetchInitialSync();
   }, []);
@@ -846,6 +873,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           photos,
           media,
           products,
+          websites,
           systemSettings,
           updatedAt: Date.now(),
         };
@@ -865,7 +893,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return () => {
       if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
     };
-  }, [posts, books, photos, media, products, systemSettings]);
+  }, [posts, books, photos, media, products, websites, systemSettings]);
 
   // Auto-sync timer (gentle interval with minimum threshold to avoid bandwidth consumption)
   useEffect(() => {
@@ -1047,6 +1075,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setOrders,
         chatMessages,
         setChatMessages,
+        websites,
+        setWebsites,
         webDavBackups,
         setWebDavBackups,
         trashItems,

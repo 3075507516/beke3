@@ -14,6 +14,7 @@ import {
   WebDavConfig,
   WebDavBackupItem,
   User,
+  WebSiteItem,
 } from '../types';
 
 export const STORAGE_KEYS = {
@@ -26,6 +27,7 @@ export const STORAGE_KEYS = {
   MAILS: 'fox3_mails',
   PRODUCTS: 'fox3_products',
   ORDERS: 'fox3_orders',
+  WEBSITES: 'fox3_websites',
   CHAT_MESSAGES: 'fox3_chat_messages',
   SYSTEM_SETTINGS: 'fox3_system_settings',
   EMAIL_SETTINGS: 'fox3_email_settings',
@@ -114,9 +116,9 @@ export const DEFAULT_SETTINGS: SystemSettings = {
   heroIntroImage: '/images/hero-default.jpg', // User uploaded panoramic hero
   heroBadge: '✨ 数字化极速智库 & 全栈现代博客',
   heroTitle: '探索数字世界与全栈极简之美',
-  heroSubtitle: '融合 Cloudflare D1/R2/KV 与 坚果云 WebDAV 容灾备份的下一代多终端响应式博客平台',
+  heroSubtitle: '融合 Cloudflare D1/R2/KV 与 WebDAV 容灾备份的下一代多终端响应式博客平台',
   transparentCards: false,
-  bottomButtonsEnabled: true,
+  bottomButtonsEnabled: false,
   hideNonBlogForGuests: false,
   emailRegistrationOnly: false,
   allowRegistration: true,
@@ -157,7 +159,7 @@ export const DEFAULT_POSTS: Post[] = [
 1. **D1 结构化数据驱动**：文章、评论、分类、标签与元数据完全依托 Cloudflare D1 SQLite 分布式数据库。
 2. **R2 零出口费用存储**：多媒体、电子书、附件与相册文件依托 Cloudflare R2 对象存储，支持全网 CDN 加速。
 3. **前端直连容错机制**：系统具备客户端与云端双模自适应。即使在未绑定 D1/R2 的环境，前端亦能无缝直连运行！
-4. **坚果云 / WebDAV 全量热备**：一键将全站数据热备至私有坚果云网盘，规避任何服务器运营与不可抗力风险。
+4. **WebDAV 全量热备**：一键将全站数据热备至私有 WebDAV 网盘，规避任何服务器运营与不可抗力风险。
 
 ---
 *本文由系统自动生成，可在管理员后台随时编辑或删除。*`,
@@ -199,7 +201,7 @@ export const DEFAULT_POSTS: Post[] = [
   {
     id: 'post-3',
     title: '全站多通道邮件中枢与 WebDAV 自动灾备实践',
-    summary: '深入探究内置邮件通知验证码、Cloudflare Email Routing 路由保存以及坚果云网盘备份恢复的技术实现。',
+    summary: '深入探究内置邮件通知验证码、Cloudflare Email Routing 路由保存以及 WebDAV 网盘备份恢复的技术实现。',
     content: `# 邮件与备份容灾体系
 
 邮件区支持：
@@ -209,10 +211,10 @@ export const DEFAULT_POSTS: Post[] = [
 - 3,000 封智能阈值风控提醒。
 
 备份区支持：
-- 坚果云 (NutStore) WebDAV 直连验证；
+- WebDAV 直连验证；
 - 全景可视化文件列表与一键灾难恢复。`,
     category: '系统运维',
-    tags: ['邮件', 'WebDAV', '坚果云', '容灾'],
+    tags: ['邮件', 'WebDAV', '容灾'],
     cover: 'https://images.unsplash.com/photo-1550751827-4bd374c3f58b?auto=format&fit=crop&w=1200&q=80',
     author: 'fox',
     views: 742,
@@ -329,8 +331,8 @@ export const DEFAULT_MAILS: MailMessage[] = [
     folder: 'inbox',
     sender: 'user@example.com',
     recipient: 'service@whitefox.blog',
-    subject: '关于 fox3 博客与坚果云 WebDAV 同步的体验咨询',
-    body: '博主您好！非常喜欢您的博客架构，请问坚果云的 WebDAV 是否支持自动定时灾备？期待回复！',
+    subject: '关于 fox3 博客与 WebDAV 同步的体验咨询',
+    body: '博主您好！非常喜欢您的博客架构，请问 WebDAV 是否支持自动定时灾备？期待回复！',
     date: '2025-05-20 14:32:00',
     read: true,
     isStarred: true,
@@ -357,8 +359,8 @@ export const DEFAULT_MAILS: MailMessage[] = [
     folder: 'sent',
     sender: 'service@whitefox.blog',
     recipient: 'user@example.com',
-    subject: 'Re: 关于 fox3 博客与坚果云 WebDAV 同步的体验咨询',
-    body: '您好，fox3 在后台设置中配置好坚果云 WebDAV 后，支持随时一键全站结构化数据备份，并可在历史备份库中随时回滚恢复！',
+    subject: 'Re: 关于 fox3 博客与 WebDAV 同步的体验咨询',
+    body: '您好，fox3 在后台设置中配置好 WebDAV 后，支持随时一键全站结构化数据备份，并可在历史备份库中随时回滚恢复！',
     date: '2025-05-20 17:05:00',
     read: true,
     isStarred: false,
@@ -542,5 +544,17 @@ export const DEFAULT_WEBDAV_BACKUPS: WebDavBackupItem[] = [
     updatedAt: Date.now() - 86400000 * 1,
     type: 'books',
     path: '/fox3_backup/fox3_books_backup_20250521.json',
+  }
+];
+
+export const DEFAULT_WEBSITES: WebSiteItem[] = [
+  {
+    id: 'site-default-1',
+    title: '白狐图床与文件分发中心',
+    url: 'https://img.001315.xyz/',
+    poster: 'https://images.unsplash.com/photo-1579783902614-a3fb3927b675?auto=format&fit=crop&w=800&q=80',
+    description: '官方高速图床与免流分发站点，支持各类高清图片、海报与素材的全球极速分发与直链引用。',
+    createdAt: Date.now() - 86400000 * 7,
+    updatedAt: Date.now() - 86400000 * 7,
   }
 ];

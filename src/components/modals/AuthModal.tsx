@@ -350,12 +350,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
         setStatusMsg({ type: 'error', text: '当前模式仅限邮箱注册，请输入有效的电子邮箱地址（例如 user@example.com）' });
         return;
       }
+      if (!sentCode) {
+        setStatusMsg({ type: 'error', text: '请先点击“获取验证码”，并在输入框中填入收到的 6 位验证码！' });
+        return;
+      }
       if (!verificationCode || verificationCode.trim().length !== 6) {
         setStatusMsg({ type: 'error', text: '请输入收到的 6 位邮箱验证码' });
         return;
       }
-      if (sentCode && verificationCode.trim() !== sentCode.trim()) {
-        setStatusMsg({ type: 'error', text: '验证码不正确，请重新核对' });
+      if (verificationCode.trim() !== sentCode.trim()) {
+        setStatusMsg({ type: 'error', text: '验证码不正确，请重新获取并核对' });
         return;
       }
     }

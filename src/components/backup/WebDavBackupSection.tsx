@@ -68,9 +68,9 @@ export const WebDavBackupSection: React.FC = () => {
       formConfig.password.length >= 6
     );
     if (isValid) {
-      setActionMessage('坚果云 / WebDAV 接入配置已持久化保存并与设置区实时同步！连接验证通过。');
+      setActionMessage('WebDAV 接入配置已持久化保存并与设置区实时同步！连接验证通过。');
     } else {
-      setActionMessage('配置已保存。当前处于未连接状态：请完整填写有效坚果云授权应用密码。');
+      setActionMessage('配置已保存。当前处于未连接状态：请完整填写有效 WebDAV 授权密码。');
     }
     setTimeout(() => setIsSaved(false), 3000);
   };
@@ -82,9 +82,9 @@ export const WebDavBackupSection: React.FC = () => {
     setTimeout(() => {
       setTestingConnection(false);
       if (formConfig.serverUrl && formConfig.username && formConfig.password) {
-        setActionMessage('坚果云 / WebDAV 连通性测试通过！远程目录握手认证成功。');
+        setActionMessage('WebDAV 连通性测试通过！远程目录握手认证成功。');
       } else {
-        setActionMessage('连通性测试未通过：请检查坚果云账号、专用应用密码是否填写完整。');
+        setActionMessage('连通性测试未通过：请检查 WebDAV 账号、专用密码是否填写完整。');
       }
     }, 600);
   };
@@ -98,7 +98,7 @@ export const WebDavBackupSection: React.FC = () => {
       media: '多媒体与相册库',
       settings: '系统配置中心',
     };
-    setActionMessage(`${scopeNames[backupScope]} 已打包并成功加密备份至坚果云 WebDAV！`);
+    setActionMessage(`${scopeNames[backupScope]} 已打包并成功加密备份至 WebDAV！`);
   };
 
   const handleRestoreBackup = async (item: WebDavBackupItem) => {
@@ -111,14 +111,14 @@ export const WebDavBackupSection: React.FC = () => {
     }
     const success = await performRestore(item.id);
     if (success) {
-      setActionMessage(`数据已成功从坚果云备份【${item.name}】选择性恢复完毕！`);
+      setActionMessage(`数据已成功从 WebDAV 备份【${item.name}】选择性恢复完毕！`);
     }
   };
 
   const handleDeleteBackup = (id: string) => {
-    if (window.confirm('确认在坚果云 WebDAV 中删除该备份快照文件吗？')) {
+    if (window.confirm('确认在 WebDAV 中删除该备份快照文件吗？')) {
       setWebDavBackups(prev => prev.filter(b => b.id !== id));
-      setActionMessage('备份快照已从坚果云移除。');
+      setActionMessage('备份快照已从 WebDAV 移除。');
     }
   };
 
@@ -133,10 +133,10 @@ export const WebDavBackupSection: React.FC = () => {
         <div>
           <h2 className="text-xl font-bold font-serif-sc text-slate-800 dark:text-slate-100 flex items-center gap-2">
             <Cloud className="w-5 h-5 text-sky-500" />
-            <span>坚果云 WebDAV 容灾备份与恢复中心</span>
+            <span>WebDAV 容灾备份与恢复中心</span>
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            外接坚果云或通用 WebDAV 网盘，可视化管理远程备份文件，支持选择性备份与精准灾难恢复，预防服务器运营风险
+            外接通用 WebDAV 网盘，可视化管理远程备份文件，支持选择性备份与精准灾难恢复，预防服务器运营风险
           </p>
         </div>
 
@@ -185,7 +185,7 @@ export const WebDavBackupSection: React.FC = () => {
         <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
           <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
             <HardDrive className="w-4 h-4 text-sky-500" />
-            <span>坚果云 / WebDAV 接入与同步配置</span>
+            <span>WebDAV 接入与同步配置</span>
           </h3>
 
           <div className="flex items-center gap-2">
@@ -197,7 +197,7 @@ export const WebDavBackupSection: React.FC = () => {
               }`}
             >
               <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
-              {isConnected ? '坚果云 WebDAV 通道已连通' : '未连接'}
+              {isConnected ? 'WebDAV 通道已连通' : '未连接'}
             </span>
           </div>
         </div>
@@ -226,7 +226,7 @@ export const WebDavBackupSection: React.FC = () => {
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-slate-500 mb-1">坚果云账号 (User)</label>
+            <label className="block text-xs font-medium text-slate-500 mb-1">WebDAV 账号 (User)</label>
             <input
               type="text"
               value={formConfig.username}
@@ -237,7 +237,7 @@ export const WebDavBackupSection: React.FC = () => {
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-slate-500 mb-1">坚果云应用密码 (Password)</label>
+            <label className="block text-xs font-medium text-slate-500 mb-1">WebDAV 应用授权密码 (Password)</label>
             <input
               type="password"
               value={formConfig.password}
@@ -251,7 +251,7 @@ export const WebDavBackupSection: React.FC = () => {
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-2">
           <p className="text-[11px] text-slate-400 flex items-center gap-1.5">
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-            支持在坚果云后台“账户信息 - 安全设置 - 第三方应用管理”中生成专属应用密码，安全隔离主账号。
+            支持在 WebDAV 网盘后台“账户信息 - 安全设置 - 第三方应用管理”中生成专属应用密码，安全隔离主账号。
           </p>
 
           <div className="flex items-center gap-2 self-end sm:self-auto">
@@ -286,7 +286,7 @@ export const WebDavBackupSection: React.FC = () => {
         <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs text-slate-400">
           <span className="flex items-center gap-2 font-medium text-slate-700 dark:text-slate-200">
             <FolderSync className="w-4 h-4 text-sky-500" />
-            坚果云远程已存储归档 ({webDavBackups.length} 份快照)
+            WebDAV 远程已存储归档 ({webDavBackups.length} 份快照)
           </span>
           <span>选择恢复 / 容灾回滚</span>
         </div>

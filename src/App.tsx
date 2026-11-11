@@ -7,6 +7,7 @@ import { BookmarksSection } from './components/bookmarks/BookmarksSection';
 import { BookshelfSection } from './components/books/BookshelfSection';
 import { GallerySection } from './components/gallery/GallerySection';
 import { MediaSection } from './components/media/MediaSection';
+import { SitesSection } from './components/sites/SitesSection';
 import { MailSection } from './components/mail/MailSection';
 import { ShopSection } from './components/shop/ShopSection';
 import { WebDavBackupSection } from './components/backup/WebDavBackupSection';
@@ -24,9 +25,9 @@ const MainLayout: React.FC = () => {
   const isAdmin = currentUser?.role === 'admin';
   const isGuestRestricted = !currentUser && systemSettings.hideNonBlogForGuests;
 
-  // If non-admin tries to access admin-only tabs (mail, settings, backup), redirect safely to blog
+  // If non-admin tries to access admin-only tabs (sites, mail, settings, backup), redirect safely to blog
   useEffect(() => {
-    if (!isAdmin && ['mail', 'settings', 'backup'].includes(currentTab)) {
+    if (!isAdmin && ['sites', 'mail', 'settings', 'backup'].includes(currentTab)) {
       setCurrentTab('blog');
     }
   }, [isAdmin, currentTab]);
@@ -91,6 +92,7 @@ const MainLayout: React.FC = () => {
           {/* Tab Views */}
           {currentTab === 'blog' && <BlogSection />}
           {currentTab === 'bookmarks' && <BookmarksSection />}
+          {currentTab === 'sites' && isAdmin && <SitesSection />}
           {currentTab === 'books' && <BookshelfSection />}
           {currentTab === 'gallery' && <GallerySection />}
           {currentTab === 'media' && <MediaSection />}
@@ -108,10 +110,13 @@ const MainLayout: React.FC = () => {
         {/* Global Footer */}
         <footer className="relative z-10 border-t py-6 text-center text-xs border-slate-200/60 dark:border-slate-800/80 bg-white/70 dark:bg-slate-900/70 backdrop-blur-md text-slate-500 dark:text-slate-400">
           <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3">
-            <div>
+            <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3 text-left sm:text-left">
               <span>&copy; {new Date().getFullYear()} <b>{systemSettings.siteName}</b> (fox3). All rights reserved.</span>
+              <span className="text-[11px] text-amber-600/90 dark:text-amber-400/90">
+                (系统权限说明：WebDAV容灾备份、邮箱中枢、系统设置、网站图床专区仅管理员可见)
+              </span>
             </div>
-            <div className="flex items-center gap-4 text-[11px]">
+            <div className="flex items-center gap-4 text-[11px] shrink-0">
               <span>依托 Cloudflare D1 + R2 原生构建</span>
               <span>•</span>
               <button
@@ -147,6 +152,7 @@ const MainLayout: React.FC = () => {
                 { id: 'shop', label: t('nav.shop') },
               ] : []),
               ...(isAdmin ? [
+                { id: 'sites', label: t('nav.sites') || '网站图床' },
                 { id: 'backup', label: t('nav.backup') },
                 { id: 'mail', label: t('nav.mail') },
                 { id: 'settings', label: t('nav.settings') },

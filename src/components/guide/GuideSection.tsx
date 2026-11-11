@@ -30,7 +30,7 @@ export const GuideSection: React.FC = () => {
       <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-2">
         <h2 className="text-xl md:text-2xl font-bold font-serif-sc text-slate-900 dark:text-slate-100 flex items-center gap-2">
           <HelpCircle className="w-6 h-6 text-rose-500" />
-          <span>fox3 博客全平台极速部署指引与 D1 / R2 / 坚果云使用说明</span>
+          <span>fox3 博客全平台极速部署指引与 D1 / R2 / WebDAV 使用说明</span>
         </h2>
         <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
           本项目依赖 Cloudflare D1 和 R2。D1 用于存储文章、评论、分类、标签、文件元数据等结构化数据；R2 用于存储图片、视频、音频和附件等大文件实体。KV 仅用于缓存和配置，不作为主数据存储。如果未配置 D1 或 R2，系统将无感降级至本地持久化。在腾讯云和阿里云环境下，可通过环境变量接入对应数据库与存储桶，实现全平台统一体验。

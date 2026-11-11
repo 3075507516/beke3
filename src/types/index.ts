@@ -152,9 +152,9 @@ export interface WebDavBackupItem {
 
 export interface WebDavConfig {
   enabled: boolean;
-  provider: 'nutstore' | 'generic'; // 坚果云或通用 WebDAV
+  provider: 'nutstore' | 'generic'; // WebDAV 提供商
   serverUrl: string;
-  port?: number | string; // 坚果云/WebDAV 端口（默认 443）
+  port?: number | string; // WebDAV 端口（默认 443）
   username: string;
   password: string;
   backupPath: string;
@@ -296,10 +296,20 @@ export interface MultiTransferProgress {
   transferredBytes?: number;
 }
 
+export interface WebSiteItem {
+  id: string;
+  title: string;
+  url: string;
+  poster: string;
+  description: string;
+  createdAt: number;
+  updatedAt?: number;
+}
+
 export interface TrashItem {
   id: string;
   originId: string;
-  originType: 'post' | 'book' | 'photo' | 'media' | 'mail' | 'chat' | 'product' | 'order';
+  originType: 'post' | 'book' | 'photo' | 'media' | 'mail' | 'chat' | 'product' | 'order' | 'website';
   title: string;
   preview?: string;
   deletedAt: number;

@@ -67,6 +67,7 @@ export const Header: React.FC<HeaderProps> = ({
   const navItems = [
     { id: 'blog', label: t('nav.blog'), icon: BookOpen },
     { id: 'bookmarks', label: t('nav.bookmarks'), icon: Bookmark },
+    { id: 'sites', label: t('nav.sites') || '网站图床', icon: Globe, adminOnly: true },
     { id: 'books', label: t('nav.books'), icon: BookOpen, restricted: true },
     { id: 'gallery', label: t('nav.gallery'), icon: Image, restricted: true },
     { id: 'media', label: t('nav.media'), icon: Film, restricted: true },
