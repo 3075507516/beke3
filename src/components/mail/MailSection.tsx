@@ -279,59 +279,104 @@ export const MailSection: React.FC = () => {
 
               <div>
                 <label className="block text-xs text-slate-500 mb-1">
-                  发信服务提供商 <span className="text-rose-500 font-bold">[必填]</span>
+                  发信服务与加密方式 <span className="text-rose-500 font-bold">[必填]</span>
                 </label>
                 <select
                   value={formSettings.provider}
                   onChange={e => setFormSettings({ ...formSettings, provider: e.target.value as any })}
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100"
                 >
-                  <option value="resend">Resend (官方推荐 / 极速交付)</option>
-                  <option value="sendgrid">Twilio SendGrid API</option>
-                  <option value="mailgun">Mailgun API</option>
-                  <option value="ses">Amazon SES (简单邮件服务)</option>
-                  <option value="smtp">企业专用 SMTP 服务器 (TLS/SSL)</option>
+                  <option value="resend">Resend API (HTTPS / TLS 1.3 现代加密 / 全球推荐)</option>
+                  <option value="brevo">Brevo API (HTTPS / SSL 高加密通道)</option>
+                  <option value="sendgrid">Twilio SendGrid API (HTTPS / TLS 传输加密)</option>
+                  <option value="mailgun">Mailgun REST API (HTTPS 安全传输)</option>
+                  <option value="ses">Amazon SES (HTTPS / TLS 安全连接)</option>
+                  <option value="smtp">标准 SMTP (SSL/TLS 加密端口 465 / STARTTLS 587)</option>
                 </select>
               </div>
 
+              {formSettings.provider !== 'smtp' ? (
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">
+                    API Key / Access Token 密钥 <span className="text-rose-500 font-bold">[必填]</span>
+                  </label>
+                  <input
+                    type="password"
+                    value={formSettings.apiKey}
+                    onChange={e => setFormSettings({ ...formSettings, apiKey: e.target.value })}
+                    placeholder="re_xxxxxxxxxxxxxx 或 key-xxxxxxxx"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 font-mono"
+                  />
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="col-span-2">
+                      <label className="block text-xs text-slate-500 mb-1">
+                        SMTP 发件服务器地址 <span className="text-rose-500 font-bold">[必填]</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={formSettings.smtpHost}
+                        onChange={e => setFormSettings({ ...formSettings, smtpHost: e.target.value })}
+                        placeholder="smtp.exmail.qq.com 或 smtp.gmail.com"
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-slate-500 mb-1">
+                        端口 (Port) <span className="text-rose-500 font-bold">[必填]</span>
+                      </label>
+                      <input
+                        type="number"
+                        value={formSettings.smtpPort || 465}
+                        onChange={e => setFormSettings({ ...formSettings, smtpPort: parseInt(e.target.value) || 465 })}
+                        placeholder="465"
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-xs text-slate-500 mb-1">
+                        SMTP 账号 / 用户名 <span className="text-rose-500 font-bold">[必填]</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={formSettings.smtpUser}
+                        onChange={e => setFormSettings({ ...formSettings, smtpUser: e.target.value })}
+                        placeholder="service@whitefox.blog"
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-slate-500 mb-1">
+                        SMTP 授权码 / 密码 <span className="text-rose-500 font-bold">[必填]</span>
+                      </label>
+                      <input
+                        type="password"
+                        value={formSettings.smtpPass}
+                        onChange={e => setFormSettings({ ...formSettings, smtpPass: e.target.value })}
+                        placeholder="••••••••"
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 font-mono"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div>
                 <label className="block text-xs text-slate-500 mb-1">
-                  API Key / Token 密钥 <span className="text-rose-500 font-bold">[必填 (使用 API 时)]</span>
+                  发信人地址 (From Header) <span className="text-rose-500 font-bold">[必填]</span>
                 </label>
                 <input
-                  type="password"
-                  value={formSettings.apiKey}
-                  onChange={e => setFormSettings({ ...formSettings, apiKey: e.target.value })}
-                  placeholder="re_xxxxxxxxxxxxxx 或 key-xxxxxxxx"
+                  type="text"
+                  value={formSettings.senderEmail}
+                  onChange={e => setFormSettings({ ...formSettings, senderEmail: e.target.value })}
+                  placeholder="service@whitefox.blog"
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 font-mono"
                 />
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-xs text-slate-500 mb-1">
-                    发件服务地址 <span className="text-slate-400">[必填 (SMTP)]</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={formSettings.smtpHost}
-                    onChange={e => setFormSettings({ ...formSettings, smtpHost: e.target.value })}
-                    placeholder="smtp.domain.com"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-slate-500 mb-1">
-                    发信账号 / 发件人 <span className="text-rose-500 font-bold">[必填]</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={formSettings.senderEmail}
-                    onChange={e => setFormSettings({ ...formSettings, senderEmail: e.target.value })}
-                    placeholder="service@whitefox.blog"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 font-mono"
-                  />
-                </div>
               </div>
             </div>
 
@@ -350,60 +395,173 @@ export const MailSection: React.FC = () => {
 
               <div>
                 <label className="block text-xs text-slate-500 mb-1">
-                  收信处理方式 <span className="text-rose-500 font-bold">[必填]</span>
+                  收信服务与加密方式 <span className="text-rose-500 font-bold">[必填]</span>
                 </label>
                 <select
                   value={formSettings.inboundMethod || 'cf_routing'}
                   onChange={e => setFormSettings({ ...formSettings, inboundMethod: e.target.value as any })}
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100"
                 >
-                  <option value="cf_routing">Cloudflare Email Routing (边缘直接路由)</option>
-                  <option value="webhook">Webhook 自动化接收回调 (HTTP POST)</option>
-                  <option value="imap_pop3">IMAP / POP3 定期轮询收取</option>
+                  <option value="cf_routing">Cloudflare Email Routing (TLS 边缘邮件路由 / 官方免运维)</option>
+                  <option value="imap_pop3">IMAP / POP3 (SSL/TLS 993 加密专用通道)</option>
+                  <option value="webhook">HTTPS Webhook 安全回调接收 (端到端加密)</option>
                 </select>
               </div>
 
-              <div>
-                <label className="block text-xs text-slate-500 mb-1">
-                  Cloudflare 路由公共收件地址 <span className="text-rose-500 font-bold">[必填]</span>
-                </label>
-                <input
-                  type="text"
-                  value={formSettings.cfEmailRouting.routingAddress}
-                  onChange={e =>
-                    setFormSettings({
-                      ...formSettings,
-                      cfEmailRouting: {
-                        ...formSettings.cfEmailRouting,
-                        routingAddress: e.target.value,
-                      },
-                    })
-                  }
-                  placeholder="contact@yourdomain.com"
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 font-mono"
-                />
-              </div>
+              {formSettings.inboundMethod === 'imap_pop3' ? (
+                <div className="space-y-2">
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="col-span-2">
+                      <label className="block text-xs text-slate-500 mb-1">
+                        IMAP 服务器地址 <span className="text-rose-500 font-bold">[必填]</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={formSettings.imapConfig?.host || ''}
+                        onChange={e =>
+                          setFormSettings({
+                            ...formSettings,
+                            imapConfig: {
+                              ...(formSettings.imapConfig || { host: '', port: 993, user: '', pass: '', tls: true }),
+                              host: e.target.value,
+                            },
+                          })
+                        }
+                        placeholder="imap.exmail.qq.com"
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-slate-500 mb-1">
+                        收信端口 <span className="text-rose-500 font-bold">[必填]</span>
+                      </label>
+                      <input
+                        type="number"
+                        value={formSettings.imapConfig?.port || 993}
+                        onChange={e =>
+                          setFormSettings({
+                            ...formSettings,
+                            imapConfig: {
+                              ...(formSettings.imapConfig || { host: '', port: 993, user: '', pass: '', tls: true }),
+                              port: parseInt(e.target.value) || 993,
+                            },
+                          })
+                        }
+                        placeholder="993"
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 font-mono"
+                      />
+                    </div>
+                  </div>
 
-              <div>
-                <label className="block text-xs text-slate-500 mb-1">
-                  管理员专属目标接收邮箱 <span className="text-rose-500 font-bold">[必填]</span>
-                </label>
-                <input
-                  type="text"
-                  value={formSettings.cfEmailRouting.forwardTo}
-                  onChange={e =>
-                    setFormSettings({
-                      ...formSettings,
-                      cfEmailRouting: {
-                        ...formSettings.cfEmailRouting,
-                        forwardTo: e.target.value,
-                      },
-                    })
-                  }
-                  placeholder="admin@gmail.com"
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 font-mono"
-                />
-              </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-xs text-slate-500 mb-1">
+                        IMAP 账号 <span className="text-rose-500 font-bold">[必填]</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={formSettings.imapConfig?.user || ''}
+                        onChange={e =>
+                          setFormSettings({
+                            ...formSettings,
+                            imapConfig: {
+                              ...(formSettings.imapConfig || { host: '', port: 993, user: '', pass: '', tls: true }),
+                              user: e.target.value,
+                            },
+                          })
+                        }
+                        placeholder="service@whitefox.blog"
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-slate-500 mb-1">
+                        IMAP 授权码 / 密码 <span className="text-rose-500 font-bold">[必填]</span>
+                      </label>
+                      <input
+                        type="password"
+                        value={formSettings.imapConfig?.pass || ''}
+                        onChange={e =>
+                          setFormSettings({
+                            ...formSettings,
+                            imapConfig: {
+                              ...(formSettings.imapConfig || { host: '', port: 993, user: '', pass: '', tls: true }),
+                              pass: e.target.value,
+                            },
+                          })
+                        }
+                        placeholder="••••••••"
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 font-mono"
+                      />
+                    </div>
+                  </div>
+                </div>
+              ) : formSettings.inboundMethod === 'webhook' ? (
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">
+                    自动化 Webhook 回调地址 (HTTP POST) <span className="text-rose-500 font-bold">[必填]</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={formSettings.cfEmailRouting.webhookUrl || '/api/mail/webhook'}
+                    onChange={e =>
+                      setFormSettings({
+                        ...formSettings,
+                        cfEmailRouting: {
+                          ...formSettings.cfEmailRouting,
+                          webhookUrl: e.target.value,
+                        },
+                      })
+                    }
+                    placeholder="/api/mail/webhook 或 https://api.yourdomain.com/mail"
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 font-mono"
+                  />
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <label className="block text-xs text-slate-500 mb-1">
+                      Cloudflare 路由公共收件地址 <span className="text-rose-500 font-bold">[必填]</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={formSettings.cfEmailRouting.routingAddress}
+                      onChange={e =>
+                        setFormSettings({
+                          ...formSettings,
+                          cfEmailRouting: {
+                            ...formSettings.cfEmailRouting,
+                            routingAddress: e.target.value,
+                          },
+                        })
+                      }
+                      placeholder="contact@yourdomain.com"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs text-slate-500 mb-1">
+                      管理员专属目标接收邮箱 <span className="text-rose-500 font-bold">[必填]</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={formSettings.cfEmailRouting.forwardTo}
+                      onChange={e =>
+                        setFormSettings({
+                          ...formSettings,
+                          cfEmailRouting: {
+                            ...formSettings.cfEmailRouting,
+                            forwardTo: e.target.value,
+                          },
+                        })
+                      }
+                      placeholder="admin@gmail.com"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 font-mono"
+                    />
+                  </div>
+                </>
+              )}
 
               {/* Switches & Limits */}
               <div className="space-y-2 pt-1">

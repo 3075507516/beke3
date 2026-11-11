@@ -810,9 +810,33 @@ export const onRequest = async (context: any) => {
       let externalDispatched = false;
       let externalProvider = 'none';
 
-      // 1. Attempt dispatch via Resend API if API Key is configured in env or passed from client settings
-      const apiKey = clientEmailSettings?.apiKey || env.RESEND_API_KEY || env.MAIL_API_KEY;
-      if (apiKey && apiKey !== '********' && !apiKey.includes('demo')) {
+      // 1. Attempt dispatch via modern API providers (Resend, Brevo, SendGrid) or SMTP
+      const provider = clientEmailSettings?.provider || (env.RESEND_API_KEY ? 'resend' : env.SENDGRID_API_KEY ? 'sendgrid' : 'resend');
+      const apiKey = clientEmailSettings?.apiKey || env.RESEND_API_KEY || env.MAIL_API_KEY || env.SENDGRID_API_KEY;
+
+      if (provider === 'brevo' && apiKey && apiKey !== '********' && !apiKey.includes('demo')) {
+        try {
+          const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+            method: 'POST',
+            headers: {
+              'api-key': apiKey,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              sender: { email: sender, name: 'fox3 Blog' },
+              to: [{ email: to }],
+              subject: subject || 'fox3 博客系统通知',
+              htmlContent: html || `<p>${(text || code || '系统信件内容').replace(/\n/g, '<br/>')}</p>`,
+            })
+          });
+          if (res.ok) {
+            externalDispatched = true;
+            externalProvider = 'brevo';
+          }
+        } catch (e) {
+          console.warn('[Mail Backend] Brevo dispatch error:', e);
+        }
+      } else if (apiKey && apiKey !== '********' && !apiKey.includes('demo')) {
         try {
           const res = await fetch('https://api.resend.com/emails', {
             method: 'POST',
