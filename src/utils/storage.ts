@@ -86,9 +86,14 @@ export const getFileFromIndexedDB = async (fileKey: string): Promise<Blob | stri
   }
 };
 
-// Convert indexedDB key or remote URL into a valid Blob or URL for reading/downloading
+// Convert indexedDB key, data URL, or remote URL into a valid URL for displaying/downloading
 export const resolveFileUrl = async (urlOrKey: string): Promise<string> => {
   if (!urlOrKey) return '';
+  // Data URLs, HTTP/HTTPS URLs, or root-relative paths can be used directly
+  if (urlOrKey.startsWith('data:') || urlOrKey.startsWith('http://') || urlOrKey.startsWith('https://') || urlOrKey.startsWith('/')) {
+    return urlOrKey;
+  }
+  // IndexedDB persistent key
   if (urlOrKey.startsWith('idb_file_')) {
     const blob = await getFileFromIndexedDB(urlOrKey);
     if (blob instanceof Blob) {

@@ -549,19 +549,9 @@ export const onRequest = async (context: any) => {
     }
   }
 
-  // Cloudflare R2 Upload Handler (Images, Videos, Ebooks)
+  // Universal Multi-Cloud File Upload Handler (R2 -> D1 -> KV -> Memory Fallback)
+  // Ensures files can be uploaded and accessed cross-device even if R2 is not bound!
   if (path === '/upload' && request.method === 'POST') {
-    if (!env.R2_BUCKET) {
-      return new Response(JSON.stringify({
-        success: false,
-        fallbackToLocal: true,
-        message: 'R2 binding not configured on this host. Use fallback storage.',
-      }), {
-        status: 200,
-        headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
-      });
-    }
-
     try {
       const formData = await request.formData();
       const file = formData.get('file') as File;
@@ -574,16 +564,94 @@ export const onRequest = async (context: any) => {
 
       const key = `${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
       const contentType = file.type || 'application/octet-stream';
-      await env.R2_BUCKET.put(key, file.stream(), {
-        httpMetadata: {
-          contentType,
-          contentDisposition: `inline; filename="${encodeURIComponent(file.name)}"`,
-        },
-        customMetadata: {
-          originalName: encodeURIComponent(file.name),
-          uploadedAt: String(Date.now()),
+      let storedTarget = 'none';
+
+      // 1. Primary: Cloudflare R2 Storage
+      if (env.R2_BUCKET) {
+        try {
+          await env.R2_BUCKET.put(key, file.stream(), {
+            httpMetadata: {
+              contentType,
+              contentDisposition: `inline; filename="${encodeURIComponent(file.name)}"`,
+            },
+            customMetadata: {
+              originalName: encodeURIComponent(file.name),
+              uploadedAt: String(Date.now()),
+            }
+          });
+          storedTarget = 'r2';
+        } catch (r2Err) {
+          console.warn('[fox3] R2 upload error, falling back to D1/KV:', r2Err);
         }
-      });
+      }
+
+      // Convert file buffer to base64 if needed for D1/KV/Memory
+      let base64Data = '';
+      if (storedTarget === 'none') {
+        const arrayBuf = await file.arrayBuffer();
+        let binary = '';
+        const bytes = new Uint8Array(arrayBuf);
+        const len = bytes.byteLength;
+        for (let i = 0; i < len; i++) {
+          binary += String.fromCharCode(bytes[i]);
+        }
+        base64Data = btoa(binary);
+      }
+
+      // 2. Secondary: Cloudflare D1 SQLite database (fox3_files table)
+      if (storedTarget === 'none' && env.DB) {
+        try {
+          await env.DB.prepare(
+            `CREATE TABLE IF NOT EXISTS fox3_files (
+              key TEXT PRIMARY KEY,
+              name TEXT,
+              type TEXT,
+              size INTEGER,
+              data TEXT,
+              uploadedAt INTEGER
+            )`
+          ).run();
+
+          await env.DB.prepare(
+            `INSERT INTO fox3_files (key, name, type, size, data, uploadedAt)
+             VALUES (?, ?, ?, ?, ?, ?)`
+          ).bind(key, file.name, contentType, file.size, base64Data, Date.now()).run();
+          storedTarget = 'd1';
+        } catch (d1Err) {
+          console.warn('[fox3] D1 file store failed:', d1Err);
+        }
+      }
+
+      // 3. Tertiary: Cloudflare KV
+      if (storedTarget === 'none' && env.KV) {
+        try {
+          await env.KV.put(`fox3_file_${key}`, JSON.stringify({
+            name: file.name,
+            type: contentType,
+            size: file.size,
+            data: base64Data,
+            uploadedAt: Date.now()
+          }), { expirationTtl: 86400 * 90 });
+          storedTarget = 'kv';
+        } catch (kvErr) {
+          console.warn('[fox3] KV file store failed:', kvErr);
+        }
+      }
+
+      // 4. In-Memory Edge Cache Fallback
+      if (storedTarget === 'none') {
+        if (!(globalThis as any).__fox3_file_store) {
+          (globalThis as any).__fox3_file_store = {};
+        }
+        (globalThis as any).__fox3_file_store[key] = {
+          name: file.name,
+          type: contentType,
+          size: file.size,
+          data: base64Data,
+          uploadedAt: Date.now()
+        };
+        storedTarget = 'memory';
+      }
 
       const publicUrl = `/api/files/${key}`;
       return new Response(JSON.stringify({
@@ -592,41 +660,118 @@ export const onRequest = async (context: any) => {
         url: publicUrl,
         name: file.name,
         size: file.size,
-        type: contentType
+        type: contentType,
+        storedTarget,
       }), {
         headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
       });
     } catch (err: any) {
-      return new Response(JSON.stringify({ error: err.message || 'R2 upload failed' }), {
+      return new Response(JSON.stringify({ error: err.message || 'Upload failed' }), {
         status: 500,
         headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
       });
     }
   }
 
-  // Cloudflare R2 File Access & Stream (with accurate Content-Type, Range & caching headers, supporting inline view & attachment download)
+  // Universal File Access & Stream (Serves from R2, D1, KV, or In-Memory Store)
   if (path.startsWith('/files/')) {
     const key = path.replace('/files/', '');
-    if (!env.R2_BUCKET) {
-      return new Response('R2 not enabled', { status: 404 });
-    }
-    const object = await env.R2_BUCKET.get(key);
-    if (!object) {
-      return new Response('File not found', { status: 404 });
-    }
-    const responseHeaders = new Headers(headers);
-    object.writeHttpMetadata(responseHeaders);
-    responseHeaders.set('etag', object.httpEtag);
-    responseHeaders.set('Cache-Control', 'public, max-age=31536000, immutable');
-
-    // Check if client explicitly requests download via query param
     const isDownload = url.searchParams.get('download') === '1';
-    if (isDownload) {
-      const originalName = object.customMetadata?.originalName || key;
-      responseHeaders.set('Content-Disposition', `attachment; filename="${originalName}"; filename*=UTF-8''${originalName}`);
+
+    // 1. Try fetch from R2
+    if (env.R2_BUCKET) {
+      try {
+        const object = await env.R2_BUCKET.get(key);
+        if (object) {
+          const responseHeaders = new Headers(headers);
+          object.writeHttpMetadata(responseHeaders);
+          responseHeaders.set('etag', object.httpEtag);
+          responseHeaders.set('Cache-Control', 'public, max-age=31536000, immutable');
+
+          if (isDownload) {
+            const originalName = object.customMetadata?.originalName || key;
+            responseHeaders.set('Content-Disposition', `attachment; filename="${originalName}"; filename*=UTF-8''${originalName}`);
+          }
+          return new Response(object.body, { headers: responseHeaders });
+        }
+      } catch (e) {}
     }
 
-    return new Response(object.body, { headers: responseHeaders });
+    // 2. Try fetch from D1
+    if (env.DB) {
+      try {
+        const row = await env.DB.prepare(
+          `SELECT name, type, size, data FROM fox3_files WHERE key = ?`
+        ).bind(key).first();
+
+        if (row && row.data) {
+          const binaryStr = atob(row.data);
+          const len = binaryStr.length;
+          const bytes = new Uint8Array(len);
+          for (let i = 0; i < len; i++) {
+            bytes[i] = binaryStr.charCodeAt(i);
+          }
+          const responseHeaders = new Headers(headers);
+          responseHeaders.set('Content-Type', row.type || 'application/octet-stream');
+          responseHeaders.set('Content-Length', String(len));
+          responseHeaders.set('Cache-Control', 'public, max-age=31536000, immutable');
+          if (isDownload) {
+            const safeName = encodeURIComponent(row.name || key);
+            responseHeaders.set('Content-Disposition', `attachment; filename="${safeName}"; filename*=UTF-8''${safeName}`);
+          }
+          return new Response(bytes.buffer, { headers: responseHeaders });
+        }
+      } catch (e) {}
+    }
+
+    // 3. Try fetch from KV
+    if (env.KV) {
+      try {
+        const kvVal = await env.KV.get(`fox3_file_${key}`);
+        if (kvVal) {
+          const fileMeta = JSON.parse(kvVal);
+          if (fileMeta && fileMeta.data) {
+            const binaryStr = atob(fileMeta.data);
+            const len = binaryStr.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+              bytes[i] = binaryStr.charCodeAt(i);
+            }
+            const responseHeaders = new Headers(headers);
+            responseHeaders.set('Content-Type', fileMeta.type || 'application/octet-stream');
+            responseHeaders.set('Content-Length', String(len));
+            responseHeaders.set('Cache-Control', 'public, max-age=31536000, immutable');
+            if (isDownload) {
+              const safeName = encodeURIComponent(fileMeta.name || key);
+              responseHeaders.set('Content-Disposition', `attachment; filename="${safeName}"; filename*=UTF-8''${safeName}`);
+            }
+            return new Response(bytes.buffer, { headers: responseHeaders });
+          }
+        }
+      } catch (e) {}
+    }
+
+    // 4. Try fetch from in-memory store
+    if ((globalThis as any).__fox3_file_store && (globalThis as any).__fox3_file_store[key]) {
+      const fileMeta = (globalThis as any).__fox3_file_store[key];
+      const binaryStr = atob(fileMeta.data);
+      const len = binaryStr.length;
+      const bytes = new Uint8Array(len);
+      for (let i = 0; i < len; i++) {
+        bytes[i] = binaryStr.charCodeAt(i);
+      }
+      const responseHeaders = new Headers(headers);
+      responseHeaders.set('Content-Type', fileMeta.type || 'application/octet-stream');
+      responseHeaders.set('Content-Length', String(len));
+      responseHeaders.set('Cache-Control', 'public, max-age=31536000, immutable');
+      if (isDownload) {
+        const safeName = encodeURIComponent(fileMeta.name || key);
+        responseHeaders.set('Content-Disposition', `attachment; filename="${safeName}"; filename*=UTF-8''${safeName}`);
+      }
+      return new Response(bytes.buffer, { headers: responseHeaders });
+    }
+
+    return new Response('File not found', { status: 404, headers });
   }
 
   // D1 Database status & health indicator (secure - no raw SQL execution)

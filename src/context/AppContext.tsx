@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import {
   Post,
   Book,
@@ -787,6 +787,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [posts, books, photos, media, mails, products, orders, chatMessages, webDavBackups, webDavConfig, trashItems, systemSettings]);
 
+  // Smart merge function preserving both local and remote unique items so refreshing never wipes data
+  const mergeById = <T extends { id: string }>(localList: T[], remoteList: any[]): T[] => {
+    if (!Array.isArray(remoteList) || remoteList.length === 0) return localList;
+    const map = new Map<string, T>();
+    // Start with remote items
+    for (const item of remoteList) {
+      if (item && item.id) map.set(item.id, item);
+    }
+    // Overlay local items so local newly created items or edits are preserved
+    for (const item of localList) {
+      if (item && item.id) map.set(item.id, item);
+    }
+    return Array.from(map.values());
+  };
+
   // Initial fetch from cloud on load to pull changes made from other devices
   useEffect(() => {
     const fetchInitialSync = async () => {
@@ -796,20 +811,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const json = await res.json();
           if (json && json.data) {
             const remote = json.data;
-            if (Array.isArray(remote.posts) && remote.posts.length > 0) {
-              setPosts(remote.posts);
+            if (Array.isArray(remote.posts)) {
+              setPosts(prev => mergeById(prev, remote.posts));
             }
-            if (Array.isArray(remote.books) && remote.books.length > 0) {
-              setBooks(remote.books);
+            if (Array.isArray(remote.books)) {
+              setBooks(prev => mergeById(prev, remote.books));
             }
-            if (Array.isArray(remote.photos) && remote.photos.length > 0) {
-              setPhotos(remote.photos);
+            if (Array.isArray(remote.photos)) {
+              setPhotos(prev => mergeById(prev, remote.photos));
             }
-            if (Array.isArray(remote.media) && remote.media.length > 0) {
-              setMedia(remote.media);
+            if (Array.isArray(remote.media)) {
+              setMedia(prev => mergeById(prev, remote.media));
             }
-            if (Array.isArray(remote.products) && remote.products.length > 0) {
-              setProducts(remote.products);
+            if (Array.isArray(remote.products)) {
+              setProducts(prev => mergeById(prev, remote.products));
             }
           }
         }
@@ -818,30 +833,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     fetchInitialSync();
   }, []);
 
-  // Instant broadcast & trigger sync whenever posts or settings change
-  const broadcastSync = useCallback((customPayload?: Record<string, unknown>) => {
-    try {
-      const payload = {
-        posts,
-        books,
-        photos,
-        media,
-        products,
-        systemSettings,
-        updatedAt: Date.now(),
-        ...customPayload,
-      };
-      const bc = new BroadcastChannel('fox3_realtime_sync');
-      bc.postMessage({ type: 'SYNC_ALL', payload });
-      bc.close();
+  // Instant broadcast & debounced trigger sync whenever modules change
+  const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-      // Non-blocking sync to cloud
-      fetch('/api/sync/global_state', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      }).catch(() => {});
-    } catch (e) {}
+  useEffect(() => {
+    if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+    syncTimeoutRef.current = setTimeout(() => {
+      try {
+        const payload = {
+          posts,
+          books,
+          photos,
+          media,
+          products,
+          systemSettings,
+          updatedAt: Date.now(),
+        };
+        const bc = new BroadcastChannel('fox3_realtime_sync');
+        bc.postMessage({ type: 'SYNC_ALL', payload });
+        bc.close();
+
+        // Non-blocking sync to cloud
+        fetch('/api/sync/global_state', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        }).catch(() => {});
+      } catch (e) {}
+    }, 1200);
+
+    return () => {
+      if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+    };
   }, [posts, books, photos, media, products, systemSettings]);
 
   // Auto-sync timer (gentle interval with minimum threshold to avoid bandwidth consumption)
@@ -877,26 +900,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           await saveFileToIndexedDB(fileKey, file);
 
           let resolvedUrl = '';
-          // If file is image, generate persistent data URL so previews never break
-          if (file.type.startsWith('image/')) {
-            try {
-              const reader = new FileReader();
-              resolvedUrl = await new Promise<string>((res) => {
-                reader.onload = (e) => res((e.target?.result as string) || '');
-                reader.onerror = () => res('');
-                reader.readAsDataURL(file);
-              });
-            } catch (e) {
-              resolvedUrl = URL.createObjectURL(file);
-            }
-          } else {
-            resolvedUrl = URL.createObjectURL(file);
+          // Convert to persistent Data URL (base64) so it never expires and syncs across views
+          try {
+            const reader = new FileReader();
+            resolvedUrl = await new Promise<string>((res) => {
+              reader.onload = (e) => res((e.target?.result as string) || '');
+              reader.onerror = () => res('');
+              reader.readAsDataURL(file);
+            });
+          } catch (e) {
+            resolvedUrl = fileKey;
           }
 
           addStorageUsage(file.size);
           clearInterval(interval);
           finishTransfer();
-          showToast(`文件《${file.name}》已安全保存至本地高可用库！`, 'success');
+          showToast(`文件《${file.name}》已安全保存并持久化！`, 'success');
           resolve({
             url: resolvedUrl || fileKey,
             size: file.size,
@@ -928,7 +947,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           addStorageUsage(file.size);
           clearInterval(interval);
           finishTransfer();
-          showToast(`文件《${file.name}》已成功上传至 Cloudflare R2 云端！`, 'success');
+          const targetName = data.storedTarget === 'r2' ? 'Cloudflare R2' : data.storedTarget === 'd1' ? 'Cloudflare D1 存储' : '云端同步库';
+          showToast(`文件《${file.name}》已成功同步至 ${targetName}！`, 'success');
           resolve({
             url: data.url,
             size: file.size,

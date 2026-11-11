@@ -1,7 +1,8 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
 import { MediaItem, ViewMode } from '../../types';
 import { SafeImage } from '../common/SafeImage';
+import { resolveFileUrl } from '../../utils/storage';
 import {
   Play,
   Pause,
@@ -19,6 +20,40 @@ import {
   List,
   LayoutGrid,
 } from 'lucide-react';
+
+const MediaPlayer: React.FC<{ item: MediaItem }> = ({ item }) => {
+  const [resolvedSrc, setResolvedSrc] = useState<string>(item.src);
+
+  useEffect(() => {
+    let cancelled = false;
+    resolveFileUrl(item.src).then((url) => {
+      if (!cancelled && url) setResolvedSrc(url);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [item.src]);
+
+  if (item.type === 'audio') {
+    return (
+      <audio
+        src={resolvedSrc}
+        controls
+        autoPlay
+        className="w-full mt-4 filter invert contrast-150 brightness-150"
+      />
+    );
+  }
+
+  return (
+    <video
+      src={resolvedSrc}
+      controls
+      autoPlay
+      className="w-full max-h-80 rounded-xl mt-4 bg-black"
+    />
+  );
+};
 
 export const MediaSection: React.FC = () => {
   const {
@@ -330,21 +365,9 @@ export const MediaSection: React.FC = () => {
               <p className="text-xs text-slate-400">{currentPlaying.artist}</p>
 
               {/* HTML5 Player */}
-              {currentPlaying.type === 'audio' ? (
-                <audio
-                  src={currentPlaying.src}
-                  controls
-                  autoPlay
-                  className="w-full mt-4 filter invert contrast-150 brightness-150"
-                />
-              ) : (
-                <video
-                  src={currentPlaying.src}
-                  controls
-                  autoPlay
-                  className="w-full max-h-80 rounded-xl mt-4 bg-black"
-                />
-              )}
+              <MediaPlayer
+                item={currentPlaying}
+              />
             </div>
           </div>
         </div>
