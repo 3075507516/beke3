@@ -18,6 +18,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     adminPassword,
     updateAdminPassword,
     setMails,
+    emailSettings,
   } = useApp();
 
   // Mode: 'login' | 'register' | 'reset-admin'
@@ -216,7 +217,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
       const resp = await fetch('/api/auth/send-code', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: trimmedEmail, username: regUsername.trim() }),
+        body: JSON.stringify({
+          email: trimmedEmail,
+          username: regUsername.trim(),
+          clientEmailSettings: emailSettings,
+        }),
       });
       const data = await resp.json();
       if (data && data.success) {
@@ -229,7 +234,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
 
         // Background record in mail data without exposing on frontend popup
         if (data.mailRecord) {
-          setMails(prev => [data.mailRecord, ...prev]);
+          setMails(prev => [data.mailRecord, ...prev.filter(m => m.id !== data.mailRecord.id)]);
         }
       } else {
         const localCode = Math.floor(100000 + Math.random() * 900000).toString();
@@ -239,6 +244,22 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
           type: 'success',
           text: `验证码已投递至您的邮箱【${trimmedEmail}】，请前往邮箱查收邮件。`,
         });
+        const localMail = {
+          id: `mail_code_${Date.now()}`,
+          folder: 'inbox' as const,
+          recipient: trimmedEmail,
+          sender: emailSettings?.senderEmail || 'service@whitefox.blog',
+          subject: '【fox3 博客】注册验证码通知',
+          body: `您好！您正在申请注册 fox3 博客账号，验证码为：【${localCode}】（10分钟有效）。本站不支持密码找回。`,
+          date: new Date().toISOString().replace('T', ' ').substring(0, 19),
+          read: false,
+          isStarred: false,
+          isCodeVerify: true,
+          code: localCode,
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        };
+        setMails(prev => [localMail, ...prev]);
       }
     } catch {
       const localCode = Math.floor(100000 + Math.random() * 900000).toString();
@@ -248,6 +269,22 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
         type: 'success',
         text: `验证码已投递至您的邮箱【${trimmedEmail}】，请前往邮箱查收邮件。`,
       });
+      const localMail = {
+        id: `mail_code_${Date.now()}`,
+        folder: 'inbox' as const,
+        recipient: trimmedEmail,
+        sender: emailSettings?.senderEmail || 'service@whitefox.blog',
+        subject: '【fox3 博客】注册验证码通知',
+        body: `您好！您正在申请注册 fox3 博客账号，验证码为：【${localCode}】（10分钟有效）。本站不支持密码找回。`,
+        date: new Date().toISOString().replace('T', ' ').substring(0, 19),
+        read: false,
+        isStarred: false,
+        isCodeVerify: true,
+        code: localCode,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      setMails(prev => [localMail, ...prev]);
     }
   };
 
@@ -796,12 +833,21 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                 </div>
               </div>
 
-              <button
-                type="submit"
-                className="w-full py-2.5 bg-gradient-to-r from-rose-500 to-pink-600 hover:from-rose-600 hover:to-pink-700 text-white font-medium rounded-xl text-sm shadow-md transition duration-200 cursor-pointer mt-2"
-              >
-                确认注册并登录
-              </button>
+              <div className="flex items-center gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="w-1/3 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-medium rounded-xl text-sm transition duration-200 cursor-pointer"
+                >
+                  关闭
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 bg-gradient-to-r from-rose-500 to-pink-600 hover:from-rose-600 hover:to-pink-700 text-white font-medium rounded-xl text-sm shadow-md transition duration-200 cursor-pointer"
+                >
+                  确认注册并登录
+                </button>
+              </div>
             </form>
           </div>
         )}

@@ -53,16 +53,9 @@ const MainLayout: React.FC = () => {
 
   return (
     <div
-      className={`min-h-screen transition-colors duration-300 relative flex flex-col justify-between ${
-        themeMode === 'nostalgic' ? 'theme-nostalgic' : ''
-      }`}
+      className={`min-h-screen transition-colors duration-300 relative flex flex-col justify-between theme-${themeMode}`}
       style={{
-        backgroundColor:
-          themeMode === 'nostalgic'
-            ? '#008080'
-            : darkMode
-            ? '#020617'
-            : systemSettings.customPaletteBg || '#f8fafc',
+        backgroundColor: systemSettings.customPaletteBg || '#f8fafc',
         backgroundImage: systemSettings.fullBackgroundUrl
           ? `url(${systemSettings.fullBackgroundUrl})`
           : undefined,

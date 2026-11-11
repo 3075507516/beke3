@@ -205,7 +205,19 @@ export interface StorageConfig {
   kvToken?: string;
 }
 
-export type GlobalThemeMode = 'modern' | 'retro' | 'nostalgic'; // modern, retro, nostalgic (Microsoft Windows 98/Classic)
+export type GlobalThemeMode =
+  | 'modern'
+  | 'win98'
+  | 'mac-classic'
+  | 'terminal'
+  | 'parchment'
+  | 'gameboy'
+  | 'cyberpunk'
+  | 'steampunk'
+  | 'nordic'
+  | 'leather'
+  | 'blueprint'
+  | 'retro';
 export type DeviceViewMode = 'responsive' | 'mobile';
 
 export interface SystemSettings {

@@ -34,7 +34,7 @@ import {
   Languages,
   Clock,
 } from 'lucide-react';
-import { WebDavBackupItem } from '../../types';
+import { WebDavBackupItem, GlobalThemeMode } from '../../types';
 
 export const SettingsSection: React.FC = () => {
   const {
@@ -46,8 +46,6 @@ export const SettingsSection: React.FC = () => {
     setCurrentUser,
     deviceMode,
     setDeviceMode,
-    darkMode,
-    setDarkMode,
     uploadFile,
     t,
     syncState,
@@ -55,6 +53,7 @@ export const SettingsSection: React.FC = () => {
     channelConnected,
     cloudServicesStatus,
     refreshChannelStatus,
+    showToast,
   } = useApp();
 
   const {
@@ -89,10 +88,15 @@ export const SettingsSection: React.FC = () => {
     apiKey: '',
   }));
 
-  const saveTranslateConfig = (newCfg: Partial<typeof translateConfig>) => {
-    const updated = { ...translateConfig, ...newCfg };
-    setTranslateConfig(updated);
-    saveLocalStorage('fox3_translate_config', updated);
+  const [translateDraft, setTranslateDraft] = useState(translateConfig);
+  const [isTranslateSaved, setIsTranslateSaved] = useState(false);
+
+  const handleSaveTranslateConfig = () => {
+    setTranslateConfig(translateDraft);
+    saveLocalStorage('fox3_translate_config', translateDraft);
+    setIsTranslateSaved(true);
+    showToast('外部翻译 API 配置已成功保存并即时生效！', 'success');
+    setTimeout(() => setIsTranslateSaved(false), 2000);
   };
 
   // Timezone options
@@ -320,20 +324,26 @@ export const SettingsSection: React.FC = () => {
     setCustomAdminName(adminUsername);
   }, [adminUsername]);
 
-  // Expanded Rich Theme Presets
-  const themePresets = [
-    { name: '天空蔚蓝', color: '#0ea5e9', bg: '#f0f9ff' },
-    { name: '魅惑玫瑰', color: '#f43f5e', bg: '#fff1f2' },
-    { name: '极客靛蓝', color: '#6366f1', bg: '#eef2ff' },
-    { name: '翡翠生机', color: '#10b981', bg: '#ecfdf5' },
-    { name: '琥珀鎏金', color: '#f59e0b', bg: '#fffbeb' },
-    { name: '赛博青蓝', color: '#06b6d4', bg: '#ecfeff' },
-    { name: '暗夜霓虹', color: '#8b5cf6', bg: '#f5f3ff' },
-    { name: '晚霞夕照', color: '#ea580c', bg: '#fff7ed' },
-    { name: '北欧松柏', color: '#059669', bg: '#f0fdf4' },
-    { name: '深海浩瀚', color: '#1d4ed8', bg: '#eff6ff' },
-    { name: '极简冷灰', color: '#475569', bg: '#f8fafc' },
-    { name: '樱花薄粉', color: '#ec4899', bg: '#fdf2f8' },
+  // Comprehensive Nostalgic & Distinct Aesthetic Themes (11 Full Themes)
+  const aestheticThemes: {
+    id: GlobalThemeMode;
+    name: string;
+    icon: string;
+    color: string;
+    bg: string;
+    desc: string;
+  }[] = [
+    { id: 'modern', name: '现代流体玻璃', icon: '✨', color: '#0ea5e9', bg: '#f8fafc', desc: '极简现代流体设计、优雅微投影与半透明层次' },
+    { id: 'win98', name: '微软 Windows 98 怀旧', icon: '🪟', color: '#000080', bg: '#008080', desc: '经典青绿视窗桌面、3D 凸面控制按钮与复古边框' },
+    { id: 'mac-classic', name: '麦金塔 Classic Platinum', icon: '🍏', color: '#333333', bg: '#7b8893', desc: '早期 Mac 经典质感金属灰底色与条纹浮雕视窗' },
+    { id: 'terminal', name: 'Matrix 极客终端', icon: '💻', color: '#22c55e', bg: '#050d08', desc: '黑客绿字控制台、荧光字符与高对比黑底' },
+    { id: 'parchment', name: '复古报纸羊皮纸', icon: '📜', color: '#8c7853', bg: '#f4ecd8', desc: '古典衬线排版、米黄做旧纸质触感与墨水印迹' },
+    { id: 'gameboy', name: '8-Bit 掌机像素', icon: '🎮', color: '#306230', bg: '#8bac0f', desc: '复古 GameBoy 四色点阵绿屏与怀旧像素边框' },
+    { id: 'cyberpunk', name: '赛博朋克霓虹', icon: '⚡', color: '#f72585', bg: '#0d0221', desc: '夜之城暗紫底色、高饱和荧光粉青双色光晕' },
+    { id: 'steampunk', name: '蒸汽朋克黄铜', icon: '⚙️', color: '#d4af37', bg: '#2b1d0c', desc: '复古机械黄铜齿轮金棕、古典雕纹边饰' },
+    { id: 'nordic', name: '北欧极简原木', icon: '❄️', color: '#5e81ac', bg: '#eceff4', desc: '冷淡雪原灰蓝、舒缓柔和的纯净自然极简' },
+    { id: 'leather', name: '复古皮质笔记本', icon: '📔', color: '#cdaa7d', bg: '#3d2314', desc: '深褐皮革压纹质感、手工书缝纫边与暖调内页' },
+    { id: 'blueprint', name: '工程架构蓝图', icon: '📐', color: '#328cc1', bg: '#0b3c5d', desc: '经典建筑施工深蓝背景、白色线框坐标网格' },
   ];
 
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -442,25 +452,6 @@ export const SettingsSection: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2">
-          {/* Night Mode Switcher moved here from Header */}
-          <button
-            onClick={() => setDarkMode(!darkMode)}
-            className="flex items-center gap-2 px-3.5 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold rounded-xl transition"
-            title="切换深色/浅色模式"
-          >
-            {darkMode ? (
-              <>
-                <Sun className="w-4 h-4 text-amber-400" />
-                <span>日间亮色模式</span>
-              </>
-            ) : (
-              <>
-                <Moon className="w-4 h-4 text-indigo-500" />
-                <span>夜间深色模式</span>
-              </>
-            )}
-          </button>
-
           <button
             onClick={() => {
               setDeviceMode(deviceMode === 'mobile' ? 'responsive' : 'mobile');
@@ -536,94 +527,63 @@ export const SettingsSection: React.FC = () => {
               </div>
             </div>
 
-            {/* 2. 深度定制与全站 12 种精品主题系统 */}
+            {/* 2. 深度定制与全站怀旧/风格主题中心 (11款独立风格主题，不仅是调色) */}
             <div>
               <div className="flex items-center justify-between mb-2">
                 <label className="block text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
                   <Palette className="w-4 h-4 text-sky-500" />
-                  <span>2. 全站主题中心 (已内置 12 款精美主题)</span>
+                  <span>2. 怀旧与设计风格主题中心 (已内置 11 款独立风格主题)</span>
                 </label>
-                <span className="text-[11px] text-slate-400">一键切换主色调与全局背景</span>
+                <span className="text-[11px] text-slate-400">深度重塑界面边框、质感、阴影与系统气质</span>
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5 mb-3">
-                {themePresets.map(preset => {
-                  const isCurrent = themeMode === 'modern' && systemSettings.themeColor === preset.color;
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-3">
+                {aestheticThemes.map(theme => {
+                  const isCurrent = themeMode === theme.id;
                   return (
                     <button
-                      key={preset.name}
+                      key={theme.id}
                       type="button"
                       onClick={() => {
-                        setThemeMode('modern');
+                        setThemeMode(theme.id);
                         updateSystemSettings({
-                          themeColor: preset.color,
-                          customPaletteBg: preset.bg,
+                          themeColor: theme.color,
+                          customPaletteBg: theme.bg,
                         });
                       }}
-                      className={`flex items-center justify-between p-2.5 rounded-2xl border text-left transition cursor-pointer ${
+                      className={`flex flex-col justify-between p-3.5 rounded-2xl border text-left transition cursor-pointer ${
                         isCurrent
-                          ? 'border-sky-500 ring-2 ring-sky-500/20 bg-sky-50/70 dark:bg-sky-950/40 shadow-sm'
-                          : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-sky-400'
+                          ? 'border-sky-500 ring-2 ring-sky-500/30 bg-sky-50/80 dark:bg-sky-950/50 shadow-md scale-[1.01]'
+                          : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-sky-400 hover:shadow-sm'
                       }`}
                     >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span
-                          className="w-4 h-4 rounded-full shrink-0 shadow-sm border border-black/10"
-                          style={{ backgroundColor: preset.color }}
-                        />
-                        <span className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate">
-                          {preset.name}
-                        </span>
+                      <div className="flex items-center justify-between w-full mb-1.5">
+                        <div className="flex items-center gap-2">
+                          <span className="text-lg">{theme.icon}</span>
+                          <span className="text-xs font-bold text-slate-800 dark:text-slate-100">
+                            {theme.name}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className="w-3.5 h-3.5 rounded-full shadow-inner border border-black/10"
+                            style={{ backgroundColor: theme.color }}
+                            title="主色"
+                          />
+                          <span
+                            className="w-3.5 h-3.5 rounded-full shadow-inner border border-black/10"
+                            style={{ backgroundColor: theme.bg }}
+                            title="背景底色"
+                          />
+                          {isCurrent && <Check className="w-4 h-4 text-sky-500 shrink-0 ml-1" />}
+                        </div>
                       </div>
-                      {isCurrent && <Check className="w-3.5 h-3.5 text-sky-500 shrink-0" />}
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                        {theme.desc}
+                      </p>
                     </button>
                   );
                 })}
-              </div>
-
-              {/* Microsoft Classic Windows Retro Preset */}
-              <div className="p-3.5 rounded-2xl bg-slate-100 dark:bg-slate-800/80 border-2 border-slate-300 dark:border-slate-600 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-lg bg-[#008080] flex items-center justify-center text-white font-bold font-mono text-xs shadow-inner border border-white/40">
-                    🪟 98
-                  </div>
-                  <div>
-                    <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-                      微软怀旧主题 (Microsoft Windows 经典复古风格)
-                    </h4>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                      经典视窗青绿底色 (#008080)、立体凹凸斜角边框、Windows 经典系统字体与控制栏
-                    </p>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    const isNostalgic = themeMode === 'nostalgic';
-                    if (isNostalgic) {
-                      setThemeMode('modern');
-                      updateSystemSettings({
-                        themeColor: '#0ea5e9',
-                        customPaletteBg: '#f8fafc',
-                      });
-                    } else {
-                      setThemeMode('nostalgic');
-                      updateSystemSettings({
-                        themeColor: '#000080', // Classic Windows Navy Blue Titlebar
-                        customPaletteBg: '#008080', // Classic Windows Teal Desktop
-                      });
-                    }
-                  }}
-                  className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
-                    themeMode === 'nostalgic'
-                      ? 'bg-[#000080] text-white shadow-lg border-2 border-white/60'
-                      : 'bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-600 hover:border-sky-500'
-                  }`}
-                >
-                  <span>🪟</span>
-                  <span>{themeMode === 'nostalgic' ? '微软怀旧主题已启用' : '一键应用微软怀旧主题'}</span>
-                </button>
               </div>
             </div>
 
@@ -669,30 +629,6 @@ export const SettingsSection: React.FC = () => {
                     />
                   </div>
                 </div>
-              </div>
-
-              {/* Night Mode Options in Section 1 */}
-              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 flex items-center justify-between gap-4">
-                <div>
-                  <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
-                    {darkMode ? <Moon className="w-3.5 h-3.5 text-indigo-400" /> : <Sun className="w-3.5 h-3.5 text-amber-500" />}
-                    夜间模式 (深色主题)
-                  </h4>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                    开启后全站界面采用舒适护眼的深色高对比度玻璃质感色彩，已从页眉独立收纳至设置区统一控制。
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setDarkMode(!darkMode)}
-                  className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 ${
-                    darkMode
-                      ? 'bg-indigo-600 text-white shadow-sm'
-                      : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200'
-                  }`}
-                >
-                  {darkMode ? '深色模式已开启' : '切换为夜间模式'}
-                </button>
               </div>
 
               {/* Transparent Card Toggle */}
@@ -1593,53 +1529,73 @@ export const SettingsSection: React.FC = () => {
           <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-2">
             {/* API Settings Panel (Foldable) */}
             {showApiSettings && (
-              <div className="p-3 bg-white dark:bg-slate-800 border border-emerald-200 dark:border-emerald-800/60 rounded-xl space-y-2 text-xs">
+              <div className="p-3.5 bg-white dark:bg-slate-800 border border-emerald-200 dark:border-emerald-800/60 rounded-xl space-y-3 text-xs">
                 <div className="flex items-center justify-between">
-                  <span className="font-bold text-emerald-700 dark:text-emerald-300">保存外部翻译 API 配置</span>
-                  <div className="flex items-center gap-2">
+                  <span className="font-bold text-emerald-700 dark:text-emerald-300">
+                    外部通用翻译 API 配置
+                  </span>
+                  <div className="flex items-center gap-3">
                     <label className="flex items-center gap-1 cursor-pointer">
                       <input
                         type="radio"
-                        checked={translateConfig.engine === 'free'}
-                        onChange={() => saveTranslateConfig({ engine: 'free' })}
+                        checked={translateDraft.engine === 'free'}
+                        onChange={() => setTranslateDraft(prev => ({ ...prev, engine: 'free' }))}
                       />
-                      <span>免费公共通道</span>
+                      <span>免费高可用通道</span>
                     </label>
                     <label className="flex items-center gap-1 cursor-pointer">
                       <input
                         type="radio"
-                        checked={translateConfig.engine === 'custom'}
-                        onChange={() => saveTranslateConfig({ engine: 'custom' })}
+                        checked={translateDraft.engine === 'custom'}
+                        onChange={() => setTranslateDraft(prev => ({ ...prev, engine: 'custom' }))}
                       />
-                      <span>自定义 API</span>
+                      <span>自定义翻译 API (DeepL/OpenAI/自建)</span>
                     </label>
                   </div>
                 </div>
 
-                {translateConfig.engine === 'custom' && (
+                {translateDraft.engine === 'custom' && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
                     <div>
-                      <span className="text-[10px] text-slate-400 block mb-0.5">翻译接口 URL</span>
+                      <span className="text-[10px] text-slate-400 block mb-0.5">
+                        翻译接口 URL (POST 请求)
+                      </span>
                       <input
                         type="text"
-                        value={translateConfig.apiUrl}
-                        placeholder="https://api.deepl.com/v2/translate"
-                        onChange={e => saveTranslateConfig({ apiUrl: e.target.value })}
+                        value={translateDraft.apiUrl}
+                        placeholder="https://api.deepl.com/v2/translate 或 https://api.openai.com/v1/chat/completions"
+                        onChange={e => setTranslateDraft(prev => ({ ...prev, apiUrl: e.target.value }))}
                         className="w-full px-2 py-1 rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-[11px]"
                       />
                     </div>
                     <div>
-                      <span className="text-[10px] text-slate-400 block mb-0.5">API Key (密钥)</span>
+                      <span className="text-[10px] text-slate-400 block mb-0.5">
+                        API Key (身份凭证密钥)
+                      </span>
                       <input
                         type="password"
-                        value={translateConfig.apiKey}
-                        placeholder="sk-..."
-                        onChange={e => saveTranslateConfig({ apiKey: e.target.value })}
+                        value={translateDraft.apiKey}
+                        placeholder="Bearer token 或 sk-..."
+                        onChange={e => setTranslateDraft(prev => ({ ...prev, apiKey: e.target.value }))}
                         className="w-full px-2 py-1 rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-[11px]"
                       />
                     </div>
                   </div>
                 )}
+
+                <div className="flex items-center justify-between pt-1 border-t border-slate-100 dark:border-slate-700">
+                  <span className="text-[10px] text-slate-400">
+                    支持标准 JSON 格式与通用翻译代理，保存后站内即刻生效
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleSaveTranslateConfig}
+                    className="flex items-center gap-1 px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold shadow transition"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>{isTranslateSaved ? '已保存！' : '保存外部翻译 API 配置'}</span>
+                  </button>
+                </div>
               </div>
             )}
 

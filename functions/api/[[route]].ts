@@ -213,7 +213,7 @@ export const onRequest = async (context: any) => {
   if (path === '/auth/send-code' && request.method === 'POST') {
     try {
       const body = await request.json() as any;
-      const { email, username } = body;
+      const { email, username, clientEmailSettings } = body;
 
       const trimmedEmail = (email || '').trim().toLowerCase();
       if (!trimmedEmail || !trimmedEmail.includes('@') || !trimmedEmail.includes('.')) {
@@ -233,14 +233,14 @@ export const onRequest = async (context: any) => {
         } catch (e) {}
       }
 
-      const sender = env.MAIL_SENDER || 'service@whitefox.blog';
+      const sender = clientEmailSettings?.senderEmail || env.MAIL_SENDER || 'service@whitefox.blog';
       let externalDispatched = false;
       let externalProvider = 'none';
 
-      // Attempt dispatch via Resend API if API Key is configured
-      if (env.RESEND_API_KEY || env.MAIL_API_KEY) {
+      // Attempt dispatch via Resend API / SendGrid if API Key is configured in env or clientEmailSettings
+      const apiKey = clientEmailSettings?.apiKey || env.RESEND_API_KEY || env.MAIL_API_KEY;
+      if (apiKey && apiKey !== '********' && !apiKey.includes('demo')) {
         try {
-          const apiKey = env.RESEND_API_KEY || env.MAIL_API_KEY;
           const res = await fetch('https://api.resend.com/emails', {
             method: 'POST',
             headers: {
@@ -275,15 +275,21 @@ export const onRequest = async (context: any) => {
       // Persist to mail record for internal mailbox tracking
       const mailRecord = {
         id: `mail_code_${Date.now()}`,
+        folder: 'inbox',
         recipient: trimmedEmail,
         sender,
-        subject: `【fox3 博客】注册验证码：${code}`,
-        body: `您正在注册 fox3 博客，验证码为：${code}（10分钟内有效）。特别注意：本站不支持密码找回。`,
+        subject: `【fox3 博客】注册验证码通知`,
+        body: `您好！您正在注册 fox3 博客账号，验证码为：【${code}】（10分钟内有效）。\n\n特别注意：本站不支持密码找回，请妥善保存您的账号密码。`,
         date: new Date().toISOString().replace('T', ' ').substring(0, 19),
         delivered: true,
         externalDispatched,
         externalProvider,
+        isCodeVerify: true,
         code,
+        read: false,
+        isStarred: false,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
       };
 
       if (env.KV) {
@@ -294,13 +300,13 @@ export const onRequest = async (context: any) => {
 
       return new Response(JSON.stringify({
         success: true,
-        code, // returned for seamless client confirmation or preview
+        code, // returned for verification & client storage
         externalDispatched,
         provider: externalProvider,
         mailRecord,
         message: externalDispatched
-          ? `验证码已发送至 ${trimmedEmail}，请查收邮件`
-          : `验证码已发送（${code}），同时已同步至站内信箱`,
+          ? `验证码已成功投递至 ${trimmedEmail}，请查收邮件`
+          : `验证码已生成并同步至邮箱中枢（${trimmedEmail}）`,
       }), {
         headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
       });
@@ -791,7 +797,7 @@ export const onRequest = async (context: any) => {
   if (path === '/mail/send' && request.method === 'POST') {
     try {
       const body = await request.json() as any;
-      const { to, subject, html, text, type, code } = body;
+      const { to, subject, html, text, type, code, clientEmailSettings } = body;
 
       if (!to) {
         return new Response(JSON.stringify({ success: false, error: 'Recipient address (to) is required' }), {
@@ -800,14 +806,14 @@ export const onRequest = async (context: any) => {
         });
       }
 
-      const sender = env.MAIL_SENDER || 'service@whitefox.blog';
+      const sender = clientEmailSettings?.senderEmail || env.MAIL_SENDER || 'service@whitefox.blog';
       let externalDispatched = false;
       let externalProvider = 'none';
 
-      // 1. Attempt dispatch via Resend API if API Key is configured
-      if (env.RESEND_API_KEY || env.MAIL_API_KEY) {
+      // 1. Attempt dispatch via Resend API if API Key is configured in env or passed from client settings
+      const apiKey = clientEmailSettings?.apiKey || env.RESEND_API_KEY || env.MAIL_API_KEY;
+      if (apiKey && apiKey !== '********' && !apiKey.includes('demo')) {
         try {
-          const apiKey = env.RESEND_API_KEY || env.MAIL_API_KEY;
           const res = await fetch('https://api.resend.com/emails', {
             method: 'POST',
             headers: {
@@ -818,7 +824,7 @@ export const onRequest = async (context: any) => {
               from: sender,
               to: [to],
               subject: subject || 'fox3 博客系统验证与通知',
-              html: html || `<p>${text || code || '您的验证码已生成'}</p>`,
+              html: html || `<div style="font-family:sans-serif;padding:20px;line-height:1.6;color:#333;"><p>${(text || code || '系统信件内容').replace(/\n/g, '<br/>')}</p></div>`,
             })
           });
           if (res.ok) {
@@ -833,6 +839,7 @@ export const onRequest = async (context: any) => {
       // 2. Persist email record to KV / D1 table if available
       const mailRecord = {
         id: `mail_dispatch_${Date.now()}`,
+        folder: 'sent',
         recipient: to,
         sender,
         subject: subject || (type === 'verify_code' ? `【fox3 博客】注册验证码：${code}` : '系统信件'),
@@ -842,6 +849,10 @@ export const onRequest = async (context: any) => {
         externalDispatched,
         externalProvider,
         code: code || null,
+        read: true,
+        isStarred: false,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
       };
 
       if (env.KV) {
@@ -858,7 +869,7 @@ export const onRequest = async (context: any) => {
         mailRecord,
         message: externalDispatched
           ? `已通过第三方邮件服务 (${externalProvider}) 成功投递至 ${to}`
-          : `验证码及信件已在站内邮件中心生成并自动回复（可在站内信箱查阅）`,
+          : `信件已在站内邮件中心生成并成功投递`,
       }), {
         headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
       });

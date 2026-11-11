@@ -432,36 +432,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     saveLocalStorage('fox3_global_theme', mode);
   };
 
-  const [darkMode, setDarkModeState] = useState<boolean>(() => {
-    try {
-      const saved = localStorage.getItem('fox3_dark_mode');
-      if (saved !== null) return saved === 'true';
-      if (typeof window !== 'undefined' && window.matchMedia) {
-        return window.matchMedia('(prefers-color-scheme: dark)').matches;
-      }
-    } catch {
-      // Ignore security/restricted environment errors
-    }
-    return false;
-  });
+  const [darkMode, setDarkModeState] = useState<boolean>(false);
 
   const setDarkMode = (dark: boolean) => {
     setDarkModeState(dark);
-    localStorage.setItem('fox3_dark_mode', String(dark));
-    if (dark) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
+    try {
+      localStorage.removeItem('fox3_dark_mode');
+    } catch {}
+    document.documentElement.classList.remove('dark');
   };
 
   useEffect(() => {
-    if (darkMode) {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
-  }, [darkMode]);
+    // Night mode removed: keep document free of forced dark class
+    document.documentElement.classList.remove('dark');
+  }, []);
 
   const [deviceMode, setDeviceModeState] = useState<DeviceViewMode>('responsive');
 
@@ -921,30 +905,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, [systemSettings.autoSync, systemSettings.syncIntervalSeconds, triggerManualSync]);
 
-  // Robust file upload
+  // Robust file upload with real XMLHttpRequest progress tracking & local fallback
   const uploadFile = async (file: File): Promise<{ url: string; size: number; name: string }> => {
     startTransfer('upload', file.name);
 
     return new Promise(async (resolve, reject) => {
-      let currentP = 20;
-      const interval = setInterval(() => {
-        currentP += Math.floor(Math.random() * 20) + 10;
-        if (currentP >= 92) {
-          clearInterval(interval);
-        } else {
-          updateTransferPercent(currentP);
-        }
-      }, 60);
+      let isCompleted = false;
 
       const doFallbackLocal = async () => {
+        if (isCompleted) return;
+        isCompleted = true;
         try {
-          // Always persist the actual File/Blob into IndexedDB with a unique permanent key
+          updateTransferPercent(50);
           const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
           const fileKey = `idb_file_${Date.now()}_${safeName}`;
           await saveFileToIndexedDB(fileKey, file);
 
           let resolvedUrl = '';
-          // Convert to persistent Data URL (base64) so it never expires and syncs across views
           try {
             const reader = new FileReader();
             resolvedUrl = await new Promise<string>((res) => {
@@ -957,16 +934,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }
 
           addStorageUsage(file.size);
-          clearInterval(interval);
+          updateTransferPercent(100);
           finishTransfer();
-          showToast(`文件《${file.name}》已安全保存并持久化！`, 'success');
+          showToast(`文件《${file.name}》已安全保存至本地持久存储！`, 'success');
           resolve({
             url: resolvedUrl || fileKey,
             size: file.size,
             name: file.name,
           });
         } catch (err: any) {
-          clearInterval(interval);
           finishTransfer();
           showToast(`文件《${file.name}》上传失败：${err?.message || '未知异常'}`, 'error');
           reject(err);
@@ -977,31 +953,58 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const formData = new FormData();
         formData.append('file', file);
 
-        const res = await fetch('/api/upload', {
-          method: 'POST',
-          body: formData,
-        }).catch(() => null);
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/upload', true);
+        xhr.timeout = 25000; // 25s timeout to prevent freezing indefinitely
 
-        if (!res || !res.ok) {
-          return doFallbackLocal();
-        }
+        const startTime = Date.now();
+        xhr.upload.onprogress = (event) => {
+          if (event.lengthComputable && event.total > 0) {
+            const percent = Math.min(98, Math.round((event.loaded / event.total) * 100));
+            const elapsedSec = Math.max(0.1, (Date.now() - startTime) / 1000);
+            const speedKB = Math.round((event.loaded / 1024) / elapsedSec);
+            const speedStr = speedKB > 1024 ? `${(speedKB / 1024).toFixed(1)} MB/s` : `${speedKB} KB/s`;
+            setTransferProgress(prev => ({
+              ...prev,
+              percent,
+              speed: speedStr,
+            }));
+          }
+        };
 
-        const data = await res.json().catch(() => null);
-        if (data && data.success && data.url) {
-          addStorageUsage(file.size);
-          clearInterval(interval);
-          finishTransfer();
-          const targetName = data.storedTarget === 'r2' ? 'Cloudflare R2' : data.storedTarget === 'd1' ? 'Cloudflare D1 存储' : '云端同步库';
-          showToast(`文件《${file.name}》已成功同步至 ${targetName}！`, 'success');
-          resolve({
-            url: data.url,
-            size: file.size,
-            name: file.name,
-          });
-        } else {
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              const data = JSON.parse(xhr.responseText);
+              if (data && data.success && data.url) {
+                isCompleted = true;
+                addStorageUsage(file.size);
+                updateTransferPercent(100);
+                finishTransfer();
+                const targetName = data.storedTarget === 'r2' ? 'Cloudflare R2' : data.storedTarget === 'd1' ? 'Cloudflare D1 存储' : '云端同步库';
+                showToast(`文件《${file.name}》已成功同步至 ${targetName}！`, 'success');
+                resolve({
+                  url: data.url,
+                  size: file.size,
+                  name: file.name,
+                });
+                return;
+              }
+            } catch (e) {}
+          }
           doFallbackLocal();
-        }
-      } catch {
+        };
+
+        xhr.onerror = () => {
+          doFallbackLocal();
+        };
+
+        xhr.ontimeout = () => {
+          doFallbackLocal();
+        };
+
+        xhr.send(formData);
+      } catch (e) {
         doFallbackLocal();
       }
     });

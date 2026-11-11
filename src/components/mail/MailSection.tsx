@@ -142,10 +142,13 @@ export const MailSection: React.FC = () => {
           subject,
           text: body,
           type: 'admin_reply',
+          clientEmailSettings: emailSettings,
         })
       });
+      showToast(`信件已成功发送至 ${recipient}`, 'success');
     } catch (err) {
       console.warn('[MailSection] Backend dispatch fallback:', err);
+      showToast(`信件已在站内生成并记录`, 'info');
     }
   };
 

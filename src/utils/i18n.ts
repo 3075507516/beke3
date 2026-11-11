@@ -32,6 +32,7 @@ export interface Translations {
   nav: {
     blog: string;
     bookmarks: string;
+    sites?: string;
     books: string;
     gallery: string;
     media: string;

@@ -44,27 +44,25 @@ body {
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
-/* Microsoft Windows Nostalgic/Classic Theme Styling */
-.theme-nostalgic {
+/* ==========================================================================
+   Comprehensive Nostalgic & Aesthetic Themes (10+ Distinct Styles)
+   ========================================================================== */
+
+/* 1. Win98 Nostalgic */
+.theme-win98, .theme-nostalgic {
   font-family: 'Segoe UI', Tahoma, 'Microsoft YaHei', sans-serif !important;
   background-color: #008080 !important;
 }
-
-.theme-nostalgic [class*="rounded-3xl"],
-.theme-nostalgic [class*="rounded-2xl"],
-.theme-nostalgic [class*="rounded-xl"],
-.theme-nostalgic [class*="rounded-lg"] {
+.theme-win98 [class*="rounded-"], .theme-nostalgic [class*="rounded-"] {
   border-radius: 2px !important;
 }
-
-.theme-nostalgic header {
+.theme-win98 header, .theme-nostalgic header {
   border-bottom: 2px solid #ffffff !important;
   box-shadow: inset 1px 1px #dfdfdf, 1px 1px #000000 !important;
   background-color: #c0c0c0 !important;
   color: #000000 !important;
 }
-
-.theme-nostalgic button:not([class*="bg-transparent"]) {
+.theme-win98 button:not([class*="bg-transparent"]), .theme-nostalgic button:not([class*="bg-transparent"]) {
   border-top: 2px solid #ffffff !important;
   border-left: 2px solid #ffffff !important;
   border-right: 2px solid #808080 !important;
@@ -73,12 +71,199 @@ body {
   border-radius: 0px !important;
 }
 
-.theme-nostalgic button:active:not([class*="bg-transparent"]) {
-  border-top: 2px solid #808080 !important;
-  border-left: 2px solid #808080 !important;
-  border-right: 2px solid #ffffff !important;
-  border-bottom: 2px solid #ffffff !important;
-  box-shadow: inset 1px 1px #000000 !important;
+/* 2. Mac OS Classic Platinum */
+.theme-mac-classic {
+  font-family: 'Chicago', -apple-system, BlinkMacSystemFont, "Lucida Grande", sans-serif !important;
+  background-color: #7b8893 !important;
+}
+.theme-mac-classic [class*="rounded-"] {
+  border-radius: 5px !important;
+}
+.theme-mac-classic header {
+  background: linear-gradient(to bottom, #dedede 0%, #b8b8b8 100%) !important;
+  border-bottom: 2px solid #666 !important;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.15) !important;
+  color: #222 !important;
+}
+.theme-mac-classic button:not([class*="bg-transparent"]) {
+  background: linear-gradient(to bottom, #ffffff 0%, #dcdcdc 100%) !important;
+  border: 1px solid #777 !important;
+  color: #111 !important;
+  border-radius: 4px !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.8), 0 1px 2px rgba(0,0,0,0.2) !important;
+}
+
+/* 3. Matrix Hacker Terminal */
+.theme-terminal {
+  font-family: 'Courier New', Courier, monospace !important;
+  background-color: #050d08 !important;
+  color: #22c55e !important;
+}
+.theme-terminal [class*="rounded-"] {
+  border-radius: 0px !important;
+  border-color: #166534 !important;
+}
+.theme-terminal header {
+  background-color: #0a180e !important;
+  border-bottom: 2px solid #22c55e !important;
+  box-shadow: 0 0 10px rgba(34, 197, 94, 0.2) !important;
+  color: #22c55e !important;
+}
+.theme-terminal button:not([class*="bg-transparent"]) {
+  background-color: #0d2818 !important;
+  border: 1px solid #22c55e !important;
+  color: #4ade80 !important;
+  border-radius: 0px !important;
+  text-shadow: 0 0 5px rgba(74, 222, 128, 0.5) !important;
+}
+
+/* 4. Vintage Newsprint / Parchment */
+.theme-parchment {
+  font-family: 'Georgia', 'Songti SC', 'SimSun', serif !important;
+  background-color: #f4ecd8 !important;
+  color: #2c251e !important;
+}
+.theme-parchment [class*="rounded-"] {
+  border-radius: 3px !important;
+  border-color: #d1c2a5 !important;
+}
+.theme-parchment header {
+  background-color: #ebe0c6 !important;
+  border-bottom: 2px solid #8c7853 !important;
+  color: #1a1612 !important;
+}
+.theme-parchment button:not([class*="bg-transparent"]) {
+  background-color: #dfd0b5 !important;
+  border: 1px solid #8c7853 !important;
+  color: #2c251e !important;
+}
+
+/* 5. 8-Bit GameBoy Retro */
+.theme-gameboy {
+  font-family: 'Press Start 2P', monospace, sans-serif !important;
+  background-color: #8bac0f !important;
+  color: #0f380f !important;
+}
+.theme-gameboy [class*="rounded-"] {
+  border-radius: 4px !important;
+  border-color: #306230 !important;
+}
+.theme-gameboy header {
+  background-color: #9bbc0f !important;
+  border-bottom: 3px solid #0f380f !important;
+  color: #0f380f !important;
+}
+.theme-gameboy button:not([class*="bg-transparent"]) {
+  background-color: #306230 !important;
+  border: 2px solid #0f380f !important;
+  color: #9bbc0f !important;
+  border-radius: 2px !important;
+}
+
+/* 6. Cyberpunk Neon */
+.theme-cyberpunk {
+  font-family: 'Orbitron', -apple-system, sans-serif !important;
+  background-color: #0d0221 !important;
+  color: #f72585 !important;
+}
+.theme-cyberpunk [class*="rounded-"] {
+  border-radius: 4px !important;
+  border-color: #7209b7 !important;
+}
+.theme-cyberpunk header {
+  background-color: #1a0826 !important;
+  border-bottom: 2px solid #4cc9f0 !important;
+  box-shadow: 0 0 15px rgba(76, 201, 240, 0.3) !important;
+  color: #4cc9f0 !important;
+}
+.theme-cyberpunk button:not([class*="bg-transparent"]) {
+  background: linear-gradient(135deg, #7209b7, #f72585) !important;
+  border: 1px solid #4cc9f0 !important;
+  color: #ffffff !important;
+}
+
+/* 7. Steampunk Brass & Gear */
+.theme-steampunk {
+  font-family: 'Palatino Linotype', 'Book Antiqua', serif !important;
+  background-color: #2b1d0c !important;
+  color: #d4af37 !important;
+}
+.theme-steampunk [class*="rounded-"] {
+  border-radius: 6px !important;
+  border-color: #8c6d31 !important;
+}
+.theme-steampunk header {
+  background: linear-gradient(to bottom, #4a3319 0%, #2b1d0c 100%) !important;
+  border-bottom: 2px solid #d4af37 !important;
+  color: #f3e5ab !important;
+}
+.theme-steampunk button:not([class*="bg-transparent"]) {
+  background: linear-gradient(to bottom, #8c6d31 0%, #594217 100%) !important;
+  border: 1px solid #d4af37 !important;
+  color: #fff8dc !important;
+}
+
+/* 8. Nordic Minimalist */
+.theme-nordic {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+  background-color: #eceff4 !important;
+  color: #2e3440 !important;
+}
+.theme-nordic [class*="rounded-"] {
+  border-radius: 12px !important;
+  border-color: #d8dee9 !important;
+}
+.theme-nordic header {
+  background-color: #e5e9f0 !important;
+  border-bottom: 1px solid #d8dee9 !important;
+  color: #2e3440 !important;
+}
+.theme-nordic button:not([class*="bg-transparent"]) {
+  background-color: #88c0d0 !important;
+  border: 1px solid #81a1c1 !important;
+  color: #2e3440 !important;
+}
+
+/* 9. Skeuomorphic Leather Journal */
+.theme-leather {
+  font-family: 'Baskerville', 'Times New Roman', serif !important;
+  background-color: #3d2314 !important;
+  color: #f5ecd7 !important;
+}
+.theme-leather [class*="rounded-"] {
+  border-radius: 8px !important;
+  border-color: #5c3820 !important;
+}
+.theme-leather header {
+  background: linear-gradient(to bottom, #4d2d1b 0%, #3d2314 100%) !important;
+  border-bottom: 2px dashed #8b5a2b !important;
+  color: #f5ecd7 !important;
+}
+.theme-leather button:not([class*="bg-transparent"]) {
+  background: linear-gradient(to bottom, #8b5a2b 0%, #5c3820 100%) !important;
+  border: 1px solid #cdaa7d !important;
+  color: #ffffff !important;
+}
+
+/* 10. Engineering Blueprint */
+.theme-blueprint {
+  font-family: 'Consolas', 'Courier New', monospace !important;
+  background-color: #0b3c5d !important;
+  color: #d9e8f5 !important;
+}
+.theme-blueprint [class*="rounded-"] {
+  border-radius: 2px !important;
+  border: 1px solid #328cc1 !important;
+}
+.theme-blueprint header {
+  background-color: #082940 !important;
+  border-bottom: 2px solid #328cc1 !important;
+  color: #ffffff !important;
+}
+.theme-blueprint button:not([class*="bg-transparent"]) {
+  background-color: #1d2731 !important;
+  border: 1px solid #328cc1 !important;
+  color: #d9e8f5 !important;
 }
 
 /* Retro Classic Skeuomorphic Styles */
