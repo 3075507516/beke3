@@ -158,10 +158,10 @@ export const HeroIntro: React.FC = () => {
             <button
               onClick={() => fileInputRef.current?.click()}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-white/20 hover:bg-white/30 text-white text-xs font-medium rounded-xl backdrop-blur-md border border-white/30 shadow-md transition"
-              title="自定义首页背景照片 (本地直传即时生效)"
+              title="更换首页介绍区照片"
             >
               <Camera className="w-3.5 h-3.5 text-sky-300" />
-              <span>更换全景封面背景</span>
+              <span>更换首页介绍区照片</span>
             </button>
 
             <input

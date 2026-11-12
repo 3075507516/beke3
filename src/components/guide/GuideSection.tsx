@@ -33,7 +33,7 @@ export const GuideSection: React.FC = () => {
           <span>fox3 博客全平台极速部署指引与 D1 / R2 / WebDAV 使用说明</span>
         </h2>
         <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-          本项目依赖 Cloudflare D1 和 R2。D1 用于存储文章、评论、分类、标签、文件元数据等结构化数据；R2 用于存储图片、视频、音频和附件等大文件实体。KV 仅用于缓存和配置，不作为主数据存储。如果未配置 D1 或 R2，系统将无感降级至本地持久化。在腾讯云和阿里云环境下，可通过环境变量接入对应数据库与存储桶，实现全平台统一体验。
+          实际存储位置：浏览器 localStorage 保存博客/邮件列表/订单/系统设置及前台邮箱配置；IndexedDB 缓存本机文件。Cloudflare D1 保存注册账户、验证码/限流、管理员共享同步 JSON 与文件回退表；R2 Bucket 保存上传文件对象；KV 仅用于兼容回退/短期记录，存在日写入额度限制。前台邮箱密码保留在当前浏览器，不上传同步且未加密。未绑定相应资源时不能把本地回退视为云端持久化；本项目没有接入 Supabase、腾讯 COS 或阿里 OSS 适配器。
         </p>
       </div>
 
@@ -72,7 +72,7 @@ export const GuideSection: React.FC = () => {
           }`}
         >
           <Server className="w-4 h-4" />
-          <span>腾讯云 EdgeOne / 轻量服务器部署与 COS 存储绑定</span>
+          <span>腾讯云 EdgeOne / 轻量服务器静态部署（COS 未接入）</span>
         </button>
 
         <button
@@ -84,7 +84,7 @@ export const GuideSection: React.FC = () => {
           }`}
         >
           <Server className="w-4 h-4" />
-          <span>阿里云 ESA / ECS 部署与 OSS 存储绑定</span>
+          <span>阿里云 ESA / ECS 静态部署（OSS 未接入）</span>
         </button>
 
         <button
@@ -217,7 +217,7 @@ export const GuideSection: React.FC = () => {
                 4. 部署密码与管理员账号环境变量 (Environment Variables)
               </h5>
               <p className="text-xs text-slate-500 mb-2">
-                在 <b>Settings</b> -&gt; <b>Environment variables</b> 中添加生产部署密码与管理员用户名：
+                在 <b>Settings</b> -&gt; <b>Variables and Secrets</b> 中配置管理员环境变量；密码应使用 Secret：
               </p>
               <div className="space-y-2 text-xs">
                 <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-between">
@@ -229,7 +229,13 @@ export const GuideSection: React.FC = () => {
                 <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-between">
                   <div>
                     <code className="text-rose-500 font-mono font-bold">ADMIN_PASSWORD</code>
-                    <span className="text-slate-500 dark:text-slate-400 ml-2">生产环境唯一超级管理员登录密码（建议配置强密码，部署时后台环境变量优先鉴权，前端设置区亦可实时修改）</span>
+                    <span className="text-slate-500 dark:text-slate-400 ml-2">必需的强随机生产管理员密码（至少12字符）；应用前端不能修改此 Cloudflare Secret</span>
+                  </div>
+                </div>
+                <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-between">
+                  <div>
+                    <code className="text-rose-500 font-mono font-bold">ADMIN_SESSION_SECRET</code>
+                    <span className="text-slate-500 dark:text-slate-400 ml-2">建议必配独立高熵随机 Secret（至少32字符）；过短会话密钥将被拒绝</span>
                   </div>
                 </div>
               </div>
@@ -247,7 +253,7 @@ export const GuideSection: React.FC = () => {
               <span>Pages 一键直接上传文件部署与获取上传包方式</span>
             </h3>
             <p className="text-xs text-slate-500">
-              适合无需配置 Git 账号的免代码一键交付，直接将打包好的静态 ZIP 文件拖拽至 Cloudflare Pages 控制台即可极速上线！
+              此 ZIP 只包含静态前端资源，适用于预览/纯静态功能。它不包含 Pages Functions 及 D1/R2/KV 绑定；账户、验证码邮件、后台邮件、共享同步和远程文件服务需要另行部署 Functions 并绑定资源。
             </p>
           </div>
 
@@ -281,7 +287,7 @@ export const GuideSection: React.FC = () => {
             <ol className="text-xs text-slate-600 dark:text-slate-300 space-y-1.5 list-decimal list-inside leading-relaxed pl-1">
               <li>打开 Cloudflare 控制台 -&gt; <b>Workers & Pages</b> -&gt; <b>Create application</b>。</li>
               <li>选择 <b>Pages</b>，然后选择 <b>Direct Upload (直接上传)</b>。</li>
-              <li>填写项目名称（如 <code>fox3</code>），将生成的 <code>dist</code> 文件夹直接拖拽入页面。</li>
+              <li>填写项目名称（如 <code>fox3</code>），上传 <code>dist</code> 静态文件；此方式不会把仓库根目录的 <code>functions/</code> 路由一并部署。</li>
               <li>点击 <b>Deploy site</b>，几秒内即可全球上线并获得 <code>*.pages.dev</code> 免费公网域名！</li>
             </ol>
           </div>
@@ -294,10 +300,10 @@ export const GuideSection: React.FC = () => {
           <div className="space-y-2">
             <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
               <Server className="w-5 h-5 text-blue-500" />
-              <span>腾讯云 EdgeOne / 轻量应用服务器部署指南与 COS 存储接入</span>
+              <span>腾讯云静态部署说明（COS 尚未接入）</span>
             </h3>
             <p className="text-xs text-slate-500">
-              支持腾讯云 EdgeOne Pages 托管与腾讯云轻量服务器（Lighthouse / CVM）使用 Nginx + Node.js 托管。
+              可将前端静态页面部署到 EdgeOne 或轻量服务器；该部署不会自动提供 Cloudflare Pages Functions、D1/R2/KV，本站账户、邮件验证码、后台邮件和共享同步 API 将不可用。
             </p>
           </div>
 
@@ -312,16 +318,14 @@ export const GuideSection: React.FC = () => {
 
           <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/70 dark:border-slate-700 space-y-3">
             <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200">
-              腾讯云 COS 对象存储环境变量绑定说明
+              腾讯云 COS 存储状态：当前未实现
             </h4>
             <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-              在轻量服务器部署时，可通过 <code>.env</code> 文件或环境变量传入腾讯云 COS 凭证：
+              仓库没有读取 COS 凭据或 COS SDK 适配代码。不要为本站填写或上传腾讯云 Secret；设置这些变量不会让文件改存 COS。
             </p>
             <div className="p-3 bg-slate-950 text-slate-200 rounded-xl text-xs font-mono space-y-1">
-              <p>TENCENT_COS_SECRET_ID=AKIDxxxxxxxxxxxxxxxx</p>
-              <p>TENCENT_COS_SECRET_KEY=xxxxxxxxxxxxxxxxxxxx</p>
-              <p>TENCENT_COS_BUCKET=fox3-1250000000</p>
-              <p>TENCENT_COS_REGION=ap-guangzhou</p>
+              <p>当前文件服务实际支持 Cloudflare R2 → D1 → KV → 易失性内存回退。</p>
+              <p>静态托管只提供前端资源；本机浏览器数据仍只保存在用户浏览器。</p>
             </div>
           </div>
 
@@ -350,10 +354,10 @@ export const GuideSection: React.FC = () => {
           <div className="space-y-2">
             <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
               <Server className="w-5 h-5 text-orange-500" />
-              <span>阿里云 ESA / OSS 静态网站与 ECS 部署指南与 OSS 存储接入</span>
+              <span>阿里云静态部署说明（OSS 尚未接入）</span>
             </h3>
             <p className="text-xs text-slate-500">
-              支持阿里云边缘安全加速 ESA Pages、阿里云 OSS 静态网站托管或 ECS 云服务器托管。
+              可将前端静态页面放到 OSS/ESA 或 ECS；静态托管不会自动运行 Cloudflare Pages Functions、D1/R2/KV，账户、验证码发信及云同步 API 不可用。
             </p>
           </div>
 
@@ -371,16 +375,14 @@ export const GuideSection: React.FC = () => {
 
           <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/70 dark:border-slate-700 space-y-3">
             <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200">
-              阿里云 OSS 环境变量绑定说明
+              阿里云 OSS 存储状态：当前未实现
             </h4>
             <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-              在 ECS 或容器部署时，可通过环境变量配置阿里云 OSS：
+              仓库没有读取 OSS 凭据或 OSS SDK 适配代码。不要为本站填写或上传阿里云 AccessKey；设置这些变量不会让文件改存 OSS。
             </p>
             <div className="p-3 bg-slate-950 text-slate-200 rounded-xl text-xs font-mono space-y-1">
-              <p>ALIYUN_OSS_ACCESS_KEY_ID=LTAIxxxxxxxxxxxxxx</p>
-              <p>ALIYUN_OSS_ACCESS_KEY_SECRET=xxxxxxxxxxxxxxxxxxxx</p>
-              <p>ALIYUN_OSS_BUCKET=fox3-bucket</p>
-              <p>ALIYUN_OSS_ENDPOINT=oss-cn-hangzhou.aliyuncs.com</p>
+              <p>当前文件服务实际支持 Cloudflare R2 → D1 → KV → 易失性内存回退。</p>
+              <p>请不要在客户端或静态网站中嵌入任何云存储 Secret。</p>
             </div>
           </div>
         </div>
@@ -456,10 +458,10 @@ export const GuideSection: React.FC = () => {
             <span>邮箱区 (邮件中枢与 Cloudflare Routing) 使用说明</span>
           </div>
           <div className="space-y-2 text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-            <p><b>1. 第三方邮件 API 保存：</b>支持 Resend、SendGrid、Mailgun、Amazon SES、Brevo、Postmark 及专用企业 SMTP 服务器配置，一键点击“保存邮箱配置”持久化。</p>
-            <p><b>2. 验证码自动回复：</b>开启“注册验证码自动应答回复”后，系统将在接收到注册邮件请求时秒级生成 6 位安全验证码并自动回信。</p>
-            <p><b>3. 收信与 Cloudflare Routing：</b>支持 Cloudflare Email Routing 边缘路由地址和管理员私人转发邮箱设定，预留 Webhook 和 IMAP 轮询接口。</p>
-            <p><b>4. 额度风控与信件管理：</b>内置单日 3,000 封发信限制开关；当总信件数达 3,000 封时将自动触发橙色醒目预警。管理员可进行站内写信、回复、批量移入回收站和彻底删除。</p>
+            <p><b>1. 发信通道：</b>当前实际支持 SMTP、Resend API、Brevo API、SendGrid API；前台配置保存在本浏览器，后台变量需在 Cloudflare Pages 设置。绿色灯仅表示测试邮件被服务商接受，不保证最终送达。</p>
+            <p><b>2. 注册验证码：</b>验证码由服务端生成和验证；Cloudflare 部署需绑定 D1 并配置可用的后台邮件发送通道。后台配置状态与前台配置分开测试。</p>
+            <p><b>3. 收信能力：</b>IMAP 轮询、Email Routing 入站处理与邮件 Webhook 当前均未实现；页面中的收信参数只是本地配置，不代表本站能收件。</p>
+            <p><b>4. 站内信：</b>管理员可在本地站内信列表撰写和回复；发送 API 需管理员短期会话。注册邮箱回信优先从 D1 用户记录解析；邮件列表本身保存在浏览器本机，管理员共享同步使用 D1。</p>
           </div>
         </div>
       </div>

@@ -405,17 +405,22 @@ export const SettingsSection: React.FC = () => {
 
   const handleChangePassword = (e: React.FormEvent) => {
     e.preventDefault();
+    const isLocalDevelopment = ['localhost', '127.0.0.1'].includes(window.location.hostname);
+    if (!isLocalDevelopment) {
+      setPasswordMsg('生产部署密码由 Cloudflare Dashboard → Pages → Settings → Variables and Secrets 管理；本页不能修改 ADMIN_PASSWORD。');
+      return;
+    }
     if (!newPassword || newPassword !== confirmPassword) {
       setPasswordMsg('两次输入的新密码不一致，请重新核对！');
       return;
     }
-    if (newPassword.length < 6) {
-      setPasswordMsg('密码长度不能少于 6 位！');
+    if (newPassword.length < 12) {
+      setPasswordMsg('密码长度不能少于 12 位！');
       return;
     }
 
     // Verify current admin password
-    const validCurrent = adminPassword || '123456';
+    const validCurrent = adminPassword || '';
     if (currentPassword !== validCurrent) {
       setPasswordMsg('当前密码输入不正确，请重新输入！');
       return;
@@ -426,7 +431,7 @@ export const SettingsSection: React.FC = () => {
     if (customAdminName && customAdminName.trim() !== adminUsername) {
       updateAdminUsername(customAdminName.trim());
     }
-    setPasswordMsg(`✅ 管理员凭据已成功修改并持久化！全站唯一超级管理员【${customAdminName || adminUsername}】最高控制权已生效。`);
+    setPasswordMsg(`本机开发管理员密码已更新；不会修改 Cloudflare 部署 Secret。`);
     setCurrentPassword('');
     setNewPassword('');
     setConfirmPassword('');
@@ -731,7 +736,7 @@ export const SettingsSection: React.FC = () => {
             {/* 6. 首页介绍区照片 */}
             <div>
               <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                6. {t('settings.heroBg')} (全景大背景设定)
+                6. {t('settings.heroBg')} (仅首页介绍区)
               </label>
               <div className="flex items-center gap-3">
                 <div className="w-16 h-12 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 shrink-0">
@@ -746,7 +751,7 @@ export const SettingsSection: React.FC = () => {
                   onClick={() => heroBgInputRef.current?.click()}
                   className="px-3.5 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-medium rounded-xl transition"
                 >
-                  上传首页介绍背景
+                  更换首页介绍区照片
                 </button>
                 <input
                   type="file"
@@ -926,7 +931,7 @@ export const SettingsSection: React.FC = () => {
             <div>
               <div className="flex items-center justify-between mb-2">
                 <h4 className="text-xs font-semibold text-slate-500">
-                  服务通道真实连通状态指示灯 (依据 Cloudflare 实际环境变量绑定动态测算)
+                  Cloudflare 绑定探测（本次 R2 列表、D1 查询、KV 读取是否成功）
                 </h4>
                 <button
                   type="button"
@@ -942,18 +947,18 @@ export const SettingsSection: React.FC = () => {
                 {/* Storage Bucket Light */}
                 <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 flex items-center justify-between">
                   <div>
-                    <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block">对象存储桶 (R2/S3/OSS)</span>
-                    <span className="text-[10px] text-slate-400">大文件实体存储与分发</span>
+                    <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block">Cloudflare R2 存储桶</span>
+                    <span className="text-[10px] text-slate-400">灯亮表示 bucket.list 探测成功</span>
                   </div>
                   {cloudServicesStatus.r2 ? (
                     <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400">
                       <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                      已连接 (R2)
+                      探测成功 (R2)
                     </span>
                   ) : (
                     <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-rose-50 text-rose-600 dark:bg-rose-950/40 dark:text-rose-400">
                       <span className="w-2 h-2 rounded-full bg-rose-500" />
-                      未连接 (降级本地)
+                      探测失败 / 未绑定
                     </span>
                   )}
                 </div>
@@ -961,18 +966,18 @@ export const SettingsSection: React.FC = () => {
                 {/* Database Light */}
                 <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 flex items-center justify-between">
                   <div>
-                    <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block">主数据库 (D1/Supabase)</span>
-                    <span className="text-[10px] text-slate-400">文章、订单、评论核心结构</span>
+                    <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block">Cloudflare D1 数据库</span>
+                    <span className="text-[10px] text-slate-400">灯亮表示 SELECT 1 查询成功</span>
                   </div>
                   {cloudServicesStatus.d1 ? (
                     <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400">
                       <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                      已连接 (D1)
+                      查询成功 (D1)
                     </span>
                   ) : (
                     <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-rose-50 text-rose-600 dark:bg-rose-950/40 dark:text-rose-400">
                       <span className="w-2 h-2 rounded-full bg-rose-500" />
-                      未连接 (降级本地)
+                      探测失败 / 未绑定
                     </span>
                   )}
                 </div>
@@ -980,18 +985,18 @@ export const SettingsSection: React.FC = () => {
                 {/* KV Light */}
                 <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 flex items-center justify-between">
                   <div>
-                    <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block">KV 极速缓存 (Workers KV)</span>
-                    <span className="text-[10px] text-slate-400">配置加速与毫秒级读取</span>
+                    <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block">Cloudflare Workers KV</span>
+                    <span className="text-[10px] text-slate-400">仅做 KV get 读取探测，不代表写入配额可用</span>
                   </div>
                   {cloudServicesStatus.kv ? (
                     <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400">
                       <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                      已连接 (KV)
+                      读取成功 (KV)
                     </span>
                   ) : (
                     <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-rose-50 text-rose-600 dark:bg-rose-950/40 dark:text-rose-400">
                       <span className="w-2 h-2 rounded-full bg-rose-500" />
-                      未连接 (降级本地)
+                      探测失败 / 未绑定
                     </span>
                   )}
                 </div>
@@ -1011,12 +1016,12 @@ export const SettingsSection: React.FC = () => {
               </div>
 
               <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700">
-                <span className="text-xs text-slate-400 block mb-1">前端直连与无感降级容错机制</span>
-                <span className="text-sm font-bold text-emerald-500 flex items-center gap-1.5 mt-1">
-                  <Check className="w-4 h-4" /> 云端未配置时无缝直连本地缓存
+                <span className="text-xs text-slate-400 block mb-1">本机数据与服务端能力边界</span>
+                <span className="text-sm font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1.5 mt-1">
+                  <Check className="w-4 h-4" /> 本机内容保存在浏览器；云服务需单独配置
                 </span>
                 <span className="text-xs text-slate-400 block mt-1">
-                  无论在何种平台部署，系统功能均可100%保持正常运作
+                  注册、验证码邮件、共享同步和远程文件依赖 Cloudflare Functions 与相应 D1/R2 绑定；纯静态托管不提供这些 API。
                 </span>
               </div>
             </div>
@@ -1379,7 +1384,7 @@ export const SettingsSection: React.FC = () => {
 
             <div>
               <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                管理员用户名 (系统全局唯一，默认 fox，支持前端修改或后台变量 ADMIN_USERNAME 覆盖)
+                管理员用户名（本机开发偏好；生产环境由 Cloudflare ADMIN_USERNAME 决定）
               </label>
               <input
                 type="text"
@@ -1406,13 +1411,13 @@ export const SettingsSection: React.FC = () => {
 
             <div>
               <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                全新密码 (管理员权限具备唯一控制权)
+                本机开发管理员密码（生产环境请在 Cloudflare Pages 修改 ADMIN_PASSWORD）
               </label>
               <input
                 type="password"
                 value={newPassword}
                 onChange={e => setNewPassword(e.target.value)}
-                placeholder="设置新密码 (不少于6位)"
+                placeholder="设置新密码（至少 12 位；仅 localhost 有效）"
                 className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100"
                 required
               />
@@ -1436,7 +1441,7 @@ export const SettingsSection: React.FC = () => {
               type="submit"
               className="px-5 py-2 bg-sky-500 hover:bg-sky-600 text-white text-xs font-semibold rounded-xl shadow-md transition"
             >
-              更新管理员密码
+              更新本机管理员密码
             </button>
           </form>
         )}
@@ -1490,7 +1495,7 @@ export const SettingsSection: React.FC = () => {
         </div>
 
         {/* Online Translation Widget */}
-        <div className="space-y-3">
+        <div className="space-y-3 flex flex-col min-h-[50vh] md:min-h-0">
           <div className="flex items-center justify-between">
             <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
               <Languages className="w-4 h-4 text-emerald-500" />
@@ -1526,7 +1531,7 @@ export const SettingsSection: React.FC = () => {
             </div>
           </div>
 
-          <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-2">
+          <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-3 flex-1 flex flex-col">
             {/* API Settings Panel (Foldable) */}
             {showApiSettings && (
               <div className="p-3.5 bg-white dark:bg-slate-800 border border-emerald-200 dark:border-emerald-800/60 rounded-xl space-y-3 text-xs">
@@ -1600,11 +1605,11 @@ export const SettingsSection: React.FC = () => {
             )}
 
             <textarea
-              rows={2}
+              rows={5}
               value={sourceText}
               onChange={e => setSourceText(e.target.value)}
               placeholder="在此输入需要快速翻译的文字..."
-              className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100"
+              className="w-full min-h-[22vh] md:min-h-24 px-3 py-3 text-sm rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100"
             />
             <div className="flex justify-between items-center">
               <span className="text-[10px] text-slate-400">
@@ -1620,7 +1625,7 @@ export const SettingsSection: React.FC = () => {
               </button>
             </div>
             {translatedText && (
-              <div className="p-2.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs text-slate-800 dark:text-slate-100 font-mono">
+              <div className="p-3 min-h-[18vh] rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-sm text-slate-800 dark:text-slate-100 font-mono whitespace-pre-wrap break-words">
                 {translatedText}
               </div>
             )}

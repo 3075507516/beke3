@@ -26,7 +26,6 @@ import {
   saveLocalStorage,
   saveFileToIndexedDB,
   DEFAULT_SETTINGS,
-  DEFAULT_ADMIN,
   DEFAULT_POSTS,
   DEFAULT_BOOKS,
   DEFAULT_PHOTOS,
@@ -187,13 +186,18 @@ interface AppContextType {
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Admin credentials with uniqueness & persistence (default 'fox', configurable via backend variable or dashboard)
+  // The administrator password is never initialized with a universal/default credential.
   const [adminUsername, setAdminUsernameState] = useState<string>(() =>
     loadLocalStorage<string>(STORAGE_KEYS.ADMIN_USERNAME, 'fox')
   );
-  const [adminPassword, setAdminPasswordState] = useState<string>(() =>
-    loadLocalStorage<string>(STORAGE_KEYS.ADMIN_PASSWORD, '123456')
-  );
+  const [adminPassword, setAdminPasswordState] = useState<string>(() => {
+    const saved = loadLocalStorage<string>(STORAGE_KEYS.ADMIN_PASSWORD, '');
+    if (['123456', 'fox3admin2026'].includes(String(saved).trim())) {
+      try { localStorage.removeItem(STORAGE_KEYS.ADMIN_PASSWORD); } catch {}
+      return '';
+    }
+    return saved;
+  });
 
   // Probe backend environment variable for admin config on startup
   useEffect(() => {
@@ -220,14 +224,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, []);
 
   const updateAdminPassword = (newPass: string): boolean => {
-    if (!newPass || newPass.length < 6) return false;
+    if (!newPass || newPass.length < 12) return false;
     setAdminPasswordState(newPass);
     saveLocalStorage(STORAGE_KEYS.ADMIN_PASSWORD, newPass);
-    try {
-      const bc = new BroadcastChannel('fox3_realtime_sync');
-      bc.postMessage({ type: 'SYNC_ALL', payload: { adminPassword: newPass } });
-      bc.close();
-    } catch (e) {}
     return true;
   };
 
@@ -244,13 +243,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return true;
   };
 
-  const [currentUser, setCurrentUser] = useState<User | null>(() =>
-    loadLocalStorage<User | null>(STORAGE_KEYS.CURRENT_USER, DEFAULT_ADMIN)
-  );
+  const [currentUser, setCurrentUser] = useState<User | null>(() => {
+    const saved = loadLocalStorage<User | null>(STORAGE_KEYS.CURRENT_USER, null);
+    // Never trust a persisted administrator profile by itself; a signed server session is required.
+    return saved?.role === 'admin' ? null : saved;
+  });
 
   const [users, setUsers] = useState<User[]>(() =>
-    loadLocalStorage<User[]>(STORAGE_KEYS.USERS, [DEFAULT_ADMIN])
+    loadLocalStorage<User[]>(STORAGE_KEYS.USERS, [])
   );
+
+  useEffect(() => {
+    let cancelled = false;
+    let token = '';
+    try { token = sessionStorage.getItem('fox3_admin_session') || ''; } catch {}
+    if (!token) {
+      const isLocalDevelopment = ['localhost', '127.0.0.1'].includes(window.location.hostname);
+      if (currentUser?.role === 'admin' && !isLocalDevelopment) setCurrentUser(null);
+      return;
+    }
+    const validateSession = async () => {
+      try {
+        const response = await fetch('/api/auth/session', { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } });
+        const data = await response.json();
+        if (!response.ok || !data?.authenticated || data?.user?.role !== 'admin') throw new Error('Invalid administrator session');
+        if (!cancelled) setCurrentUser(data.user as User);
+      } catch {
+        if (!cancelled) {
+          try { sessionStorage.removeItem('fox3_admin_session'); } catch {}
+          setCurrentUser(prev => prev?.role === 'admin' ? null : prev);
+        }
+      }
+    };
+    void validateSession();
+    const interval = window.setInterval(validateSession, 60_000);
+    return () => { cancelled = true; window.clearInterval(interval); };
+  }, [currentUser?.id, currentUser?.role]);
 
   const [posts, setPosts] = useState<Post[]>(() =>
     loadLocalStorage<Post[]>(STORAGE_KEYS.POSTS, DEFAULT_POSTS)
@@ -603,7 +631,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }, 600);
   }, []);
 
-  // Sync to local storage: save locally without generating network storms
+  // Persist mailbox settings on this browser so SMTP/API credentials survive reloads.
+  // These settings are deliberately excluded from cross-device sync below and secrets
+  // remain redacted from exported backups.
   useEffect(() => saveLocalStorage(STORAGE_KEYS.CURRENT_USER, currentUser), [currentUser]);
   useEffect(() => saveLocalStorage(STORAGE_KEYS.USERS, users), [users]);
   useEffect(() => saveLocalStorage(STORAGE_KEYS.POSTS, posts), [posts]);
@@ -615,12 +645,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => saveLocalStorage(STORAGE_KEYS.ORDERS, orders), [orders]);
   useEffect(() => saveLocalStorage(STORAGE_KEYS.CHAT_MESSAGES, chatMessages), [chatMessages]);
   useEffect(() => saveLocalStorage(STORAGE_KEYS.SYSTEM_SETTINGS, systemSettings), [systemSettings]);
-  useEffect(() => saveLocalStorage(STORAGE_KEYS.EMAIL_SETTINGS, {
-    ...emailSettings,
-    apiKey: '',
-    smtpPass: '',
-    imapConfig: emailSettings.imapConfig ? { ...emailSettings.imapConfig, pass: '' } : emailSettings.imapConfig,
-  }), [emailSettings]);
+  useEffect(() => saveLocalStorage(STORAGE_KEYS.EMAIL_SETTINGS, emailSettings), [emailSettings]);
   useEffect(() => saveLocalStorage(STORAGE_KEYS.PAYMENT_SETTINGS, paymentSettings), [paymentSettings]);
   useEffect(() => saveLocalStorage(STORAGE_KEYS.WEBDAV_CONFIG, webDavConfig), [webDavConfig]);
   useEffect(() => saveLocalStorage(STORAGE_KEYS.WEBDAV_BACKUPS, webDavBackups), [webDavBackups]);
@@ -732,7 +757,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         orders,
         chatMessages,
         webDavBackups,
-        webDavConfig,
         trashItems,
         systemSettings,
         updatedAt: Date.now(),
@@ -746,14 +770,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       } catch (e) {}
 
       // Push to backend sync
-      const postRes = await fetch('/api/sync/global_state', {
+      const adminToken = sessionStorage.getItem('fox3_admin_session');
+      const postRes = adminToken ? await fetch('/api/sync/global_state', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${adminToken}` },
         body: JSON.stringify(syncPayload),
-      }).catch(() => null);
+      }).catch(() => null) : null;
 
       // Try pull remote updates
-      const getRes = await fetch('/api/sync/global_state', { method: 'GET' }).catch(() => null);
+      const getRes = adminToken ? await fetch('/api/sync/global_state', { method: 'GET', headers: { 'Authorization': `Bearer ${adminToken}` } }).catch(() => null) : null;
       if (getRes && getRes.ok) {
         const data = await getRes.json();
         if (data && data.data) {
@@ -769,7 +794,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             if (Array.isArray(remote.orders)) setOrders(remote.orders);
             if (Array.isArray(remote.chatMessages)) setChatMessages(remote.chatMessages);
             if (Array.isArray(remote.webDavBackups)) setWebDavBackups(remote.webDavBackups);
-            if (remote.webDavConfig) setWebDavConfig(remote.webDavConfig);
             if (Array.isArray(remote.trashItems)) setTrashItems(remote.trashItems);
             if (remote.systemSettings) setSystemSettings(remote.systemSettings);
           }
@@ -783,9 +807,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         message: postRes?.ok ? '多设备云端与本地已无缝实时同步' : '本地与多窗口已实时同步',
       });
       // Also sync bookmarks and posts to dedicated /api/sync/posts
-      fetch('/api/sync/posts', {
+      if (adminToken) fetch('/api/sync/posts', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${adminToken}` },
         body: JSON.stringify({ posts, updatedAt: Date.now() }),
       }).catch(() => null);
     } catch {
@@ -817,7 +841,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     const fetchInitialSync = async () => {
       try {
-        const res = await fetch('/api/sync/global_state', { method: 'GET' }).catch(() => null);
+        const adminToken = sessionStorage.getItem('fox3_admin_session');
+        if (!adminToken) return;
+        const res = await fetch('/api/sync/global_state', { method: 'GET', headers: { 'Authorization': `Bearer ${adminToken}` } }).catch(() => null);
         if (res && res.ok) {
           const json = await res.json();
           if (json && json.data) {
@@ -883,9 +909,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         bc.close();
 
         // Non-blocking sync to cloud
-        fetch('/api/sync/global_state', {
+        const adminToken = sessionStorage.getItem('fox3_admin_session');
+        if (adminToken) fetch('/api/sync/global_state', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${adminToken}` },
           body: JSON.stringify(payload),
         }).catch(() => {});
       } catch (e) {}

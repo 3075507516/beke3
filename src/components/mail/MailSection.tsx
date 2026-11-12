@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import { MailMessage } from '../../types';
 import {
@@ -18,6 +18,18 @@ import {
   Reply,
   KeyRound,
 } from 'lucide-react';
+
+async function readMailApiJson(response: Response, label: string): Promise<any> {
+  const body = await response.text();
+  try {
+    return JSON.parse(body);
+  } catch {
+    const contentType = response.headers.get('content-type') || '未知';
+    const title = body.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]?.replace(/\s+/g, ' ').trim();
+    const excerpt = body.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 140);
+    throw new Error(`${label}返回非 JSON（HTTP ${response.status}，${contentType}）：${title || excerpt || '响应内容为空'}`);
+  }
+}
 
 export const MailSection: React.FC = () => {
   const {
@@ -42,18 +54,86 @@ export const MailSection: React.FC = () => {
   const [isSaved, setIsSaved] = useState(false);
   const [testingStatus, setTestingStatus] = useState(false);
   const [actionAlert, setActionAlert] = useState<string | null>(null);
+  const [settingsSource, setSettingsSource] = useState<'frontend' | 'backend'>('frontend');
+  const [backendMailConfigured, setBackendMailConfigured] = useState<boolean | null>(null);
+  const [backendMailStatusAvailable, setBackendMailStatusAvailable] = useState<boolean | null>(null);
+  const [frontendTestFingerprint, setFrontendTestFingerprint] = useState('');
+  const [frontendTestFailedFingerprint, setFrontendTestFailedFingerprint] = useState('');
+  const [backendTestResult, setBackendTestResult] = useState<boolean | null>(null);
 
-  // Accurate connection indicators for Outbound & Inbound
-  const isOutboundConnected = Boolean(
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/mail/status', { headers: { Accept: 'application/json' } })
+      .then(async response => {
+        const contentType = response.headers.get('content-type') || '';
+        if (!response.ok || !contentType.includes('application/json')) throw new Error('status unavailable');
+        return response.json();
+      })
+      .then(data => {
+        if (!cancelled) {
+          setBackendMailConfigured(Boolean(data?.outbound?.configured));
+          setBackendMailStatusAvailable(true);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setBackendMailConfigured(null);
+          setBackendMailStatusAvailable(false);
+        }
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Filled parameters are never called connected until an actual test message succeeds.
+  const frontendOutboundConfigured = Boolean(
     (formSettings.provider === 'smtp' && formSettings.smtpHost && formSettings.smtpUser && formSettings.smtpPass && formSettings.smtpPass !== '********') ||
     (formSettings.provider !== 'smtp' && formSettings.apiKey && formSettings.apiKey !== '********' && !formSettings.apiKey.includes('demo') && formSettings.apiKey.length >= 8)
-  );
+  ) && Boolean(formSettings.senderEmail);
+  const frontendFingerprint = [formSettings.provider, formSettings.smtpHost, formSettings.smtpPort, formSettings.smtpSecurity, formSettings.smtpUser, formSettings.smtpPass, formSettings.apiKey, formSettings.senderEmail].join('|');
+  const isFrontendConnected = frontendOutboundConfigured && frontendTestFingerprint === frontendFingerprint;
+  const isFrontendTestFailed = frontendOutboundConfigured && frontendTestFailedFingerprint === frontendFingerprint;
+  const isBackendConnected = backendMailConfigured === true && backendTestResult === true;
+  const isBackendTestFailed = backendTestResult === false;
 
-  const isInboundConnected = Boolean(
+  const inboundParametersConfigured = Boolean(
     (formSettings.inboundMethod === 'cf_routing' && formSettings.cfEmailRouting?.routingAddress && formSettings.cfEmailRouting?.forwardTo) ||
     (formSettings.inboundMethod === 'imap_pop3' && formSettings.imapConfig?.host && formSettings.imapConfig?.user && formSettings.imapConfig?.pass && formSettings.imapConfig?.pass !== '********') ||
     (formSettings.inboundMethod === 'webhook' && formSettings.cfEmailRouting?.webhookUrl)
   );
+
+  const handleTestMail = async (source: 'frontend' | 'backend') => {
+    const token = sessionStorage.getItem('fox3_admin_session');
+    if (!token) {
+      showToast('邮件连通测试需要通过已部署的管理员账号重新登录。', 'error');
+      return;
+    }
+    setTestingStatus(true);
+    if (source === 'backend') setBackendTestResult(null);
+    try {
+      const response = await fetch('/api/mail/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ source, clientEmailSettings: source === 'frontend' ? formSettings : undefined }),
+      });
+      const result = await readMailApiJson(response, '邮件连通测试接口');
+      if (!response.ok || !result?.success) throw new Error(result?.error || `测试失败 (HTTP ${response.status})`);
+      if (source === 'frontend') {
+        setFrontendTestFingerprint(frontendFingerprint);
+        setFrontendTestFailedFingerprint('');
+      }
+      else setBackendTestResult(true);
+      showToast(`测试邮件已由 ${source === 'frontend' ? '前台配置' : '后台环境变量'}投递至发件地址 ${result.recipient}；请实际查收确认。`, 'success');
+    } catch (error: any) {
+      if (source === 'frontend') {
+        setFrontendTestFingerprint('');
+        setFrontendTestFailedFingerprint(frontendFingerprint);
+      }
+      else setBackendTestResult(false);
+      showToast(error?.message || '邮件连通测试失败。', 'error');
+    } finally {
+      setTestingStatus(false);
+    }
+  };
 
   // New Compose state
   const [recipient, setRecipient] = useState('');
@@ -113,20 +193,22 @@ export const MailSection: React.FC = () => {
     if ((!recipient && !replyIdentity) || !subject || !body) return;
 
     const sender = emailSettings.senderEmail || 'service@whitefox.blog';
+    const token = sessionStorage.getItem('fox3_admin_session');
     try {
       const response = await fetch('/api/mail/send', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({
           to: recipient,
           recipientIdentity: replyIdentity || undefined,
           subject,
           text: body,
           type: replyIdentity ? 'admin_reply' : 'manual',
-          clientEmailSettings: emailSettings,
+          settingsSource,
+          clientEmailSettings: settingsSource === 'frontend' ? formSettings : undefined,
         })
       });
-      const result = await response.json();
+      const result = await readMailApiJson(response, '邮件发送接口');
       if (!response.ok || !result?.success || !result?.externalDispatched) {
         throw new Error(result?.error || '邮件服务未确认投递，请检查发信设置。');
       }
@@ -198,7 +280,7 @@ export const MailSection: React.FC = () => {
         <div>
           <h2 className="text-xl font-bold font-serif-sc text-slate-800 dark:text-slate-100 flex items-center gap-2">
             <Mail className="w-5 h-5 text-rose-500" />
-            <span>站内邮件管理中枢 & Cloudflare Email Routing</span>
+            <span>站内邮件中枢（发信已接入 / 收信待接入）</span>
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
             支持 Resend SMTP/API、Brevo 与 SendGrid 发信，含验证码模板和收发限制设置
@@ -207,27 +289,18 @@ export const MailSection: React.FC = () => {
 
         <div className="flex items-center gap-3 flex-wrap">
           {/* Real-time Status Indicators Lamp in Header */}
-          <div className="flex items-center gap-2">
-            <span
-              className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full font-medium ${
-                isOutboundConnected
-                  ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200/50'
-                  : 'bg-rose-50 text-rose-600 dark:bg-rose-950/40 dark:text-rose-400 border border-rose-200/50'
-              }`}
-            >
-              <span className={`w-2 h-2 rounded-full ${isOutboundConnected ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
-              <span>发信: {isOutboundConnected ? '已配置' : '未配置'}</span>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className={`inline-flex items-center gap-1.5 text-[10px] px-2 py-1 rounded-full font-medium border ${isFrontendConnected ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300' : isFrontendTestFailed || !frontendOutboundConfigured ? 'bg-rose-50 text-rose-600 border-rose-200 dark:bg-rose-950/40 dark:text-rose-400' : 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300'}`}>
+              <span className={`w-2 h-2 rounded-full ${isFrontendConnected ? 'bg-emerald-500' : isFrontendTestFailed || !frontendOutboundConfigured ? 'bg-rose-500' : 'bg-amber-500'}`} />
+              <span>前台: {isFrontendConnected ? '测试已接受' : isFrontendTestFailed ? '测试失败' : frontendOutboundConfigured ? '待实测' : '未配置'}</span>
             </span>
-
-            <span
-              className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full font-medium ${
-                isInboundConnected
-                  ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200/50'
-                  : 'bg-rose-50 text-rose-600 dark:bg-rose-950/40 dark:text-rose-400 border border-rose-200/50'
-              }`}
-            >
-              <span className={`w-2 h-2 rounded-full ${isInboundConnected ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
-              <span>收信: {isInboundConnected ? '已配置' : '未配置'}</span>
+            <span className={`inline-flex items-center gap-1.5 text-[10px] px-2 py-1 rounded-full font-medium border ${isBackendConnected ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300' : isBackendTestFailed || backendMailStatusAvailable === false || backendMailConfigured === false ? 'bg-rose-50 text-rose-600 border-rose-200 dark:bg-rose-950/40 dark:text-rose-400' : 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300'}`}>
+              <span className={`w-2 h-2 rounded-full ${isBackendConnected ? 'bg-emerald-500' : isBackendTestFailed || backendMailStatusAvailable === false || backendMailConfigured === false ? 'bg-rose-500' : 'bg-amber-500'}`} />
+              <span>后台: {isBackendConnected ? '测试已接受' : isBackendTestFailed ? '测试失败' : backendMailStatusAvailable === null ? '检测中' : backendMailStatusAvailable === false ? '状态不可读取' : backendMailConfigured ? '参数已配置/待测试' : '未配置'}</span>
+            </span>
+            <span className="inline-flex items-center gap-1.5 text-[10px] px-2 py-1 rounded-full font-medium border bg-rose-50 text-rose-600 border-rose-200 dark:bg-rose-950/40 dark:text-rose-400">
+              <span className="w-2 h-2 rounded-full bg-rose-500" />
+              <span>收信: 未接入</span>
             </span>
           </div>
 
@@ -265,10 +338,10 @@ export const MailSection: React.FC = () => {
               <span>站内发信与收信配置指南 & 后端环境变量说明</span>
             </div>
             <div className="text-slate-600 dark:text-slate-300 leading-relaxed space-y-1">
-              <p><b>1. SMTP 设置：</b>Resend 默认使用 <code>smtp.resend.com</code>、端口 <code>465</code>、<b>SSL</b>、用户名 <code>resend</code>，密码填写 Resend API Key；发件域名必须先在 Resend 验证。</p>
-              <p><b>2. 线上部署：</b>SMTP 密码/API Key 不写入浏览器存储，仅在当前页面会话内保留。给所有访客提供注册邮件时，请在 Cloudflare Pages Functions 设置 <code>SMTP_HOST</code>、<code>SMTP_PORT</code>、<code>SMTP_SECURITY</code>、<code>SMTP_USER</code>、<code>SMTP_PASS</code>、<code>MAIL_SENDER</code>，并绑定 KV 验证码存储。</p>
-              <p><b>3. 全站验证码定制：</b>可设置 <code>VERIFY_CODE_LENGTH</code>、<code>VERIFY_EMAIL_SUBJECT</code>、<code>VERIFY_EMAIL_TEMPLATE</code>。模板变量：{'{{code}}'}、{'{{username}}'}、{'{{email}}'}。回复邮件采用注册用户数据库中的真实邮箱。</p>
-              <p><b>4. 收信路由：</b>Cloudflare Email Routing 需在 Cloudflare 域名后台单独开启并设置转发目标；当前收信设置区只保存转发/IMAP 配置，不代表已成功收件。</p>
+              <p><b>1. Resend SMTP 示例：</b>服务器 <code>smtp.resend.com</code>，端口 <code>465</code>，加密选 <b>SSL</b>，用户名填 <code>resend</code>，密码填 Resend API Key（通常以 <code>re_</code> 开头）；发件人必须使用已在 Resend 验证的域名邮箱。</p>
+              <p><b>2. 前台与后台：</b>前台配置保存在当前浏览器本机，可在「前台/后台」选择实际发信源并分别发送测试邮件。后台环境变量优先服务注册验证码；请在 Cloudflare Pages 的 Functions Variables/Secrets 设置 <code>MAIL_PROVIDER</code>、<code>SMTP_HOST</code>、<code>SMTP_PORT</code>、<code>SMTP_SECURITY</code>、<code>SMTP_USER</code>、<code>SMTP_PASS</code>、<code>MAIL_SENDER</code>，并绑定 <code>DB</code>。密钥在本机浏览器存储中未加密，请只在可信管理员设备保存。</p>
+              <p><b>3. 全站验证码：</b>可设置 <code>VERIFY_CODE_LENGTH</code>、<code>VERIFY_EMAIL_SUBJECT</code>、<code>VERIFY_EMAIL_TEMPLATE</code>；模板变量为 {'{{code}}'}、{'{{username}}'}、{'{{email}}'}。后台环境变量配置适用于访客注册，回信收件人由 D1 注册用户记录解析。</p>
+              <p><b>4. 收信：</b>当前应用没有 IMAP 轮询、Email Routing 收件处理器或 Webhook 接收路由。这里仅保存收信参数，Cloudflare 转发到外部邮箱不等于邮件进入本站；收信灯不会显示已连通。</p>
             </div>
           </div>
 
@@ -292,11 +365,27 @@ export const MailSection: React.FC = () => {
                 <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
                   <span>发信通道设置 (Outbound)</span>
                 </h4>
-                <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
-                  isOutboundConnected ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'
-                }`}>
-                  {isOutboundConnected ? '● 发信参数已填写' : '○ 发信参数未填写'}
+                <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${isFrontendConnected ? 'bg-emerald-50 text-emerald-700' : isFrontendTestFailed || !frontendOutboundConfigured ? 'bg-rose-50 text-rose-600' : 'bg-amber-50 text-amber-700'}`}>
+                  {isFrontendConnected ? '● 前台测试已接受' : isFrontendTestFailed ? '○ 前台测试失败' : frontendOutboundConfigured ? '● 前台参数已填写/待测试' : '○ 前台未配置'}
                 </span>
+              </div>
+
+              <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 space-y-2">
+                <label className="block text-[11px] text-slate-600 dark:text-slate-300 font-semibold">普通站内信使用哪组发信凭据？</label>
+                <select value={settingsSource} onChange={e => setSettingsSource(e.target.value as 'frontend' | 'backend')} className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs">
+                  <option value="frontend">使用前台邮箱设置（本机保存）</option>
+                  <option value="backend">使用 Cloudflare 后台环境变量</option>
+                </select>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" disabled={testingStatus || !frontendOutboundConfigured} onClick={() => handleTestMail('frontend')} className="px-3 py-1.5 rounded-lg bg-sky-600 disabled:opacity-40 text-white text-[11px] font-semibold">
+                    {testingStatus ? '测试中…' : '测试前台配置'}
+                  </button>
+                  <button type="button" disabled={testingStatus || !backendMailConfigured} onClick={() => handleTestMail('backend')} className="px-3 py-1.5 rounded-lg bg-indigo-600 disabled:opacity-40 text-white text-[11px] font-semibold">
+                    {testingStatus ? '测试中…' : '测试后台配置'}
+                  </button>
+                  <span className="self-center text-[10px] text-slate-500">测试邮件仅发回该通道的发件地址；绿色仅代表邮件服务接受了测试投递。</span>
+                </div>
+                <div className="text-[10px] text-slate-500">后台环境变量状态：{backendMailStatusAvailable === null ? '检测中…' : backendMailStatusAvailable === false ? '状态接口不可读取，无法判断后台是否配置' : isBackendTestFailed ? '测试失败' : isBackendConnected ? '测试邮件已被服务商接受' : backendMailConfigured ? '参数已配置，尚未测试' : '未配置发信环境变量'}</div>
               </div>
 
               <div>
@@ -420,36 +509,11 @@ export const MailSection: React.FC = () => {
                 />
               </div>
 
-              <div className="space-y-2 border-t border-slate-100 dark:border-slate-800 pt-4">
-                <h5 className="text-xs font-bold text-slate-700 dark:text-slate-200">注册验证码邮件内容</h5>
-                <div>
-                  <label className="block text-xs text-slate-500 mb-1">邮件主题（变量：{'{{code}}'}、{'{{username}}'}、{'{{email}}'}）</label>
-                  <input
-                    type="text"
-                    value={formSettings.verificationEmailSubject || '【fox3 博客】注册验证码：{{code}}'}
-                    onChange={e => setFormSettings({ ...formSettings, verificationEmailSubject: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-slate-500 mb-1">验证码位数（默认 6 位）</label>
-                  <select
-                    value={formSettings.verificationCodeLength || 6}
-                    onChange={e => setFormSettings({ ...formSettings, verificationCodeLength: Number(e.target.value) })}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100"
-                  >
-                    {[4, 5, 6, 7, 8].map(length => <option key={length} value={length}>{length} 位数字</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs text-slate-500 mb-1">回复正文（变量：{'{{code}}'}、{'{{username}}'}、{'{{email}}'}）</label>
-                  <textarea
-                    rows={5}
-                    value={formSettings.verificationEmailTemplate || ''}
-                    onChange={e => setFormSettings({ ...formSettings, verificationEmailTemplate: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100"
-                  />
-                  <p className="text-[10px] text-slate-400">验证码由服务端随机生成，验证后即失效。默认模板说明验证码 10 分钟有效。</p>
+              <div className="border-t border-slate-100 dark:border-slate-800 pt-4">
+                <div className="p-3 rounded-xl border border-sky-200 dark:border-sky-900 bg-sky-50/70 dark:bg-sky-950/30 space-y-1 text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">
+                  <h5 className="font-bold text-slate-700 dark:text-slate-200">注册验证码邮件（服务端生成与校验）</h5>
+                  <p>验证码由 Pages Functions 安全随机生成并存入 D1/KV；注册访客的请求不会传入本机 SMTP 密钥、验证码位数或邮件正文。</p>
+                  <p>如需自定义，请在 Cloudflare Pages 的 Functions Variables/Secrets 设置 <code>VERIFY_CODE_LENGTH</code>（默认 6，范围 4–8）、<code>VERIFY_EMAIL_SUBJECT</code> 和 <code>VERIFY_EMAIL_TEMPLATE</code>。模板变量：{'{{code}}'}、{'{{username}}'}、{'{{email}}'}；未设置时使用系统默认内容。</p>
                 </div>
               </div>
             </div>
@@ -460,25 +524,23 @@ export const MailSection: React.FC = () => {
                 <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
                   收信通道方式 & Cloudflare Email Routing (Inbound)
                 </h4>
-                <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
-                  isInboundConnected ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'
-                }`}>
-                  {isInboundConnected ? '● 收信参数已填写' : '○ 收信参数未填写'}
+                <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${inboundParametersConfigured ? 'bg-amber-50 text-amber-700' : 'bg-rose-50 text-rose-600'}`}>
+                  {inboundParametersConfigured ? '● 参数已填/本站未接收' : '○ 未配置/本站未接收'}
                 </span>
               </div>
 
               <div>
                 <label className="block text-xs text-slate-500 mb-1">
-                  收信服务与加密方式 <span className="text-rose-500 font-bold">[必填]</span>
+                  收信配置（当前仅保存，不实际收件）
                 </label>
                 <select
                   value={formSettings.inboundMethod || 'cf_routing'}
                   onChange={e => setFormSettings({ ...formSettings, inboundMethod: e.target.value as any })}
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100"
                 >
-                  <option value="cf_routing">Cloudflare Email Routing (TLS 边缘邮件路由 / 官方免运维)</option>
-                  <option value="imap_pop3">IMAP / POP3 (SSL/TLS 993 加密专用通道)</option>
-                  <option value="webhook">HTTPS Webhook 安全回调接收 (端到端加密)</option>
+                  <option value="cf_routing">Cloudflare Email Routing（本站尚未接收入站邮件）</option>
+                  <option value="imap_pop3">IMAP / POP3 参数（本站尚无轮询器）</option>
+                  <option value="webhook">Webhook 参数（本站尚无接收路由）</option>
                 </select>
               </div>
 
@@ -487,7 +549,7 @@ export const MailSection: React.FC = () => {
                   <div className="grid grid-cols-3 gap-2">
                     <div className="col-span-2">
                       <label className="block text-xs text-slate-500 mb-1">
-                        IMAP 服务器地址 <span className="text-rose-500 font-bold">[必填]</span>
+                        IMAP 服务器地址 <span className="text-slate-400">[仅保存，未接入]</span>
                       </label>
                       <input
                         type="text"
@@ -507,7 +569,7 @@ export const MailSection: React.FC = () => {
                     </div>
                     <div>
                       <label className="block text-xs text-slate-500 mb-1">
-                        收信端口 <span className="text-rose-500 font-bold">[必填]</span>
+                        收信端口 <span className="text-slate-400">[仅保存，未接入]</span>
                       </label>
                       <input
                         type="number"
@@ -530,7 +592,7 @@ export const MailSection: React.FC = () => {
                   <div className="grid grid-cols-2 gap-2">
                     <div>
                       <label className="block text-xs text-slate-500 mb-1">
-                        IMAP 账号 <span className="text-rose-500 font-bold">[必填]</span>
+                        IMAP 账号 <span className="text-slate-400">[仅保存，未接入]</span>
                       </label>
                       <input
                         type="text"
@@ -550,7 +612,7 @@ export const MailSection: React.FC = () => {
                     </div>
                     <div>
                       <label className="block text-xs text-slate-500 mb-1">
-                        IMAP 授权码 / 密码 <span className="text-rose-500 font-bold">[必填]</span>
+                        IMAP 授权码 / 密码 <span className="text-slate-400">[仅保存，未接入]</span>
                       </label>
                       <input
                         type="password"
@@ -573,7 +635,7 @@ export const MailSection: React.FC = () => {
               ) : formSettings.inboundMethod === 'webhook' ? (
                 <div>
                   <label className="block text-xs text-slate-500 mb-1">
-                    自动化 Webhook 回调地址 (HTTP POST) <span className="text-rose-500 font-bold">[必填]</span>
+                    Webhook 地址 <span className="text-slate-400">[仅保存，本站没有接收路由]</span>
                   </label>
                   <input
                     type="text"
@@ -637,37 +699,9 @@ export const MailSection: React.FC = () => {
                 </>
               )}
 
-              {/* Switches & Limits */}
-              <div className="space-y-2 pt-1">
-                <div className="flex items-center justify-between p-2 rounded-xl bg-slate-50 dark:bg-slate-800">
-                  <div>
-                    <span className="text-xs text-slate-700 dark:text-slate-200 font-medium block">
-                      发信配额与风控限制开关 <span className="text-slate-400">[可选]</span>
-                    </span>
-                    <span className="text-[10px] text-slate-400">单日上限: {formSettings.maxDailyEmails || 3000} 封 (防恶意刷信)</span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={formSettings.rateLimitEnabled}
-                    onChange={e => setFormSettings({ ...formSettings, rateLimitEnabled: e.target.checked })}
-                    className="w-4 h-4 text-rose-500 rounded focus:ring-rose-500"
-                  />
-                </div>
-
-                <div className="flex items-center justify-between p-2 rounded-xl bg-slate-50 dark:bg-slate-800">
-                  <div>
-                    <span className="text-xs text-slate-700 dark:text-slate-200 font-medium block">
-                      注册验证码自动应答回复 <span className="text-slate-400">[可选]</span>
-                    </span>
-                    <span className="text-[10px] text-slate-400">收到新注册邮件时自动生成6位验证码并秒级回信</span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={formSettings.autoReplyEnabled}
-                    onChange={e => setFormSettings({ ...formSettings, autoReplyEnabled: e.target.checked })}
-                    className="w-4 h-4 text-rose-500 rounded focus:ring-rose-500"
-                  />
-                </div>
+              <div className="p-3 rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50/70 dark:bg-amber-950/30 text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">
+                <b className="text-slate-700 dark:text-slate-200">服务端风控：</b>
+                注册验证码对邮箱和 IP 执行冷却并由服务端过期；邮件连通测试需要管理员会话。每日发信上限和收信轮询目前没有可配置实现，本机表单不会伪装这些能力。
               </div>
             </div>
           </div>
@@ -675,7 +709,7 @@ export const MailSection: React.FC = () => {
           {/* Explicit Save Configuration Button */}
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-4 border-t border-slate-100 dark:border-slate-800">
             <span className="text-xs text-slate-400">
-              非密钥设置保存到本地；密码/API Key 仅在当前页面会话内保留，不写入备份或浏览器存储。
+              邮箱配置（含密码/API Key）将持久保存在此浏览器本机，采用浏览器本地存储，不加密且不会同步到其它设备；导出备份仍会排除密钥。请勿在公用设备保存。
             </span>
             <div className="flex items-center gap-2 self-end sm:self-auto">
               <button

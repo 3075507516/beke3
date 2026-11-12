@@ -23,6 +23,7 @@ interface Env {
   SMTP_SECURITY?: string;
   SMTP_USER?: string;
   SMTP_PASS?: string;
+  ADMIN_SESSION_SECRET?: string;
   VERIFY_CODE_LENGTH?: string;
   VERIFY_EMAIL_SUBJECT?: string;
   VERIFY_EMAIL_TEMPLATE?: string;
@@ -169,6 +170,90 @@ async function consumeStoredCode(env: any, email: string): Promise<void> {
   }
 }
 
+function base64UrlEncode(bytes: Uint8Array): string {
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+async function createAdminSessionToken(env: any): Promise<string> {
+  const secret = getAdminSessionSecret(env);
+  if (!secret) return '';
+  const payload = base64UrlEncode(new TextEncoder().encode(JSON.stringify({ role: 'admin', exp: Date.now() + 12 * 60 * 60 * 1000 })));
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const signature = new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(payload)));
+  return `${payload}.${base64UrlEncode(signature)}`;
+}
+
+function getConfiguredAdminPassword(env: any): string {
+  const password = String(env.ADMIN_PASSWORD || '').trim();
+  return password.length < 12 || ['123456', 'fox3admin2026'].includes(password) ? '' : password;
+}
+
+function getAdminSessionSecret(env: any): string {
+  const configuredSecret = String(env.ADMIN_SESSION_SECRET || '').trim();
+  if (configuredSecret) return configuredSecret.length >= 32 ? configuredSecret : '';
+  const fallbackPassword = getConfiguredAdminPassword(env);
+  return fallbackPassword.length >= 32 ? fallbackPassword : '';
+}
+
+async function hasAdminSession(request: Request, env: any): Promise<boolean> {
+  const secret = getAdminSessionSecret(env);
+  const token = request.headers.get('Authorization')?.replace(/^Bearer\s+/i, '') || '';
+  if (!secret || !token) return false;
+  const [payload, signature, extra] = token.split('.');
+  if (!payload || !signature || extra) return false;
+  try {
+    const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['verify']);
+    const signatureBytes = Uint8Array.from(atob(signature.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - signature.length % 4) % 4)), ch => ch.charCodeAt(0));
+    const valid = await crypto.subtle.verify('HMAC', key, signatureBytes, new TextEncoder().encode(payload));
+    if (!valid) return false;
+    const payloadBytes = Uint8Array.from(atob(payload.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - payload.length % 4) % 4)), ch => ch.charCodeAt(0));
+    const claims = JSON.parse(new TextDecoder().decode(payloadBytes));
+    return claims.role === 'admin' && Number(claims.exp) > Date.now();
+  } catch {
+    return false;
+  }
+}
+
+async function hashUserPassword(password: string): Promise<string> {
+  const iterations = 120_000;
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
+  const bits = new Uint8Array(await crypto.subtle.deriveBits({ name: 'PBKDF2', salt, iterations, hash: 'SHA-256' }, key, 256));
+  return `pbkdf2$${iterations}$${base64UrlEncode(salt)}$${base64UrlEncode(bits)}`;
+}
+
+async function verifyUserPassword(db: any, userRow: any, password: string): Promise<boolean> {
+  const stored = String(userRow?.password || '');
+  if (!stored.startsWith('pbkdf2$')) {
+    if (stored !== password) return false;
+    const upgraded = await hashUserPassword(password);
+    await db.prepare('UPDATE fox3_users SET password = ? WHERE id = ?').bind(upgraded, userRow.id).run();
+    return true;
+  }
+  try {
+    const [, rounds, saltValue, hashValue] = stored.split('$');
+    const saltBase64 = saltValue.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - saltValue.length % 4) % 4);
+    const hashBase64 = hashValue.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - hashValue.length % 4) % 4);
+    const salt = Uint8Array.from(atob(saltBase64), ch => ch.charCodeAt(0));
+    const expected = Uint8Array.from(atob(hashBase64), ch => ch.charCodeAt(0));
+    const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
+    const actual = new Uint8Array(await crypto.subtle.deriveBits({ name: 'PBKDF2', salt, iterations: Number(rounds), hash: 'SHA-256' }, key, expected.length * 8));
+    if (actual.length !== expected.length) return false;
+    let mismatch = 0;
+    for (let i = 0; i < actual.length; i++) mismatch |= actual[i] ^ expected[i];
+    return mismatch === 0;
+  } catch {
+    return false;
+  }
+}
+
+function applyFileSafetyHeaders(headers: Headers): void {
+  headers.set('X-Content-Type-Options', 'nosniff');
+  headers.set('Content-Security-Policy', "default-src 'none'; sandbox");
+}
+
 export const onRequest = async (context: any) => {
   const { request } = context;
   const rawEnv: Env = context.env || {};
@@ -193,17 +278,34 @@ export const onRequest = async (context: any) => {
     return new Response(null, { headers });
   }
 
+  if (path === '/auth/session' && request.method === 'GET') {
+    const authenticated = await hasAdminSession(request, env);
+    if (!authenticated) {
+      return new Response(JSON.stringify({ success: false, authenticated: false, error: '管理员会话无效或已过期' }), {
+        status: 401,
+        headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
+      });
+    }
+    const username = (env.ADMIN_USERNAME || 'fox').trim().toLowerCase();
+    return new Response(JSON.stringify({
+      success: true,
+      authenticated: true,
+      user: { id: 'user_fox_admin', username, email: 'service@whitefox.blog', role: 'admin', createdAt: Date.now(), status: 'active' }
+    }), { headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+  }
+
   // Admin credentials verification & backend variable resolver endpoint
   // Ensures single admin uniqueness. Reads ADMIN_PASSWORD and ADMIN_USERNAME from dashboard/environment variables.
   if (path === '/admin/config' || path === '/auth/admin') {
     const defaultAdminName = (env.ADMIN_USERNAME || 'fox').trim().toLowerCase();
-    const hasConfiguredPassword = Boolean(env.ADMIN_PASSWORD);
+    const hasConfiguredPassword = Boolean(getConfiguredAdminPassword(env));
 
     if (request.method === 'GET') {
       return new Response(JSON.stringify({
         success: true,
         adminUsername: defaultAdminName,
         isCustomPasswordConfigured: hasConfiguredPassword,
+        isSessionSecretConfigured: Boolean(getAdminSessionSecret(env)),
         singleAdminEnforced: true,
         message: `单一管理员唯一性已生效，仅允许唯一超级管理员【${defaultAdminName}】`,
       }), {
@@ -216,9 +318,7 @@ export const onRequest = async (context: any) => {
         const body = await request.json();
         const { username, password } = body;
 
-        // If backend environment variable ADMIN_PASSWORD is set, strictly verify against it
-        // Default super administrator password is explicitly 123456 as specified by user
-        const validPassword = (env.ADMIN_PASSWORD ? env.ADMIN_PASSWORD.trim() : '123456');
+        const validPassword = getConfiguredAdminPassword(env);
         const validUser = defaultAdminName.trim().toLowerCase();
 
         const inputUser = (username || '').trim().toLowerCase();
@@ -232,12 +332,15 @@ export const onRequest = async (context: any) => {
           inputUser === 'service@whitefox.blog' ||
           !inputUser; // Allow direct password verification for admin endpoint
 
-        const isMatch = isAdminUser && (inputPass === validPassword || inputPass === '123456' || inputPass === 'fox3admin2026');
+        const credentialsMatch = Boolean(validPassword) && isAdminUser && inputPass === validPassword;
+        const sessionToken = credentialsMatch ? await createAdminSessionToken(env) : '';
+        const isMatch = credentialsMatch && Boolean(sessionToken);
 
         return new Response(JSON.stringify({
           success: isMatch,
           adminUsername: defaultAdminName,
           authenticated: isMatch,
+          sessionToken: sessionToken || undefined,
           user: isMatch ? {
             id: 'user_fox_admin',
             username: defaultAdminName,
@@ -246,7 +349,7 @@ export const onRequest = async (context: any) => {
             createdAt: Date.now(),
             status: 'active',
           } : null,
-          message: isMatch ? '管理员身份鉴权成功' : '管理员账号或密码不正确',
+          message: isMatch ? '管理员身份鉴权成功' : credentialsMatch ? '请在部署端设置至少 32 个字符的随机 ADMIN_SESSION_SECRET' : '管理员账号或密码不正确',
         }), {
           headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
         });
@@ -266,7 +369,7 @@ export const onRequest = async (context: any) => {
       const { account, password } = body;
 
       const validAdminName = (env.ADMIN_USERNAME || 'fox').trim().toLowerCase();
-      const validAdminPass = (env.ADMIN_PASSWORD ? env.ADMIN_PASSWORD.trim() : '123456');
+      const validAdminPass = getConfiguredAdminPassword(env);
 
       const inputAccount = (account || '').trim().toLowerCase();
       const inputPass = (password || '').trim();
@@ -278,10 +381,18 @@ export const onRequest = async (context: any) => {
         inputAccount === 'admin' ||
         inputAccount === 'service@whitefox.blog';
 
-      if (isAdminAccount && (inputPass === validAdminPass || inputPass === '123456' || inputPass === 'fox3admin2026')) {
+      if (isAdminAccount && validAdminPass && inputPass === validAdminPass) {
+        const sessionToken = await createAdminSessionToken(env);
+        if (!sessionToken) {
+          return new Response(JSON.stringify({ success: false, authenticated: false, message: '请在部署端设置至少 32 个字符的随机 ADMIN_SESSION_SECRET' }), {
+            status: 503,
+            headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
+          });
+        }
         return new Response(JSON.stringify({
           success: true,
           authenticated: true,
+          sessionToken,
           user: {
             id: 'user_fox_admin',
             username: validAdminName,
@@ -317,7 +428,13 @@ export const onRequest = async (context: any) => {
           ).bind(inputAccount, inputAccount).first();
 
           if (userRow) {
-            if (userRow.password === inputPass) {
+            if (userRow.role === 'admin') {
+              return new Response(JSON.stringify({ success: false, authenticated: false, message: '管理员账号必须通过部署端 ADMIN_PASSWORD 验证' }), {
+                status: 401,
+                headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
+              });
+            }
+            if (await verifyUserPassword(env.DB, userRow, inputPass)) {
               return new Response(JSON.stringify({
                 success: true,
                 authenticated: true,
@@ -379,12 +496,9 @@ export const onRequest = async (context: any) => {
         return new Response(JSON.stringify({ success: false, error: '验证码服务未配置 Cloudflare D1 或 KV，当前无法安全发送和校验验证码' }), { status: 503, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
       }
 
-      const clientEmailSettings = body.clientEmailSettings || {};
-      if (clientEmailSettings.enabled === false) {
-        return new Response(JSON.stringify({ success: false, error: '发信通道已停用' }), { status: 503, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
-      }
-      const settings = getOutboundSettings(clientEmailSettings, env);
-      const codeLength = Math.min(8, Math.max(4, Number(env.VERIFY_CODE_LENGTH || clientEmailSettings.verificationCodeLength) || 6));
+      // Public registration uses server-side settings only. Never accept SMTP/API secrets from visitors.
+      const settings = getOutboundSettings({}, env);
+      const codeLength = Math.min(8, Math.max(4, Number(env.VERIFY_CODE_LENGTH) || 6));
       const code = createVerificationCode(codeLength);
       const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
       const store = await reserveVerificationCode(env, email, ip, code);
@@ -393,8 +507,8 @@ export const onRequest = async (context: any) => {
       }
       const templateValues: Record<string, string> = { code, username: username || '用户', email };
       const render = (value: unknown, fallback: string) => String(value || fallback).replace(/\{\{(code|username|email)\}\}/g, (_match, key) => templateValues[key] || '');
-      const subject = render(env.VERIFY_EMAIL_SUBJECT || clientEmailSettings.verificationEmailSubject, '【fox3 博客】注册验证码：{{code}}').replace(/[\r\n]+/g, ' ').slice(0, 180);
-      const text = render(env.VERIFY_EMAIL_TEMPLATE || clientEmailSettings.verificationEmailTemplate, '您好 {{username}}，您的注册验证码是 {{code}}。验证码 10 分钟内有效；若非本人操作，请忽略此邮件。').slice(0, 10000);
+      const subject = render(env.VERIFY_EMAIL_SUBJECT, '【fox3 博客】注册验证码：{{code}}').replace(/[\r\n]+/g, ' ').slice(0, 180);
+      const text = render(env.VERIFY_EMAIL_TEMPLATE, '您好 {{username}}，您的注册验证码是 {{code}}。验证码 10 分钟内有效；若非本人操作，请忽略此邮件。').slice(0, 10000);
       const html = `<div style="font-family:sans-serif;white-space:pre-wrap;line-height:1.7">${escapeHtml(text)}</div>`;
 
       const result = await dispatchEmail(settings, { to: email, subject, text, html });
@@ -508,10 +622,11 @@ export const onRequest = async (context: any) => {
             return new Response(JSON.stringify({ success: false, error: '该用户名或邮箱已被注册' }), { status: 409, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
           }
 
+          const passwordHash = await hashUserPassword(inputPass);
           await env.DB.prepare(
             `INSERT INTO fox3_users (id, username, email, password, role, createdAt, status)
              VALUES (?, ?, ?, ?, ?, ?, ?)`
-          ).bind(id || `user_${Date.now()}`, inputUser, inputEmail, inputPass, assignedRole, Date.now(), 'active').run();
+          ).bind(id || `user_${Date.now()}`, inputUser, inputEmail, passwordHash, assignedRole, Date.now(), 'active').run();
         } catch (dbErr: any) {
           console.warn('[Auth] Registration persistence failed:', dbErr?.message || 'database error');
           return new Response(JSON.stringify({ success: false, error: '注册信息无法保存到数据库，请稍后重试' }), { status: 503, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
@@ -547,7 +662,7 @@ export const onRequest = async (context: any) => {
   }
 
   // Health check & genuine connectivity status indicator
-  // Displays online (channelOnline: true) when DB or R2_BUCKET is actually bound and live
+  // channelOnline means at least one primary Cloudflare service (D1 or R2) passed its probe.
   if (path === '/status' || path === '') {
     let d1Healthy = false;
     let r2Healthy = false;
@@ -594,8 +709,8 @@ export const onRequest = async (context: any) => {
         kv: kvHealthy,
       },
       message: channelOnline
-        ? 'Cloudflare D1/R2 服务通道已正常在线并完成连通探测'
-        : '未检测到活跃 D1/R2 绑定，当前运行在本地离线/本地存储模式',
+        ? '至少一个 D1/R2 资源探测成功；请查看 cloudServices 各项状态，单项能力取决于对应绑定'
+        : 'D1 与 R2 均未通过探测；服务端云存储功能不可用',
       timestamp: Date.now(),
     }), {
       headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
@@ -606,6 +721,9 @@ export const onRequest = async (context: any) => {
   // Allows device A to push records, and device B to poll updates in real-time.
   // Prefer D1 to avoid exhausting the daily KV write allowance; retain KV as fallback.
   if (path.startsWith('/sync/')) {
+    if (!await hasAdminSession(request, env)) {
+      return new Response(JSON.stringify({ success: false, error: '云端共享同步需要有效的管理员会话' }), { status: 401, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+    }
     const syncKey = path.replace('/sync/', '');
 
     // Initialize D1 table if DB is available
@@ -709,10 +827,14 @@ export const onRequest = async (context: any) => {
     }
   }
 
-  // Universal Multi-Cloud File Upload Handler (R2 -> D1 -> KV -> Memory Fallback)
-  // Ensures files can be uploaded and accessed cross-device even if R2 is not bound!
+  // Public file uploads support blog/media publishing; apply strict size and active-content limits.
   if (path === '/upload' && request.method === 'POST') {
     try {
+      const maxUploadBytes = 90 * 1024 * 1024;
+      const contentLength = Number(request.headers.get('content-length') || 0);
+      if (contentLength > maxUploadBytes + 1024 * 1024) {
+        return new Response(JSON.stringify({ success: false, error: '上传请求超过 90 MB 限制' }), { status: 413, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+      }
       const formData = await request.formData();
       const file = formData.get('file') as File;
       if (!file) {
@@ -721,8 +843,22 @@ export const onRequest = async (context: any) => {
           headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
         });
       }
+      if (file.size > maxUploadBytes) {
+        return new Response(JSON.stringify({ success: false, error: '单个文件不能超过 90 MB' }), { status: 413, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+      }
+      if (/\.(html?|xhtml|svg|xml|js|mjs|cjs|wasm|php|phtml|exe|dll|bat|cmd|sh)$/i.test(file.name) || /^(text\/html|application\/xhtml\+xml|image\/svg\+xml|text\/xml|application\/xml|application\/(javascript|ecmascript|wasm|x-msdownload)|text\/javascript)/i.test(file.type)) {
+        return new Response(JSON.stringify({ success: false, error: '不接受可执行网页、脚本或程序文件' }), { status: 415, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+      }
 
-      const key = `${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
+      const canUseD1Fallback = file.size <= 1024 * 1024 && Boolean(env.DB);
+      const canUseKvFallback = file.size <= 18 * 1024 * 1024 && Boolean(env.KV);
+      const canUseMemoryFallback = file.size <= 4 * 1024 * 1024;
+      if (!env.R2_BUCKET && !canUseD1Fallback && !canUseKvFallback && !canUseMemoryFallback) {
+        return new Response(JSON.stringify({ success: false, error: '该文件大小需绑定 Cloudflare R2；D1/KV/内存回退无法安全保存此文件' }), { status: 503, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+      }
+
+      const safeFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 150) || 'upload.bin';
+      const key = `${Date.now()}-${crypto.randomUUID()}-${safeFileName}`;
       const contentType = file.type || 'application/octet-stream';
       let storedTarget = 'none';
 
@@ -747,7 +883,7 @@ export const onRequest = async (context: any) => {
 
       // Convert file buffer to base64 if needed for D1/KV/Memory
       let base64Data = '';
-      if (storedTarget === 'none') {
+      if (storedTarget === 'none' && (canUseD1Fallback || canUseKvFallback || canUseMemoryFallback)) {
         const arrayBuf = await file.arrayBuffer();
         let binary = '';
         const bytes = new Uint8Array(arrayBuf);
@@ -759,7 +895,7 @@ export const onRequest = async (context: any) => {
       }
 
       // 2. Secondary: Cloudflare D1 SQLite database (fox3_files table)
-      if (storedTarget === 'none' && env.DB) {
+      if (storedTarget === 'none' && canUseD1Fallback) {
         try {
           await env.DB.prepare(
             `CREATE TABLE IF NOT EXISTS fox3_files (
@@ -783,7 +919,7 @@ export const onRequest = async (context: any) => {
       }
 
       // 3. Tertiary: Cloudflare KV
-      if (storedTarget === 'none' && env.KV) {
+      if (storedTarget === 'none' && canUseKvFallback) {
         try {
           await env.KV.put(`fox3_file_${key}`, JSON.stringify({
             name: file.name,
@@ -799,7 +935,7 @@ export const onRequest = async (context: any) => {
       }
 
       // 4. In-Memory Edge Cache Fallback
-      if (storedTarget === 'none') {
+      if (storedTarget === 'none' && canUseMemoryFallback) {
         if (!(globalThis as any).__fox3_file_store) {
           (globalThis as any).__fox3_file_store = {};
         }
@@ -811,6 +947,10 @@ export const onRequest = async (context: any) => {
           uploadedAt: Date.now()
         };
         storedTarget = 'memory';
+      }
+
+      if (storedTarget === 'none') {
+        return new Response(JSON.stringify({ success: false, error: '远程存储不可用，文件未保存；请检查 R2/D1/KV 绑定和额度' }), { status: 503, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
       }
 
       const publicUrl = `/api/files/${key}`;
@@ -844,6 +984,7 @@ export const onRequest = async (context: any) => {
         const object = await env.R2_BUCKET.get(key);
         if (object) {
           const responseHeaders = new Headers(headers);
+          applyFileSafetyHeaders(responseHeaders);
           object.writeHttpMetadata(responseHeaders);
           responseHeaders.set('etag', object.httpEtag);
           responseHeaders.set('Cache-Control', 'public, max-age=31536000, immutable');
@@ -872,6 +1013,7 @@ export const onRequest = async (context: any) => {
             bytes[i] = binaryStr.charCodeAt(i);
           }
           const responseHeaders = new Headers(headers);
+          applyFileSafetyHeaders(responseHeaders);
           responseHeaders.set('Content-Type', row.type || 'application/octet-stream');
           responseHeaders.set('Content-Length', String(len));
           responseHeaders.set('Cache-Control', 'public, max-age=31536000, immutable');
@@ -898,6 +1040,7 @@ export const onRequest = async (context: any) => {
               bytes[i] = binaryStr.charCodeAt(i);
             }
             const responseHeaders = new Headers(headers);
+            applyFileSafetyHeaders(responseHeaders);
             responseHeaders.set('Content-Type', fileMeta.type || 'application/octet-stream');
             responseHeaders.set('Content-Length', String(len));
             responseHeaders.set('Cache-Control', 'public, max-age=31536000, immutable');
@@ -921,6 +1064,7 @@ export const onRequest = async (context: any) => {
         bytes[i] = binaryStr.charCodeAt(i);
       }
       const responseHeaders = new Headers(headers);
+      applyFileSafetyHeaders(responseHeaders);
       responseHeaders.set('Content-Type', fileMeta.type || 'application/octet-stream');
       responseHeaders.set('Content-Length', String(len));
       responseHeaders.set('Cache-Control', 'public, max-age=31536000, immutable');
@@ -946,7 +1090,51 @@ export const onRequest = async (context: any) => {
   }
 
   // Send an email through the selected SMTP/API provider; never claim success on local-only fallback.
+  if (path === '/mail/test' && request.method === 'POST') {
+    if (!await hasAdminSession(request, env)) {
+      return new Response(JSON.stringify({ success: false, error: '邮件连通测试需要管理员重新登录' }), { status: 401, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+    }
+    try {
+      if (!env.DB) {
+        return new Response(JSON.stringify({ success: false, error: '后台邮件测试需要绑定 D1 以执行防滥用限流' }), { status: 503, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+      }
+      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS fox3_mail_test_rates (ipHash TEXT PRIMARY KEY, expiresAt INTEGER NOT NULL)`).run();
+      const ipHash = await hashRateLimitIp(request.headers.get('CF-Connecting-IP') || 'unknown');
+      const now = Date.now();
+      await env.DB.prepare('DELETE FROM fox3_mail_test_rates WHERE ipHash = ? AND expiresAt <= ?').bind(ipHash, now).run();
+      const reservation = await env.DB.prepare('INSERT OR IGNORE INTO fox3_mail_test_rates (ipHash, expiresAt) VALUES (?, ?)').bind(ipHash, now + 60_000).run();
+      if (Number(reservation?.meta?.changes || 0) === 0) {
+        return new Response(JSON.stringify({ success: false, error: '测试邮件每分钟仅允许一次，请稍后再试' }), { status: 429, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+      }
+
+      const body = await request.json() as any;
+      const source = body.source === 'backend' ? 'backend' : 'frontend';
+      const settings = source === 'backend'
+        ? getOutboundSettings({}, env)
+        : getOutboundSettings(body.clientEmailSettings || {}, {});
+      const to = normalizeEmail(settings.senderEmail || '');
+      if (!/^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/.test(to)) {
+        return new Response(JSON.stringify({ success: false, source, error: source === 'backend' ? '后台 MAIL_SENDER/SMTP 发件人地址未正确配置' : '前台发件人邮箱不是有效地址' }), { status: 400, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+      }
+      const result = await dispatchEmail(settings, {
+        to,
+        subject: 'fox3 邮件连通测试',
+        text: `这是一封 fox3 ${source === 'backend' ? '后台环境变量' : '前台邮箱配置'}的连通测试邮件。收到本邮件说明邮件服务已接受投递请求。`,
+        html: `<p>这是一封 fox3 ${source === 'backend' ? '后台环境变量' : '前台邮箱配置'}的连通测试邮件。</p><p>收到本邮件说明邮件服务已接受投递请求。</p>`,
+      });
+      return new Response(JSON.stringify({ success: result.success, source, provider: result.provider, recipient: to, error: result.error || undefined }), {
+        status: result.success ? 200 : 502,
+        headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' },
+      });
+    } catch (err: any) {
+      return new Response(JSON.stringify({ success: false, error: err?.message || '邮件连通测试失败' }), { status: 500, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+    }
+  }
+
   if (path === '/mail/send' && request.method === 'POST') {
+    if (!await hasAdminSession(request, env)) {
+      return new Response(JSON.stringify({ success: false, delivered: false, error: '发送邮件需要有效的管理员会话，请重新登录' }), { status: 401, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+    }
     try {
       const body = await request.json() as any;
       const { subject, html, text, type, clientEmailSettings } = body;
@@ -959,7 +1147,9 @@ export const onRequest = async (context: any) => {
         return new Response(JSON.stringify({ success: false, error: '收件人必须是有效邮箱地址' }), { status: 400, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
       }
 
-      const settings = getOutboundSettings(clientEmailSettings || {}, env);
+      const settings = body.settingsSource === 'backend'
+        ? getOutboundSettings({}, env)
+        : getOutboundSettings(clientEmailSettings || {}, {});
       const mailSubject = String(subject || 'fox3 博客系统通知').replace(/[\r\n]+/g, ' ').slice(0, 180);
       const mailText = typeof text === 'string' ? text.slice(0, 100000) : '';
       const mailHtml = typeof html === 'string' ? html.slice(0, 150000) : undefined;
@@ -984,10 +1174,6 @@ export const onRequest = async (context: any) => {
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };
-      if (env.KV) {
-        try { await env.KV.put(`mail_${mailRecord.id}`, JSON.stringify(mailRecord), { expirationTtl: 86400 * 7 }); } catch {}
-      }
-
       return new Response(JSON.stringify({
         success: true,
         delivered: true,
@@ -1019,14 +1205,17 @@ export const onRequest = async (context: any) => {
       outbound: {
         configured: outboundConfigured,
         provider: outboundSettings.provider,
-        status: outboundConfigured ? 'configured' : 'unconfigured',
+        verified: false,
+        status: outboundConfigured ? 'configured_unverified' : 'unconfigured',
         senderEmail: outboundSettings.senderEmail || '',
       },
       inbound: {
         configured: inboundConfigured,
+        implemented: false,
+        verified: false,
         routingAddress: env.CF_EMAIL_ROUTING_ADDRESS || 'contact@whitefox.blog',
         destination: env.CF_EMAIL_DESTINATION || 'admin@whitefox.blog',
-        status: inboundConfigured ? 'connected' : 'unconfigured',
+        status: 'not_implemented',
       },
       quotaLimit: 3000,
       timestamp: Date.now(),

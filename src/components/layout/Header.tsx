@@ -89,6 +89,7 @@ export const Header: React.FC<HeaderProps> = ({
   });
 
   const handleLogout = () => {
+    sessionStorage.removeItem('fox3_admin_session');
     setCurrentUser(null);
   };
 

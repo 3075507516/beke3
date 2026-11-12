@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import { X, Mail, Lock, User, ShieldAlert, CheckCircle, AlertCircle, Key, Sparkles, UserCheck, KeyRound } from 'lucide-react';
+import { hashPassword, verifyPassword } from '../../utils/password';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -105,6 +106,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     }
 
     const normalizedInput = inputAccount.toLowerCase();
+    const configuredAdminName = (adminUsername || 'fox').trim().toLowerCase();
+    const isAdminAccount = normalizedInput === configuredAdminName || normalizedInput === 'fox' || normalizedInput === 'admin' || normalizedInput === 'service@whitefox.blog';
+    sessionStorage.removeItem('fox3_admin_session');
 
     // 1. Probe backend Cloudflare Pages Functions endpoint (/api/auth/login or /api/auth/admin)
     try {
@@ -113,10 +117,21 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ account: inputAccount, password: inputPass })
       });
+      const resJson = await resp.json();
+      if (!resp.ok && isAdminAccount && resJson?.message) {
+        setStatusMsg({ type: 'error', text: resJson.message });
+        return;
+      }
       if (resp.ok) {
-        const resJson = await resp.json();
         if (resJson && resJson.success && resJson.user) {
           const remoteUser = resJson.user;
+          if (remoteUser.role === 'admin') {
+            if (!resJson.sessionToken) {
+              setStatusMsg({ type: 'error', text: '管理员登录未取得服务端授权会话，请检查部署端 ADMIN_PASSWORD 和 Functions 配置。' });
+              return;
+            }
+            sessionStorage.setItem('fox3_admin_session', resJson.sessionToken);
+          }
           setCurrentUser(remoteUser);
           // Sync with local users list
           setUsers(prev => {
@@ -132,54 +147,27 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
       // Offline fallback
     }
 
-    // 2. Check Administrator local / deployment matching
-    let savedAdminPass = '123456';
-    try {
-      const rawStored = localStorage.getItem('fox3_admin_password');
-      if (rawStored) {
-        savedAdminPass = rawStored.startsWith('"') ? JSON.parse(rawStored) : rawStored;
-      }
-    } catch {
-      savedAdminPass = '123456';
-    }
-
-    const effectiveAdminName = (adminUsername || 'fox').trim().toLowerCase();
-    const effectiveAdminPass = (adminPassword || savedAdminPass || '123456').trim();
-
-    const isAdminIdentifier =
-      normalizedInput === effectiveAdminName ||
-      normalizedInput === 'fox' ||
-      normalizedInput === 'admin' ||
-      normalizedInput === 'service@whitefox.blog';
-
-    if (isAdminIdentifier) {
-      // Both effectiveAdminPass and standard fallback are supported, ensuring deployer is never locked out
-      const isPassValid =
-        inputPass === effectiveAdminPass ||
-        inputPass === savedAdminPass ||
-        inputPass === '123456' ||
-        inputPass === 'fox3admin2026';
-
-      if (isPassValid) {
-        const adminUser = users.find(u => u.role === 'admin' || u.username.toLowerCase() === effectiveAdminName) || {
+    // A production browser must never turn an offline API error into administrator access.
+    if (isAdminAccount) {
+      const isLocalDevelopment = ['localhost', '127.0.0.1'].includes(window.location.hostname);
+      const localAdminPass = (adminPassword || '').trim();
+      const isKnownWeakDefault = ['123456', 'fox3admin2026'].includes(localAdminPass);
+      if (isLocalDevelopment && localAdminPass.length >= 12 && !isKnownWeakDefault && inputPass === localAdminPass) {
+        const adminUser = users.find(u => u.role === 'admin' || u.username.toLowerCase() === configuredAdminName) || {
           id: 'user_fox_admin',
-          username: effectiveAdminName,
+          username: configuredAdminName,
           email: 'service@whitefox.blog',
           role: 'admin' as const,
           createdAt: Date.now(),
           status: 'active' as const,
         };
         setCurrentUser({ ...adminUser, role: 'admin' });
-        setStatusMsg({ type: 'success', text: `超级管理员【${effectiveAdminName}】鉴权成功！` });
+        setStatusMsg({ type: 'success', text: `本地开发管理员【${configuredAdminName}】登录成功。` });
         setTimeout(() => { onClose(); }, 500);
         return;
-      } else {
-        setStatusMsg({
-          type: 'error',
-          text: '管理员密码不正确。如通过 Cloudflare 部署，请使用部署变量 ADMIN_PASSWORD 或点击下方重置',
-        });
-        return;
       }
+      setStatusMsg({ type: 'error', text: '管理员远端验证失败。请确认 Cloudflare Pages Functions 已部署，并在后台配置 ADMIN_PASSWORD；离线管理员登录仅允许 localhost 的自定义强密码。' });
+      return;
     }
 
     // 3. Check regular registered users (username OR email matching)
@@ -212,9 +200,22 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
         (matchedUser.email && userPasswords[matchedUser.email]) ||
         (matchedUser.email && userPasswords[matchedUser.email.toLowerCase()]);
 
-      if (recordedPass && recordedPass.trim() !== inputPass) {
+      if (!recordedPass) {
+        setStatusMsg({ type: 'error', text: '该账号没有可验证的本地密码记录，请通过已配置的云端登录服务验证或重新注册。' });
+        return;
+      }
+
+      if (!(await verifyPassword(recordedPass, inputPass))) {
         setStatusMsg({ type: 'error', text: '密码错误，请核对后重试' });
         return;
+      }
+
+      if (recordedPass && !recordedPass.startsWith('pbkdf2$')) {
+        const upgraded = await hashPassword(inputPass);
+        for (const key of [matchedUser.id, matchedUser.username, matchedUser.username.toLowerCase(), matchedUser.email, matchedUser.email.toLowerCase()]) {
+          if (key && userPasswords[key] === recordedPass) userPasswords[key] = upgraded;
+        }
+        localStorage.setItem('fox3_user_passwords', JSON.stringify(userPasswords));
       }
 
       setCurrentUser(matchedUser);
@@ -242,7 +243,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
         body: JSON.stringify({
           email: trimmedEmail,
           username: regUsername.trim(),
-          clientEmailSettings: emailSettings,
         }),
       });
       const data = await readApiJson(resp, '验证码发送接口');
@@ -271,42 +271,23 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
 
     const inputSecret = deploymentSecret.trim();
     const newPass = newAdminPassword.trim();
+    const isLocalDevelopment = ['localhost', '127.0.0.1'].includes(window.location.hostname);
 
-    if (!inputSecret) {
-      setStatusMsg({ type: 'error', text: '请输入部署环境变量 ADMIN_PASSWORD 或初始管理员密码' });
+    if (!isLocalDevelopment) {
+      setStatusMsg({ type: 'error', text: '此操作无法修改 Cloudflare Pages Secret。请在 Cloudflare Dashboard → Pages → Settings → Variables and Secrets 修改 ADMIN_PASSWORD，然后重新部署。' });
       return;
     }
 
-    if (!newPass || newPass.length < 6) {
-      setStatusMsg({ type: 'error', text: '新管理员密码长度至少需 6 位字符' });
+    if (!newPass || newPass.length < 12) {
+      setStatusMsg({ type: 'error', text: '新管理员密码至少需要 12 个字符' });
       return;
     }
 
-    // Validate secret against backend endpoint or local admin secret
-    let verified = false;
-    try {
-      const resp = await fetch('/api/auth/admin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: inputSecret })
-      });
-      if (resp.ok) {
-        const rJson = await resp.json();
-        if (rJson && rJson.authenticated) {
-          verified = true;
-        }
-      }
-    } catch {
-      // Offline probe
-    }
-
-    const effectiveAdminPass = (adminPassword || '123456').trim();
-    if (inputSecret === effectiveAdminPass || inputSecret === '123456' || inputSecret === 'fox3admin2026') {
-      verified = true;
-    }
+    const effectiveAdminPass = (adminPassword || '').trim();
+    const verified = effectiveAdminPass ? inputSecret === effectiveAdminPass : inputSecret === '';
 
     if (!verified) {
-      setStatusMsg({ type: 'error', text: '部署变量验证失败，请输入正确的 ADMIN_PASSWORD' });
+      setStatusMsg({ type: 'error', text: '当前本机管理员密码不正确' });
       return;
     }
 
@@ -322,7 +303,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
       status: 'active' as const,
     };
     setCurrentUser({ ...adminUser, role: 'admin' });
-    setStatusMsg({ type: 'success', text: '管理员密码重置并指定成功！已自动登入超级管理员。' });
+    setStatusMsg({ type: 'success', text: '本机开发管理员密码已更新；此密码不会修改 Cloudflare 部署密码。' });
     setTimeout(() => { onClose(); }, 700);
   };
 
@@ -467,12 +448,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
       const currentPassMap: Record<string, string> = localStorage.getItem('fox3_user_passwords')
         ? JSON.parse(localStorage.getItem('fox3_user_passwords')!)
         : {};
-      currentPassMap[newUser.id] = trimmedPass;
-      currentPassMap[newUser.username] = trimmedPass;
-      currentPassMap[newUser.username.toLowerCase()] = trimmedPass;
+      const passwordHash = await hashPassword(trimmedPass);
+      currentPassMap[newUser.id] = passwordHash;
+      currentPassMap[newUser.username] = passwordHash;
+      currentPassMap[newUser.username.toLowerCase()] = passwordHash;
       if (newUser.email) {
-        currentPassMap[newUser.email] = trimmedPass;
-        currentPassMap[newUser.email.toLowerCase()] = trimmedPass;
+        currentPassMap[newUser.email] = passwordHash;
+        currentPassMap[newUser.email.toLowerCase()] = passwordHash;
       }
       localStorage.setItem('fox3_user_passwords', JSON.stringify(currentPassMap));
     } catch (e) {
@@ -626,7 +608,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                 }}
                 className="text-[11px] text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 underline cursor-pointer"
               >
-                超级管理员忘记密码？点此使用部署变量重置/指定密码
+                超级管理员登录问题？查看部署端 ADMIN_PASSWORD 设置说明
               </button>
             </div>
           </form>
@@ -634,13 +616,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
           /* RESET / SPECIFY ADMIN PASSWORD FORM */
           <form onSubmit={handleResetAdminPassword} className="space-y-4">
             <div className="p-3 rounded-xl bg-sky-50 dark:bg-sky-950/40 border border-sky-200/80 dark:border-sky-900/50 text-xs text-sky-800 dark:text-sky-300">
-              <span className="font-semibold">部署密钥快速通道：</span>
-              输入 Cloudflare 部署环境变量 <code className="font-mono font-bold">ADMIN_PASSWORD</code> 验证后，可立即指定并重置超级管理员全新访问密码。
+              <span className="font-semibold">管理员密码管理：</span>
+              生产环境密码只能在 Cloudflare Pages 的 Variables and Secrets 中更改；本页仅允许 localhost 开发环境设置本机密码。
             </div>
 
             <div>
               <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                部署环境变量 ADMIN_PASSWORD <span className="text-rose-500">*</span>
+                本机当前密码（首次设置可留空）
               </label>
               <div className="relative">
                 <Key className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
@@ -648,9 +630,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                   type="password"
                   value={deploymentSecret}
                   onChange={e => setDeploymentSecret(e.target.value)}
-                  placeholder="输入部署时的 ADMIN_PASSWORD（默认: 123456）"
+                  placeholder="当前本机密码；首次设置可留空"
                   className="w-full pl-9 pr-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 text-slate-800 dark:text-slate-100"
-                  required
                 />
               </div>
             </div>
@@ -665,7 +646,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                   type="password"
                   value={newAdminPassword}
                   onChange={e => setNewAdminPassword(e.target.value)}
-                  placeholder="设置至少 6 位的新密码"
+                  placeholder="设置至少 12 位的新密码"
                   className="w-full pl-9 pr-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 text-slate-800 dark:text-slate-100"
                   required
                 />
@@ -774,6 +755,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                         {countdown > 0 ? `${countdown}s 后重新获取` : '获取验证码'}
                       </button>
                     </div>
+                    <p className="mt-1 text-[10px] text-slate-400">注册验证码使用 Cloudflare Pages 后台发信环境变量；本浏览器保存的 SMTP/API 密钥不会随验证码请求发送。</p>
                   </div>
 
                   <div>
