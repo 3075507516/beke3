@@ -32,6 +32,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   const [regEmail, setRegEmail] = useState('');
   const [verificationCode, setVerificationCode] = useState('');
   const [sentCode, setSentCode] = useState<string | null>(null);
+  const [sentCodeLength, setSentCodeLength] = useState(emailSettings.verificationCodeLength || 6);
   const [countdown, setCountdown] = useState(0);
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -61,6 +62,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
       setRegEmail('');
       setVerificationCode('');
       setSentCode(null);
+      setSentCodeLength(emailSettings.verificationCodeLength || 6);
       setCountdown(0);
       setDeploymentSecret('');
       setNewAdminPassword('');
@@ -203,7 +205,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     }
   };
 
-  // Send email verification code handler: strictly send to external email, NEVER reveal code in page/popup
+  // Send a real verification email; the code stays in the backend KV store.
   const handleSendVerificationCode = async () => {
     const trimmedEmail = regEmail.trim();
     if (!trimmedEmail || !trimmedEmail.includes('@') || !trimmedEmail.includes('.')) {
@@ -224,67 +226,21 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
         }),
       });
       const data = await resp.json();
-      if (data && data.success) {
-        setSentCode(data.code || null);
+      if (resp.ok && data?.success && data?.externalDispatched) {
+        setSentCode('sent');
+        setSentCodeLength(Number(data.codeLength) || emailSettings.verificationCodeLength || 6);
         setCountdown(60);
         setStatusMsg({
           type: 'success',
-          text: `验证码已投递至您的邮箱【${trimmedEmail}】，请前往您的邮箱查收，切勿泄露给他人。`,
+          text: `验证码已发送至您的邮箱【${trimmedEmail}】，请查收邮件。`,
         });
-
-        // Background record in mail data without exposing on frontend popup
-        if (data.mailRecord) {
-          setMails(prev => [data.mailRecord, ...prev.filter(m => m.id !== data.mailRecord.id)]);
-        }
       } else {
-        const localCode = Math.floor(100000 + Math.random() * 900000).toString();
-        setSentCode(localCode);
-        setCountdown(60);
-        setStatusMsg({
-          type: 'success',
-          text: `验证码已投递至您的邮箱【${trimmedEmail}】，请前往邮箱查收邮件。`,
-        });
-        const localMail = {
-          id: `mail_code_${Date.now()}`,
-          folder: 'inbox' as const,
-          recipient: trimmedEmail,
-          sender: emailSettings?.senderEmail || 'service@whitefox.blog',
-          subject: '【fox3 博客】注册验证码通知',
-          body: `您好！您正在申请注册 fox3 博客账号，验证码为：【${localCode}】（10分钟有效）。本站不支持密码找回。`,
-          date: new Date().toISOString().replace('T', ' ').substring(0, 19),
-          read: false,
-          isStarred: false,
-          isCodeVerify: true,
-          code: localCode,
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-        };
-        setMails(prev => [localMail, ...prev]);
+        setSentCode(null);
+        setStatusMsg({ type: 'error', text: data?.error || '邮件发送失败，请检查发信通道配置后重试。' });
       }
-    } catch {
-      const localCode = Math.floor(100000 + Math.random() * 900000).toString();
-      setSentCode(localCode);
-      setCountdown(60);
-      setStatusMsg({
-        type: 'success',
-        text: `验证码已投递至您的邮箱【${trimmedEmail}】，请前往邮箱查收邮件。`,
-      });
-      const localMail = {
-        id: `mail_code_${Date.now()}`,
-        folder: 'inbox' as const,
-        recipient: trimmedEmail,
-        sender: emailSettings?.senderEmail || 'service@whitefox.blog',
-        subject: '【fox3 博客】注册验证码通知',
-        body: `您好！您正在申请注册 fox3 博客账号，验证码为：【${localCode}】（10分钟有效）。本站不支持密码找回。`,
-        date: new Date().toISOString().replace('T', ' ').substring(0, 19),
-        read: false,
-        isStarred: false,
-        isCodeVerify: true,
-        code: localCode,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      };
-      setMails(prev => [localMail, ...prev]);
+    } catch (error: any) {
+      setSentCode(null);
+      setStatusMsg({ type: 'error', text: error?.message || '邮件服务暂不可用，请稍后重试。' });
     }
   };
 
@@ -388,15 +344,27 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
         return;
       }
       if (!sentCode) {
-        setStatusMsg({ type: 'error', text: '请先点击“获取验证码”，并在输入框中填入收到的 6 位验证码！' });
+        setStatusMsg({ type: 'error', text: '请先点击“获取验证码”，并输入邮件中收到的验证码。' });
         return;
       }
-      if (!verificationCode || verificationCode.trim().length !== 6) {
-        setStatusMsg({ type: 'error', text: '请输入收到的 6 位邮箱验证码' });
+      const expectedLength = sentCodeLength || 6;
+      if (!verificationCode || verificationCode.trim().length !== expectedLength) {
+        setStatusMsg({ type: 'error', text: `请输入收到的 ${expectedLength} 位邮箱验证码` });
         return;
       }
-      if (verificationCode.trim() !== sentCode.trim()) {
-        setStatusMsg({ type: 'error', text: '验证码不正确，请重新获取并核对' });
+      try {
+        const verificationResp = await fetch('/api/auth/verify-code', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: trimmedEmail, code: verificationCode.trim() }),
+        });
+        const verificationData = await verificationResp.json();
+        if (!verificationResp.ok || !verificationData?.success) {
+          setStatusMsg({ type: 'error', text: verificationData?.error || '验证码不正确或已过期，请重新获取' });
+          return;
+        }
+      } catch {
+        setStatusMsg({ type: 'error', text: '无法连接验证码服务，请确认服务已部署后重试。' });
         return;
       }
     }
@@ -448,6 +416,32 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
       status: 'active' as const,
     };
 
+    try {
+      const registerResp = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: newUser.id,
+          username: newUser.username,
+          email: trimmedEmail,
+          password: trimmedPass,
+          verificationCode: trimmedEmail ? verificationCode.trim() : undefined,
+        }),
+      });
+      const registerData = await registerResp.json();
+      if (!registerResp.ok || !registerData?.success) {
+        if (trimmedEmail) {
+          setStatusMsg({ type: 'error', text: registerData?.error || '注册失败，请稍后重试。' });
+          return;
+        }
+      }
+    } catch (error: any) {
+      if (trimmedEmail) {
+        setStatusMsg({ type: 'error', text: error?.message || '无法连接注册服务，邮箱注册暂不可用。' });
+        return;
+      }
+    }
+
     // Save password mapping into localStorage
     try {
       const currentPassMap: Record<string, string> = localStorage.getItem('fox3_user_passwords')
@@ -463,23 +457,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
       localStorage.setItem('fox3_user_passwords', JSON.stringify(currentPassMap));
     } catch (e) {
       console.warn('Password persistence error:', e);
-    }
-
-    // Try posting to backend Cloudflare Functions /api/auth/register
-    try {
-      await fetch('/api/auth/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: newUser.id,
-          username: newUser.username,
-          email: newUser.email,
-          password: trimmedPass,
-          role: newUser.role,
-        })
-      });
-    } catch {
-      // Fallback local registration
     }
 
     // If email registration, send welcome notification email to system mailbox
@@ -787,10 +764,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                       <KeyRound className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
                       <input
                         type="text"
-                        maxLength={6}
+                        maxLength={sentCodeLength || 6}
                         value={verificationCode}
                         onChange={e => setVerificationCode(e.target.value.trim())}
-                        placeholder="请输入收到的 6 位验证码"
+                        placeholder={`请输入收到的 ${sentCodeLength || 6} 位验证码`}
                         className="w-full pl-9 pr-4 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-rose-500 text-slate-800 dark:text-slate-100"
                         required
                       />

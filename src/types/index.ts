@@ -168,9 +168,13 @@ export interface EmailSettings {
   apiEndpoint: string;
   smtpHost: string;
   smtpPort: number;
+  smtpSecurity: 'ssl' | 'starttls';
   smtpUser: string;
   smtpPass: string;
   senderEmail: string;
+  verificationCodeLength: number;
+  verificationEmailSubject: string;
+  verificationEmailTemplate: string;
   autoReplyEnabled: boolean;
   rateLimitEnabled: boolean;
   maxDailyEmails: number;

@@ -1,3 +1,5 @@
+import { createVerificationCode, dispatchEmail, escapeHtml, normalizeEmail, type MailProvider, type OutboundMailSettings } from '../mail';
+
 // Cloudflare Pages Functions API Handler
 // Routes: /api/*
 
@@ -9,7 +11,75 @@ interface Env {
   R2?: any;        // Alias for Cloudflare R2 Bucket binding
   BUCKET?: any;    // Alias for Cloudflare R2 Bucket binding
   KV?: any;        // Cloudflare KV Namespace binding
-  FOX3_KV?: any;   // Alias for Cloudflare KV Namespace binding
+  FOX3_KV?: any;   // Alias for KV Namespace binding
+  MAIL_PROVIDER?: string;
+  MAIL_SENDER?: string;
+  MAIL_API_KEY?: string;
+  RESEND_API_KEY?: string;
+  BREVO_API_KEY?: string;
+  SENDGRID_API_KEY?: string;
+  SMTP_HOST?: string;
+  SMTP_PORT?: string;
+  SMTP_SECURITY?: string;
+  SMTP_USER?: string;
+  SMTP_PASS?: string;
+  VERIFY_CODE_LENGTH?: string;
+  VERIFY_EMAIL_SUBJECT?: string;
+  VERIFY_EMAIL_TEMPLATE?: string;
+}
+
+function getOutboundSettings(client: any, env: any): OutboundMailSettings {
+  const smtpHost = (env.SMTP_HOST || client?.smtpHost || '').trim();
+  const providerValue = (env.MAIL_PROVIDER || client?.provider || (smtpHost ? 'smtp' : (env.RESEND_API_KEY || env.MAIL_API_KEY) ? 'resend' : 'smtp')).toLowerCase();
+  const supportedProviders: MailProvider[] = ['smtp', 'resend', 'brevo', 'sendgrid'];
+  const provider = (supportedProviders.includes(providerValue as MailProvider) ? providerValue : 'smtp') as MailProvider;
+  const smtpPort = Number(env.SMTP_PORT || client?.smtpPort || 465);
+  const smtpSecurityValue = String(env.SMTP_SECURITY || client?.smtpSecurity || (smtpPort === 465 ? 'ssl' : 'starttls')).toLowerCase();
+  const smtpSecurity = smtpSecurityValue === 'starttls' ? 'starttls' : 'ssl';
+  const apiKey = provider === 'brevo'
+    ? env.BREVO_API_KEY || client?.apiKey
+    : provider === 'sendgrid'
+      ? env.SENDGRID_API_KEY || client?.apiKey
+      : env.RESEND_API_KEY || env.MAIL_API_KEY || client?.apiKey;
+  const smtpPass = env.SMTP_PASS || client?.smtpPass || (smtpHost === 'smtp.resend.com' ? (env.RESEND_API_KEY || env.MAIL_API_KEY) : '');
+
+  return {
+    provider,
+    apiKey: typeof apiKey === 'string' ? apiKey : '',
+    smtpHost,
+    smtpPort,
+    smtpSecurity,
+    smtpUser: (env.SMTP_USER || client?.smtpUser || '').trim(),
+    smtpPass: typeof smtpPass === 'string' ? smtpPass : '',
+    senderEmail: (env.MAIL_SENDER || client?.senderEmail || '').trim(),
+  };
+}
+
+async function findRegisteredUserEmail(db: any, identity: string): Promise<string | null> {
+  if (!db || !identity) return null;
+  try {
+    const normalized = identity.trim().toLowerCase();
+    const row = await db.prepare(
+      `SELECT id, username, email FROM fox3_users
+       WHERE id = ? OR LOWER(username) = ? OR LOWER(email) = ? LIMIT 1`
+    ).bind(identity.trim(), normalized, normalized).first();
+    return normalizeEmail(row?.email) || null;
+  } catch {
+    return null;
+  }
+}
+
+async function verifyStoredCode(kv: any, email: string, code: string): Promise<boolean> {
+  const codeKey = `verify_code_${email}`;
+  const attemptKey = `verify_attempt_${email}`;
+  const attempts = Number(await kv.get(attemptKey)) || 0;
+  if (attempts >= 10) return false;
+  const storedCode = await kv.get(codeKey);
+  if (storedCode && code === storedCode) return true;
+  const nextAttempts = attempts + 1;
+  await kv.put(attemptKey, String(nextAttempts), { expirationTtl: 600 });
+  if (nextAttempts >= 10) await kv.delete(codeKey);
+  return false;
 }
 
 export const onRequest = async (context: any) => {
@@ -209,125 +279,92 @@ export const onRequest = async (context: any) => {
     }
   }
 
-  // Email verification code generation and dispatch endpoint
+  // Send a real verification email and keep its code only in KV.
   if (path === '/auth/send-code' && request.method === 'POST') {
     try {
       const body = await request.json() as any;
-      const { email, username, clientEmailSettings } = body;
-
-      const trimmedEmail = (email || '').trim().toLowerCase();
-      if (!trimmedEmail || !trimmedEmail.includes('@') || !trimmedEmail.includes('.')) {
-        return new Response(JSON.stringify({ success: false, error: '请输入有效的邮箱地址' }), {
-          status: 400,
-          headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
-        });
+      const email = normalizeEmail(body.email);
+      const username = String(body.username || '').trim().slice(0, 80);
+      if (!/^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/.test(email)) {
+        return new Response(JSON.stringify({ success: false, error: '请输入有效的邮箱地址' }), { status: 400, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+      }
+      if (!env.KV) {
+        return new Response(JSON.stringify({ success: false, error: '验证码服务未配置 Cloudflare KV，当前无法安全发送和校验验证码' }), { status: 503, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
       }
 
-      // Generate 6-digit random verification code
-      const code = Math.floor(100000 + Math.random() * 900000).toString();
-
-      // Store code in KV or memory
-      if (env.KV) {
-        try {
-          await env.KV.put(`verify_code_${trimmedEmail}`, code, { expirationTtl: 600 }); // 10 minutes
-        } catch (e) {}
+      const rateEmailKey = `mail_rate_email_${encodeURIComponent(email)}`;
+      const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+      const rateIpKey = `mail_rate_ip_${encodeURIComponent(ip)}`;
+      const [emailRate, ipRate] = await Promise.all([env.KV.get(rateEmailKey), env.KV.get(rateIpKey)]);
+      if (emailRate || ipRate) {
+        return new Response(JSON.stringify({ success: false, error: '发送过于频繁，请稍后再试' }), { status: 429, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
       }
+      await Promise.all([
+        env.KV.put(rateEmailKey, '1', { expirationTtl: 60 }),
+        env.KV.put(rateIpKey, '1', { expirationTtl: 20 }),
+      ]);
 
-      const sender = clientEmailSettings?.senderEmail || env.MAIL_SENDER || 'service@whitefox.blog';
-      let externalDispatched = false;
-      let externalProvider = 'none';
-
-      // Attempt dispatch via Resend API / SendGrid if API Key is configured in env or clientEmailSettings
-      const apiKey = clientEmailSettings?.apiKey || env.RESEND_API_KEY || env.MAIL_API_KEY;
-      if (apiKey && apiKey !== '********' && !apiKey.includes('demo')) {
-        try {
-          const res = await fetch('https://api.resend.com/emails', {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${apiKey}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              from: sender,
-              to: [trimmedEmail],
-              subject: `【fox3 博客】注册验证码：${code}`,
-              html: `
-                <div style="font-family:sans-serif;max-width:520px;margin:0 auto;padding:24px;background:#f8fafc;border-radius:16px;">
-                  <h2 style="color:#e11d48;margin-bottom:12px;">fox3 博客系统</h2>
-                  <p style="color:#334155;font-size:14px;">您好${username ? ` <b>${username}</b>` : ''}，您正在申请注册 fox3 博客账号，您的电子邮箱验证码为：</p>
-                  <div style="font-size:32px;letter-spacing:6px;font-weight:bold;color:#e11d48;padding:16px;background:#fff;border-radius:12px;text-align:center;margin:20px 0;border:1px solid #fed7aa;">
-                    ${code}
-                  </div>
-                  <p style="color:#64748b;font-size:12px;line-height:1.6;">验证码有效期为 10 分钟。若非您本人操作，请忽略此邮件。<br/><strong>特别提示：</strong>本站不支持密码找回，请牢记您的账号与密码。</p>
-                </div>
-              `,
-            })
-          });
-          if (res.ok) {
-            externalDispatched = true;
-            externalProvider = 'resend';
-          }
-        } catch (e) {
-          console.warn('[Mail Backend] Send verification code error:', e);
-        }
+      const clientEmailSettings = body.clientEmailSettings || {};
+      if (clientEmailSettings.enabled === false) {
+        return new Response(JSON.stringify({ success: false, error: '发信通道已停用' }), { status: 503, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
       }
+      const settings = getOutboundSettings(clientEmailSettings, env);
+      const codeLength = Math.min(8, Math.max(4, Number(env.VERIFY_CODE_LENGTH || clientEmailSettings.verificationCodeLength) || 6));
+      const code = createVerificationCode(codeLength);
+      const templateValues: Record<string, string> = { code, username: username || '用户', email };
+      const render = (value: unknown, fallback: string) => String(value || fallback).replace(/\{\{(code|username|email)\}\}/g, (_match, key) => templateValues[key] || '');
+      const subject = render(env.VERIFY_EMAIL_SUBJECT || clientEmailSettings.verificationEmailSubject, '【fox3 博客】注册验证码：{{code}}').replace(/[\r\n]+/g, ' ').slice(0, 180);
+      const text = render(env.VERIFY_EMAIL_TEMPLATE || clientEmailSettings.verificationEmailTemplate, '您好 {{username}}，您的注册验证码是 {{code}}。验证码 10 分钟内有效；若非本人操作，请忽略此邮件。').slice(0, 10000);
+      const html = `<div style="font-family:sans-serif;white-space:pre-wrap;line-height:1.7">${escapeHtml(text)}</div>`;
+      const codeKey = `verify_code_${email}`;
+      await env.KV.delete(`verify_attempt_${email}`);
+      await env.KV.put(codeKey, code, { expirationTtl: 600 });
 
-      // Persist to mail record for internal mailbox tracking
-      const mailRecord = {
-        id: `mail_code_${Date.now()}`,
-        folder: 'inbox',
-        recipient: trimmedEmail,
-        sender,
-        subject: `【fox3 博客】注册验证码通知`,
-        body: `您好！您正在注册 fox3 博客账号，验证码为：【${code}】（10分钟内有效）。\n\n特别注意：本站不支持密码找回，请妥善保存您的账号密码。`,
-        date: new Date().toISOString().replace('T', ' ').substring(0, 19),
-        delivered: true,
-        externalDispatched,
-        externalProvider,
-        isCodeVerify: true,
-        code,
-        read: false,
-        isStarred: false,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      };
-
-      if (env.KV) {
-        try {
-          await env.KV.put(`mail_${mailRecord.id}`, JSON.stringify(mailRecord), { expirationTtl: 86400 * 7 });
-        } catch (e) {}
+      const result = await dispatchEmail(settings, { to: email, subject, text, html });
+      if (!result.success) {
+        await Promise.all([env.KV.delete(codeKey), env.KV.delete(rateEmailKey), env.KV.delete(rateIpKey)]);
+        return new Response(JSON.stringify({ success: false, error: result.error || '邮件发送失败，请检查发信设置' }), { status: 502, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
       }
 
       return new Response(JSON.stringify({
         success: true,
-        code, // returned for verification & client storage
-        externalDispatched,
-        provider: externalProvider,
-        mailRecord,
-        message: externalDispatched
-          ? `验证码已成功投递至 ${trimmedEmail}，请查收邮件`
-          : `验证码已生成并同步至邮箱中枢（${trimmedEmail}）`,
-      }), {
-        headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
-      });
+        externalDispatched: true,
+        provider: result.provider,
+        codeLength,
+        message: `验证码已发送至 ${email}，请查收邮件`,
+      }), { headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
     } catch (err: any) {
-      return new Response(JSON.stringify({ success: false, error: err.message }), {
-        status: 500,
-        headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
-      });
+      console.warn('[Mail Backend] Verification email failed:', err?.message || 'unknown error');
+      return new Response(JSON.stringify({ success: false, error: err?.message || '验证码邮件发送失败' }), { status: 500, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+    }
+  }
+
+  // Check a code without returning or consuming it; registration validates it again and consumes it.
+  if (path === '/auth/verify-code' && request.method === 'POST') {
+    try {
+      const body = await request.json() as any;
+      const email = normalizeEmail(body.email);
+      const code = String(body.code || '').trim();
+      if (!env.KV || !email || !code) {
+        return new Response(JSON.stringify({ success: false, error: '验证码不存在或已过期，请重新获取' }), { status: 400, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+      }
+      const valid = await verifyStoredCode(env.KV, email, code);
+      return new Response(JSON.stringify({ success: valid, error: valid ? undefined : '验证码不正确或已过期，请重新获取' }), { status: valid ? 200 : 400, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+    } catch {
+      return new Response(JSON.stringify({ success: false, error: '验证码校验失败' }), { status: 500, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
     }
   }
 
   // Registration endpoint (Option A: strictly forbid registering admin reserved names)
   if (path === '/auth/register' && request.method === 'POST') {
     try {
-      const body = await request.json();
-      const { id, username, email, password } = body;
+      const body = await request.json() as any;
+      const { id, username, email, password, verificationCode } = body;
 
       const validAdminName = (env.ADMIN_USERNAME || 'fox').trim().toLowerCase();
 
       const inputUser = (username || '').trim();
-      const inputEmail = (email || '').trim();
+      const inputEmail = normalizeEmail(email);
       const inputPass = (password || '').trim();
 
       // Forbid registration of reserved administrator names
@@ -343,6 +380,16 @@ export const onRequest = async (context: any) => {
           status: 400,
           headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
         });
+      }
+
+      if (inputEmail) {
+        if (!/^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/.test(inputEmail) || !env.KV) {
+          return new Response(JSON.stringify({ success: false, error: '邮箱注册需要有效邮箱和验证码服务' }), { status: 400, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+        }
+        const validCode = await verifyStoredCode(env.KV, inputEmail, String(verificationCode || '').trim());
+        if (!validCode) {
+          return new Response(JSON.stringify({ success: false, error: '验证码不正确或已过期，请重新获取' }), { status: 400, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+        }
       }
 
       const assignedRole = 'user';
@@ -362,13 +409,27 @@ export const onRequest = async (context: any) => {
             )`
           ).run();
 
+          const existing = await env.DB.prepare(
+            `SELECT id FROM fox3_users WHERE LOWER(username) = ? OR (? <> '' AND LOWER(email) = ?) LIMIT 1`
+          ).bind(inputUser.toLowerCase(), inputEmail, inputEmail).first();
+          if (existing) {
+            return new Response(JSON.stringify({ success: false, error: '该用户名或邮箱已被注册' }), { status: 409, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+          }
+
           await env.DB.prepare(
             `INSERT INTO fox3_users (id, username, email, password, role, createdAt, status)
              VALUES (?, ?, ?, ?, ?, ?, ?)`
           ).bind(id || `user_${Date.now()}`, inputUser, inputEmail, inputPass, assignedRole, Date.now(), 'active').run();
-        } catch (dbErr) {
-          // Allow fallback
+        } catch (dbErr: any) {
+          console.warn('[Auth] Registration persistence failed:', dbErr?.message || 'database error');
+          return new Response(JSON.stringify({ success: false, error: '注册信息无法保存到数据库，请稍后重试' }), { status: 503, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
         }
+      }
+
+      if (inputEmail && env.KV) {
+        try {
+          await Promise.all([env.KV.delete(`verify_code_${inputEmail}`), env.KV.delete(`verify_attempt_${inputEmail}`)]);
+        } catch {}
       }
 
       return new Response(JSON.stringify({
@@ -792,128 +853,69 @@ export const onRequest = async (context: any) => {
     });
   }
 
-  // Real Mail Dispatch / Verification Code Endpoint
-  // Dispatches actual email via Resend API, SendGrid, or records to D1/KV with auto-reply
+  // Send an email through the selected SMTP/API provider; never claim success on local-only fallback.
   if (path === '/mail/send' && request.method === 'POST') {
     try {
       const body = await request.json() as any;
-      const { to, subject, html, text, type, code, clientEmailSettings } = body;
-
-      if (!to) {
-        return new Response(JSON.stringify({ success: false, error: 'Recipient address (to) is required' }), {
-          status: 400,
-          headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
-        });
+      const { subject, html, text, type, clientEmailSettings } = body;
+      let to = normalizeEmail(body.to);
+      if (type === 'admin_reply' && body.recipientIdentity) {
+        const registeredEmail = await findRegisteredUserEmail(env.DB, String(body.recipientIdentity));
+        if (registeredEmail) to = registeredEmail;
+      }
+      if (!/^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/.test(to)) {
+        return new Response(JSON.stringify({ success: false, error: '收件人必须是有效邮箱地址' }), { status: 400, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
       }
 
-      const sender = clientEmailSettings?.senderEmail || env.MAIL_SENDER || 'service@whitefox.blog';
-      let externalDispatched = false;
-      let externalProvider = 'none';
-
-      // 1. Attempt dispatch via modern API providers (Resend, Brevo, SendGrid) or SMTP
-      const provider = clientEmailSettings?.provider || (env.RESEND_API_KEY ? 'resend' : env.SENDGRID_API_KEY ? 'sendgrid' : 'resend');
-      const apiKey = clientEmailSettings?.apiKey || env.RESEND_API_KEY || env.MAIL_API_KEY || env.SENDGRID_API_KEY;
-
-      if (provider === 'brevo' && apiKey && apiKey !== '********' && !apiKey.includes('demo')) {
-        try {
-          const res = await fetch('https://api.brevo.com/v3/smtp/email', {
-            method: 'POST',
-            headers: {
-              'api-key': apiKey,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              sender: { email: sender, name: 'fox3 Blog' },
-              to: [{ email: to }],
-              subject: subject || 'fox3 博客系统通知',
-              htmlContent: html || `<p>${(text || code || '系统信件内容').replace(/\n/g, '<br/>')}</p>`,
-            })
-          });
-          if (res.ok) {
-            externalDispatched = true;
-            externalProvider = 'brevo';
-          }
-        } catch (e) {
-          console.warn('[Mail Backend] Brevo dispatch error:', e);
-        }
-      } else if (apiKey && apiKey !== '********' && !apiKey.includes('demo')) {
-        try {
-          const res = await fetch('https://api.resend.com/emails', {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${apiKey}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              from: sender,
-              to: [to],
-              subject: subject || 'fox3 博客系统验证与通知',
-              html: html || `<div style="font-family:sans-serif;padding:20px;line-height:1.6;color:#333;"><p>${(text || code || '系统信件内容').replace(/\n/g, '<br/>')}</p></div>`,
-            })
-          });
-          if (res.ok) {
-            externalDispatched = true;
-            externalProvider = 'resend';
-          }
-        } catch (e) {
-          console.warn('[Mail Backend] External dispatch error:', e);
-        }
+      const settings = getOutboundSettings(clientEmailSettings || {}, env);
+      const mailSubject = String(subject || 'fox3 博客系统通知').replace(/[\r\n]+/g, ' ').slice(0, 180);
+      const mailText = typeof text === 'string' ? text.slice(0, 100000) : '';
+      const mailHtml = typeof html === 'string' ? html.slice(0, 150000) : undefined;
+      const result = await dispatchEmail(settings, { to, subject: mailSubject, text: mailText, html: mailHtml });
+      if (!result.success) {
+        return new Response(JSON.stringify({ success: false, delivered: false, externalDispatched: false, provider: result.provider, error: result.error || '邮件发送失败' }), { status: 502, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
       }
 
-      // 2. Persist email record to KV / D1 table if available
       const mailRecord = {
         id: `mail_dispatch_${Date.now()}`,
         folder: 'sent',
         recipient: to,
-        sender,
-        subject: subject || (type === 'verify_code' ? `【fox3 博客】注册验证码：${code}` : '系统信件'),
-        body: text || html || `验证码为: ${code}`,
+        sender: settings.senderEmail || env.MAIL_SENDER || '',
+        subject: mailSubject,
+        body: mailText || mailHtml || '',
         date: new Date().toISOString().replace('T', ' ').substring(0, 19),
         delivered: true,
-        externalDispatched,
-        externalProvider,
-        code: code || null,
+        externalDispatched: true,
+        externalProvider: result.provider,
         read: true,
         isStarred: false,
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };
-
       if (env.KV) {
-        try {
-          await env.KV.put(`mail_${mailRecord.id}`, JSON.stringify(mailRecord), { expirationTtl: 86400 * 7 });
-        } catch (e) {}
+        try { await env.KV.put(`mail_${mailRecord.id}`, JSON.stringify(mailRecord), { expirationTtl: 86400 * 7 }); } catch {}
       }
 
       return new Response(JSON.stringify({
         success: true,
         delivered: true,
-        externalDispatched,
-        provider: externalProvider,
+        externalDispatched: true,
+        provider: result.provider,
         mailRecord,
-        message: externalDispatched
-          ? `已通过第三方邮件服务 (${externalProvider}) 成功投递至 ${to}`
-          : `信件已在站内邮件中心生成并成功投递`,
-      }), {
-        headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
-      });
+        message: `已通过 ${result.provider} 成功投递至 ${to}`,
+      }), { headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
     } catch (err: any) {
-      return new Response(JSON.stringify({ success: false, error: err.message }), {
-        status: 500,
-        headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
-      });
+      return new Response(JSON.stringify({ success: false, delivered: false, error: err?.message || '邮件发送失败' }), { status: 500, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
     }
   }
 
   // Mail Service API Status & Configuration Endpoint
   // Reads backend Cloudflare environment variables or D1/KV storage
   if (path === '/mail/status') {
-    const outboundConfigured = Boolean(
-      env.MAIL_API_KEY ||
-      env.RESEND_API_KEY ||
-      env.SENDGRID_API_KEY ||
-      (env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS)
-    );
+    const outboundSettings = getOutboundSettings({}, env);
+    const outboundConfigured = outboundSettings.provider === 'smtp'
+      ? Boolean(outboundSettings.smtpHost && outboundSettings.smtpUser && outboundSettings.smtpPass && outboundSettings.senderEmail)
+      : Boolean(outboundSettings.apiKey && outboundSettings.senderEmail);
     const inboundConfigured = Boolean(
       env.CF_EMAIL_ROUTING_ADDRESS ||
       env.CF_EMAIL_DESTINATION ||
@@ -924,9 +926,9 @@ export const onRequest = async (context: any) => {
       success: true,
       outbound: {
         configured: outboundConfigured,
-        provider: env.RESEND_API_KEY ? 'resend' : env.SENDGRID_API_KEY ? 'sendgrid' : (env.SMTP_HOST ? 'smtp' : 'internal'),
-        status: outboundConfigured ? 'connected' : 'unconfigured',
-        senderEmail: env.MAIL_SENDER || 'service@whitefox.blog',
+        provider: outboundSettings.provider,
+        status: outboundConfigured ? 'configured' : 'unconfigured',
+        senderEmail: outboundSettings.senderEmail || '',
       },
       inbound: {
         configured: inboundConfigured,

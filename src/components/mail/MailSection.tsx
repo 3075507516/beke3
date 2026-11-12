@@ -26,6 +26,7 @@ export const MailSection: React.FC = () => {
     emailSettings,
     updateEmailSettings,
     currentUser,
+    users,
     moveToTrash,
     showToast,
   } = useApp();
@@ -56,6 +57,7 @@ export const MailSection: React.FC = () => {
 
   // New Compose state
   const [recipient, setRecipient] = useState('');
+  const [replyIdentity, setReplyIdentity] = useState('');
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
 
@@ -108,53 +110,71 @@ export const MailSection: React.FC = () => {
 
   const handleSendMail = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!recipient || !subject || !body) return;
+    if ((!recipient && !replyIdentity) || !subject || !body) return;
 
     const sender = emailSettings.senderEmail || 'service@whitefox.blog';
-    const newMail: MailMessage = {
-      id: `mail-${Date.now()}`,
-      folder: 'sent',
-      sender,
-      recipient,
-      subject,
-      body,
-      date: new Date().toISOString().replace('T', ' ').substring(0, 19),
-      read: true,
-      isStarred: false,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-
-    setMails(prev => [newMail, ...prev]);
-    setIsComposing(false);
-    setRecipient('');
-    setSubject('');
-    setBody('');
-    setActiveFolder('sent');
-
-    // Call backend API for real third-party/Cloudflare dispatch
     try {
-      await fetch('/api/mail/send', {
+      const response = await fetch('/api/mail/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           to: recipient,
+          recipientIdentity: replyIdentity || undefined,
           subject,
           text: body,
-          type: 'admin_reply',
+          type: replyIdentity ? 'admin_reply' : 'manual',
           clientEmailSettings: emailSettings,
         })
       });
-      showToast(`信件已成功发送至 ${recipient}`, 'success');
-    } catch (err) {
-      console.warn('[MailSection] Backend dispatch fallback:', err);
-      showToast(`信件已在站内生成并记录`, 'info');
+      const result = await response.json();
+      if (!response.ok || !result?.success || !result?.externalDispatched) {
+        throw new Error(result?.error || '邮件服务未确认投递，请检查发信设置。');
+      }
+      const deliveredTo = result.mailRecord?.recipient || recipient;
+      const newMail: MailMessage = {
+        id: result.mailRecord?.id || `mail-${Date.now()}`,
+        folder: 'sent',
+        sender,
+        recipient: deliveredTo,
+        subject,
+        body,
+        date: new Date().toISOString().replace('T', ' ').substring(0, 19),
+        read: true,
+        isStarred: false,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      setMails(prev => [newMail, ...prev]);
+      setIsComposing(false);
+      setRecipient('');
+      setReplyIdentity('');
+      setSubject('');
+      setBody('');
+      setActiveFolder('sent');
+      showToast(`邮件已实际发送至 ${deliveredTo}`, 'success');
+    } catch (err: any) {
+      showToast(err?.message || '邮件发送失败，请检查 SMTP/API 设置。', 'error');
     }
   };
 
-  const handleReplyMail = () => {
+  const handleReplyMail = async () => {
     if (!selectedMail) return;
-    setRecipient(selectedMail.sender);
+    const identity = selectedMail.sender.trim();
+    const senderEmail = identity.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0] || '';
+    const identityLower = identity.toLowerCase();
+    const localUser = users.find(user =>
+      user.role === 'user' && (
+        user.id.toLowerCase() === identityLower ||
+        user.username.trim().toLowerCase() === identityLower ||
+        user.email.trim().toLowerCase() === identityLower ||
+        (senderEmail && user.email.trim().toLowerCase() === senderEmail.toLowerCase())
+      )
+    );
+    let registeredEmail = localUser?.email && !localUser.email.toLowerCase().endsWith('@user.blog')
+      ? localUser.email
+      : senderEmail;
+    setReplyIdentity(localUser?.id || senderEmail || identity);
+    setRecipient(registeredEmail);
     setSubject(`Re: ${selectedMail.subject}`);
     setBody(`\n\n--- 原始邮件内容 ---\n发件人: ${selectedMail.sender}\n时间: ${selectedMail.date}\n${selectedMail.body}`);
     setIsComposing(true);
@@ -181,7 +201,7 @@ export const MailSection: React.FC = () => {
             <span>站内邮件管理中枢 & Cloudflare Email Routing</span>
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            支持保存第三方 API（Resend/SendGrid/SMTP）、验证码自动回复及收发限制风控开关
+            支持 Resend SMTP/API、Brevo 与 SendGrid 发信，含验证码模板和收发限制设置
           </p>
         </div>
 
@@ -196,7 +216,7 @@ export const MailSection: React.FC = () => {
               }`}
             >
               <span className={`w-2 h-2 rounded-full ${isOutboundConnected ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
-              <span>发信: {isOutboundConnected ? '已连通' : '未连通'}</span>
+              <span>发信: {isOutboundConnected ? '已配置' : '未配置'}</span>
             </span>
 
             <span
@@ -207,7 +227,7 @@ export const MailSection: React.FC = () => {
               }`}
             >
               <span className={`w-2 h-2 rounded-full ${isInboundConnected ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
-              <span>收信: {isInboundConnected ? '已连通' : '未连通'}</span>
+              <span>收信: {isInboundConnected ? '已配置' : '未配置'}</span>
             </span>
           </div>
 
@@ -222,6 +242,7 @@ export const MailSection: React.FC = () => {
           <button
             onClick={() => {
               setRecipient('');
+              setReplyIdentity('');
               setSubject('');
               setBody('');
               setIsComposing(true);
@@ -244,9 +265,10 @@ export const MailSection: React.FC = () => {
               <span>站内发信与收信配置指南 & 后端环境变量说明</span>
             </div>
             <div className="text-slate-600 dark:text-slate-300 leading-relaxed space-y-1">
-              <p><b>1. 前端配置与后端变量双模生效：</b>前端填写的配置直接加密存储于本地并在连通时同步至云端。后端亦可配置 Cloudflare 环境变量（<code>MAIL_API_KEY</code>, <code>SMTP_HOST</code>, <code>CF_EMAIL_ROUTING_ADDRESS</code> 等）。</p>
-              <p><b>2. 发信通道推荐：</b>推荐使用 <b>Resend API</b> (每天免费 100 封，极速到达) 或企业自建 <b>SMTP</b>。填写有效 API Key 或 SMTP 账密后状态灯将变绿。</p>
-              <p><b>3. 收信通道方式：</b>推荐开启 <b>Cloudflare Email Routing</b>，在 Cloudflare 域名后台启用 Email Routing 并配置捕获地址与转发目标，实现 0 成本企业域名收件。</p>
+              <p><b>1. SMTP 设置：</b>Resend 默认使用 <code>smtp.resend.com</code>、端口 <code>465</code>、<b>SSL</b>、用户名 <code>resend</code>，密码填写 Resend API Key；发件域名必须先在 Resend 验证。</p>
+              <p><b>2. 线上部署：</b>SMTP 密码/API Key 不写入浏览器存储，仅在当前页面会话内保留。给所有访客提供注册邮件时，请在 Cloudflare Pages Functions 设置 <code>SMTP_HOST</code>、<code>SMTP_PORT</code>、<code>SMTP_SECURITY</code>、<code>SMTP_USER</code>、<code>SMTP_PASS</code>、<code>MAIL_SENDER</code>，并绑定 KV 验证码存储。</p>
+              <p><b>3. 全站验证码定制：</b>可设置 <code>VERIFY_CODE_LENGTH</code>、<code>VERIFY_EMAIL_SUBJECT</code>、<code>VERIFY_EMAIL_TEMPLATE</code>。模板变量：{'{{code}}'}、{'{{username}}'}、{'{{email}}'}。回复邮件采用注册用户数据库中的真实邮箱。</p>
+              <p><b>4. 收信路由：</b>Cloudflare Email Routing 需在 Cloudflare 域名后台单独开启并设置转发目标；当前收信设置区只保存转发/IMAP 配置，不代表已成功收件。</p>
             </div>
           </div>
 
@@ -273,7 +295,7 @@ export const MailSection: React.FC = () => {
                 <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
                   isOutboundConnected ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'
                 }`}>
-                  {isOutboundConnected ? '● 发信服务连通' : '○ 未连通'}
+                  {isOutboundConnected ? '● 发信参数已填写' : '○ 发信参数未填写'}
                 </span>
               </div>
 
@@ -286,12 +308,10 @@ export const MailSection: React.FC = () => {
                   onChange={e => setFormSettings({ ...formSettings, provider: e.target.value as any })}
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100"
                 >
-                  <option value="resend">Resend API (HTTPS / TLS 1.3 现代加密 / 全球推荐)</option>
-                  <option value="brevo">Brevo API (HTTPS / SSL 高加密通道)</option>
-                  <option value="sendgrid">Twilio SendGrid API (HTTPS / TLS 传输加密)</option>
-                  <option value="mailgun">Mailgun REST API (HTTPS 安全传输)</option>
-                  <option value="ses">Amazon SES (HTTPS / TLS 安全连接)</option>
-                  <option value="smtp">标准 SMTP (SSL/TLS 加密端口 465 / STARTTLS 587)</option>
+                  <option value="smtp">SMTP (SSL 465 / STARTTLS 587)</option>
+                  <option value="resend">Resend API (HTTPS)</option>
+                  <option value="brevo">Brevo API (HTTPS)</option>
+                  <option value="sendgrid">Twilio SendGrid API (HTTPS)</option>
                 </select>
               </div>
 
@@ -319,7 +339,7 @@ export const MailSection: React.FC = () => {
                         type="text"
                         value={formSettings.smtpHost}
                         onChange={e => setFormSettings({ ...formSettings, smtpHost: e.target.value })}
-                        placeholder="smtp.exmail.qq.com 或 smtp.gmail.com"
+                        placeholder="smtp.resend.com"
                         className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 font-mono"
                       />
                     </div>
@@ -340,13 +360,34 @@ export const MailSection: React.FC = () => {
                   <div className="grid grid-cols-2 gap-2">
                     <div>
                       <label className="block text-xs text-slate-500 mb-1">
+                        加密方式 <span className="text-rose-500 font-bold">[必填]</span>
+                      </label>
+                      <select
+                        value={formSettings.smtpSecurity || 'ssl'}
+                        onChange={e => setFormSettings({
+                          ...formSettings,
+                          smtpSecurity: e.target.value as 'ssl' | 'starttls',
+                          smtpPort: e.target.value === 'ssl' ? 465 : 587,
+                        })}
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100"
+                      >
+                        <option value="ssl">SSL / Implicit TLS</option>
+                        <option value="starttls">STARTTLS</option>
+                      </select>
+                    </div>
+                    <p className="self-end text-[10px] text-slate-400 pb-2">Resend 推荐 SSL 465；STARTTLS 通常使用 587。</p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-xs text-slate-500 mb-1">
                         SMTP 账号 / 用户名 <span className="text-rose-500 font-bold">[必填]</span>
                       </label>
                       <input
                         type="text"
                         value={formSettings.smtpUser}
                         onChange={e => setFormSettings({ ...formSettings, smtpUser: e.target.value })}
-                        placeholder="service@whitefox.blog"
+                        placeholder="resend"
                         className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 font-mono"
                       />
                     </div>
@@ -358,7 +399,7 @@ export const MailSection: React.FC = () => {
                         type="password"
                         value={formSettings.smtpPass}
                         onChange={e => setFormSettings({ ...formSettings, smtpPass: e.target.value })}
-                        placeholder="••••••••"
+                        placeholder="Resend API Key（re_...）"
                         className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 font-mono"
                       />
                     </div>
@@ -378,6 +419,39 @@ export const MailSection: React.FC = () => {
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 font-mono"
                 />
               </div>
+
+              <div className="space-y-2 border-t border-slate-100 dark:border-slate-800 pt-4">
+                <h5 className="text-xs font-bold text-slate-700 dark:text-slate-200">注册验证码邮件内容</h5>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">邮件主题（变量：{'{{code}}'}、{'{{username}}'}、{'{{email}}'}）</label>
+                  <input
+                    type="text"
+                    value={formSettings.verificationEmailSubject || '【fox3 博客】注册验证码：{{code}}'}
+                    onChange={e => setFormSettings({ ...formSettings, verificationEmailSubject: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">验证码位数（默认 6 位）</label>
+                  <select
+                    value={formSettings.verificationCodeLength || 6}
+                    onChange={e => setFormSettings({ ...formSettings, verificationCodeLength: Number(e.target.value) })}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100"
+                  >
+                    {[4, 5, 6, 7, 8].map(length => <option key={length} value={length}>{length} 位数字</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">回复正文（变量：{'{{code}}'}、{'{{username}}'}、{'{{email}}'}）</label>
+                  <textarea
+                    rows={5}
+                    value={formSettings.verificationEmailTemplate || ''}
+                    onChange={e => setFormSettings({ ...formSettings, verificationEmailTemplate: e.target.value })}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100"
+                  />
+                  <p className="text-[10px] text-slate-400">验证码由服务端随机生成，验证后即失效。默认模板说明验证码 10 分钟有效。</p>
+                </div>
+              </div>
             </div>
 
             {/* Cloudflare Email Routing & Inbound Routing */}
@@ -389,7 +463,7 @@ export const MailSection: React.FC = () => {
                 <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
                   isInboundConnected ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'
                 }`}>
-                  {isInboundConnected ? '● 收信路由连通' : '○ 未连通'}
+                  {isInboundConnected ? '● 收信参数已填写' : '○ 收信参数未填写'}
                 </span>
               </div>
 
@@ -601,7 +675,7 @@ export const MailSection: React.FC = () => {
           {/* Explicit Save Configuration Button */}
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-4 border-t border-slate-100 dark:border-slate-800">
             <span className="text-xs text-slate-400">
-              [必填项已明确标注] 设置保存后即时持久化到浏览器本地并同步云端 D1 / KV
+              非密钥设置保存到本地；密码/API Key 仅在当前页面会话内保留，不写入备份或浏览器存储。
             </span>
             <div className="flex items-center gap-2 self-end sm:self-auto">
               <button
@@ -609,7 +683,7 @@ export const MailSection: React.FC = () => {
                 onClick={() => {
                   updateEmailSettings(formSettings);
                   setIsSaved(true);
-                  showToast('邮箱配置已成功保存！发信/收信连通状态已更新。', 'success');
+                  showToast('邮箱配置已保存。发信是否连通以实际发送结果为准。', 'success');
                   setTimeout(() => {
                     setIsSaved(false);
                     setShowConfig(false);
@@ -865,9 +939,9 @@ export const MailSection: React.FC = () => {
                   type="email"
                   value={recipient}
                   onChange={e => setRecipient(e.target.value)}
-                  placeholder="recipient@example.com"
+                  placeholder={replyIdentity ? '将使用注册用户资料中的真实邮箱' : 'recipient@example.com'}
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-rose-500"
-                  required
+                  required={!replyIdentity}
                 />
               </div>
 
@@ -902,7 +976,10 @@ export const MailSection: React.FC = () => {
               <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100 dark:border-slate-800">
                 <button
                   type="button"
-                  onClick={() => setIsComposing(false)}
+                  onClick={() => {
+                    setIsComposing(false);
+                    setReplyIdentity('');
+                  }}
                   className="px-4 py-2 text-xs font-medium text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl"
                 >
                   取消

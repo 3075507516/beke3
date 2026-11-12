@@ -398,7 +398,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   );
 
   const [emailSettings, setEmailSettings] = useState<EmailSettings>(() =>
-    loadLocalStorage<EmailSettings>(STORAGE_KEYS.EMAIL_SETTINGS, DEFAULT_EMAIL_SETTINGS)
+    (() => {
+      const saved = loadLocalStorage<Partial<EmailSettings>>(STORAGE_KEYS.EMAIL_SETTINGS, {});
+      return {
+        ...DEFAULT_EMAIL_SETTINGS,
+        ...saved,
+        smtpSecurity: saved.smtpSecurity === 'starttls' || saved.smtpPort === 587 ? 'starttls' : 'ssl',
+        verificationCodeLength: Math.min(8, Math.max(4, Number(saved.verificationCodeLength) || DEFAULT_EMAIL_SETTINGS.verificationCodeLength)),
+        verificationEmailSubject: saved.verificationEmailSubject || DEFAULT_EMAIL_SETTINGS.verificationEmailSubject,
+        verificationEmailTemplate: saved.verificationEmailTemplate || DEFAULT_EMAIL_SETTINGS.verificationEmailTemplate,
+        cfEmailRouting: { ...DEFAULT_EMAIL_SETTINGS.cfEmailRouting, ...(saved.cfEmailRouting || {}) },
+        imapConfig: saved.imapConfig ? { ...DEFAULT_EMAIL_SETTINGS.imapConfig!, ...saved.imapConfig } : DEFAULT_EMAIL_SETTINGS.imapConfig,
+      } as EmailSettings;
+    })()
   );
 
   const [paymentSettings, setPaymentSettings] = useState<PaymentSettings>(() =>
@@ -603,7 +615,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => saveLocalStorage(STORAGE_KEYS.ORDERS, orders), [orders]);
   useEffect(() => saveLocalStorage(STORAGE_KEYS.CHAT_MESSAGES, chatMessages), [chatMessages]);
   useEffect(() => saveLocalStorage(STORAGE_KEYS.SYSTEM_SETTINGS, systemSettings), [systemSettings]);
-  useEffect(() => saveLocalStorage(STORAGE_KEYS.EMAIL_SETTINGS, emailSettings), [emailSettings]);
+  useEffect(() => saveLocalStorage(STORAGE_KEYS.EMAIL_SETTINGS, {
+    ...emailSettings,
+    apiKey: '',
+    smtpPass: '',
+    imapConfig: emailSettings.imapConfig ? { ...emailSettings.imapConfig, pass: '' } : emailSettings.imapConfig,
+  }), [emailSettings]);
   useEffect(() => saveLocalStorage(STORAGE_KEYS.PAYMENT_SETTINGS, paymentSettings), [paymentSettings]);
   useEffect(() => saveLocalStorage(STORAGE_KEYS.WEBDAV_CONFIG, webDavConfig), [webDavConfig]);
   useEffect(() => saveLocalStorage(STORAGE_KEYS.WEBDAV_BACKUPS, webDavBackups), [webDavBackups]);
@@ -1025,7 +1042,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
     if (scope === 'full' || scope === 'settings') {
       backupData.systemSettings = systemSettings;
-      backupData.emailSettings = emailSettings;
+      backupData.emailSettings = {
+        ...emailSettings,
+        apiKey: '',
+        smtpPass: '',
+        imapConfig: emailSettings.imapConfig ? { ...emailSettings.imapConfig, pass: '' } : emailSettings.imapConfig,
+      };
       backupData.paymentSettings = paymentSettings;
       backupData.webDavConfig = webDavConfig;
     }
