@@ -69,7 +69,82 @@ async function findRegisteredUserEmail(db: any, identity: string): Promise<strin
   }
 }
 
-async function verifyStoredCode(kv: any, email: string, code: string): Promise<boolean> {
+async function ensureVerificationTables(db: any): Promise<void> {
+  await db.prepare(`CREATE TABLE IF NOT EXISTS fox3_email_verifications (
+    email TEXT PRIMARY KEY,
+    code TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    expiresAt INTEGER NOT NULL,
+    lastSentAt INTEGER NOT NULL
+  )`).run();
+  await db.prepare(`CREATE TABLE IF NOT EXISTS fox3_email_ip_rates (
+    ipHash TEXT PRIMARY KEY,
+    expiresAt INTEGER NOT NULL
+  )`).run();
+}
+
+async function hashRateLimitIp(ip: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(ip));
+  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+async function reserveVerificationCode(env: any, email: string, ip: string, code: string): Promise<'d1' | 'kv' | null> {
+  const now = Date.now();
+  if (env.DB) {
+    await ensureVerificationTables(env.DB);
+    const ipHash = await hashRateLimitIp(ip);
+    const [emailRow, ipRow] = await Promise.all([
+      env.DB.prepare('SELECT lastSentAt FROM fox3_email_verifications WHERE email = ?').bind(email).first(),
+      env.DB.prepare('SELECT expiresAt FROM fox3_email_ip_rates WHERE ipHash = ?').bind(ipHash).first(),
+    ]);
+    if ((emailRow && now - Number(emailRow.lastSentAt) < 60_000) || (ipRow && Number(ipRow.expiresAt) > now)) return null;
+
+    await env.DB.batch([
+      env.DB.prepare(`INSERT INTO fox3_email_verifications (email, code, attempts, expiresAt, lastSentAt)
+        VALUES (?, ?, 0, ?, ?)
+        ON CONFLICT(email) DO UPDATE SET code = excluded.code, attempts = 0,
+          expiresAt = excluded.expiresAt, lastSentAt = excluded.lastSentAt`)
+        .bind(email, code, now + 600_000, now),
+      env.DB.prepare(`INSERT INTO fox3_email_ip_rates (ipHash, expiresAt) VALUES (?, ?)
+        ON CONFLICT(ipHash) DO UPDATE SET expiresAt = excluded.expiresAt`)
+        .bind(ipHash, now + 60_000),
+    ]);
+    return 'd1';
+  }
+
+  if (!env.KV) return null;
+  const codeKey = `verify_code_${email}`;
+  const attemptKey = `verify_attempt_${email}`;
+  const rateEmailKey = `mail_rate_email_${encodeURIComponent(email)}`;
+  const rateIpKey = `mail_rate_ip_${encodeURIComponent(ip)}`;
+  const [emailRate, ipRate] = await Promise.all([env.KV.get(rateEmailKey), env.KV.get(rateIpKey)]);
+  if (emailRate || ipRate) return null;
+  await Promise.all([
+    env.KV.put(rateEmailKey, '1', { expirationTtl: 60 }),
+    env.KV.put(rateIpKey, '1', { expirationTtl: 60 }),
+  ]);
+  await env.KV.delete(attemptKey);
+  await env.KV.put(codeKey, code, { expirationTtl: 600 });
+  return 'kv';
+}
+
+async function verifyStoredCode(env: any, email: string, code: string): Promise<boolean> {
+  if (env.DB) {
+    await ensureVerificationTables(env.DB);
+    const row = await env.DB.prepare('SELECT code, attempts, expiresAt FROM fox3_email_verifications WHERE email = ?').bind(email).first();
+    if (row) {
+      if (Number(row.expiresAt) <= Date.now() || Number(row.attempts) >= 10 || !row.code) return false;
+      if (code && code === String(row.code)) return true;
+      const nextAttempts = Number(row.attempts) + 1;
+      await env.DB.prepare(`UPDATE fox3_email_verifications
+        SET attempts = ?, code = CASE WHEN ? >= 10 THEN '' ELSE code END
+        WHERE email = ? AND expiresAt > ?`).bind(nextAttempts, nextAttempts, email, Date.now()).run();
+      return false;
+    }
+  }
+
+  if (!env.KV) return false;
+  const kv = env.KV;
   const codeKey = `verify_code_${email}`;
   const attemptKey = `verify_attempt_${email}`;
   const attempts = Number(await kv.get(attemptKey)) || 0;
@@ -80,6 +155,18 @@ async function verifyStoredCode(kv: any, email: string, code: string): Promise<b
   await kv.put(attemptKey, String(nextAttempts), { expirationTtl: 600 });
   if (nextAttempts >= 10) await kv.delete(codeKey);
   return false;
+}
+
+async function consumeStoredCode(env: any, email: string): Promise<void> {
+  if (env.DB) {
+    await ensureVerificationTables(env.DB);
+    const result = await env.DB.prepare(`UPDATE fox3_email_verifications
+      SET code = '', attempts = 10 WHERE email = ?`).bind(email).run();
+    if (Number(result?.meta?.changes || 0) > 0) return;
+  }
+  if (env.KV) {
+    await Promise.all([env.KV.delete(`verify_code_${email}`), env.KV.delete(`verify_attempt_${email}`)]);
+  }
 }
 
 export const onRequest = async (context: any) => {
@@ -279,7 +366,7 @@ export const onRequest = async (context: any) => {
     }
   }
 
-  // Send a real verification email and keep its code only in KV.
+  // Send a real verification email; prefer D1 so KV quotas are reserved for fallback use.
   if (path === '/auth/send-code' && request.method === 'POST') {
     try {
       const body = await request.json() as any;
@@ -288,21 +375,9 @@ export const onRequest = async (context: any) => {
       if (!/^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/.test(email)) {
         return new Response(JSON.stringify({ success: false, error: '请输入有效的邮箱地址' }), { status: 400, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
       }
-      if (!env.KV) {
-        return new Response(JSON.stringify({ success: false, error: '验证码服务未配置 Cloudflare KV，当前无法安全发送和校验验证码' }), { status: 503, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+      if (!env.DB && !env.KV) {
+        return new Response(JSON.stringify({ success: false, error: '验证码服务未配置 Cloudflare D1 或 KV，当前无法安全发送和校验验证码' }), { status: 503, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
       }
-
-      const rateEmailKey = `mail_rate_email_${encodeURIComponent(email)}`;
-      const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
-      const rateIpKey = `mail_rate_ip_${encodeURIComponent(ip)}`;
-      const [emailRate, ipRate] = await Promise.all([env.KV.get(rateEmailKey), env.KV.get(rateIpKey)]);
-      if (emailRate || ipRate) {
-        return new Response(JSON.stringify({ success: false, error: '发送过于频繁，请稍后再试' }), { status: 429, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
-      }
-      await Promise.all([
-        env.KV.put(rateEmailKey, '1', { expirationTtl: 60 }),
-        env.KV.put(rateIpKey, '1', { expirationTtl: 60 }),
-      ]);
 
       const clientEmailSettings = body.clientEmailSettings || {};
       if (clientEmailSettings.enabled === false) {
@@ -311,18 +386,28 @@ export const onRequest = async (context: any) => {
       const settings = getOutboundSettings(clientEmailSettings, env);
       const codeLength = Math.min(8, Math.max(4, Number(env.VERIFY_CODE_LENGTH || clientEmailSettings.verificationCodeLength) || 6));
       const code = createVerificationCode(codeLength);
+      const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
+      const store = await reserveVerificationCode(env, email, ip, code);
+      if (!store) {
+        return new Response(JSON.stringify({ success: false, error: '发送过于频繁，请稍后再试' }), { status: 429, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+      }
       const templateValues: Record<string, string> = { code, username: username || '用户', email };
       const render = (value: unknown, fallback: string) => String(value || fallback).replace(/\{\{(code|username|email)\}\}/g, (_match, key) => templateValues[key] || '');
       const subject = render(env.VERIFY_EMAIL_SUBJECT || clientEmailSettings.verificationEmailSubject, '【fox3 博客】注册验证码：{{code}}').replace(/[\r\n]+/g, ' ').slice(0, 180);
       const text = render(env.VERIFY_EMAIL_TEMPLATE || clientEmailSettings.verificationEmailTemplate, '您好 {{username}}，您的注册验证码是 {{code}}。验证码 10 分钟内有效；若非本人操作，请忽略此邮件。').slice(0, 10000);
       const html = `<div style="font-family:sans-serif;white-space:pre-wrap;line-height:1.7">${escapeHtml(text)}</div>`;
-      const codeKey = `verify_code_${email}`;
-      await env.KV.delete(`verify_attempt_${email}`);
-      await env.KV.put(codeKey, code, { expirationTtl: 600 });
 
       const result = await dispatchEmail(settings, { to: email, subject, text, html });
       if (!result.success) {
-        await Promise.all([env.KV.delete(codeKey), env.KV.delete(rateEmailKey), env.KV.delete(rateIpKey)]);
+        if (store === 'd1') {
+          await env.DB.prepare(`UPDATE fox3_email_verifications SET code = '' WHERE email = ?`).bind(email).run();
+        } else {
+          await Promise.all([
+            env.KV.delete(`verify_code_${email}`),
+            env.KV.delete(`mail_rate_email_${encodeURIComponent(email)}`),
+            env.KV.delete(`mail_rate_ip_${encodeURIComponent(ip)}`),
+          ]);
+        }
         return new Response(JSON.stringify({ success: false, error: result.error || '邮件发送失败，请检查发信设置' }), { status: 502, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
       }
 
@@ -345,10 +430,10 @@ export const onRequest = async (context: any) => {
       const body = await request.json() as any;
       const email = normalizeEmail(body.email);
       const code = String(body.code || '').trim();
-      if (!env.KV || !email || !code) {
+      if ((!env.DB && !env.KV) || !email || !code) {
         return new Response(JSON.stringify({ success: false, error: '验证码不存在或已过期，请重新获取' }), { status: 400, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
       }
-      const valid = await verifyStoredCode(env.KV, email, code);
+      const valid = await verifyStoredCode(env, email, code);
       return new Response(JSON.stringify({ success: valid, error: valid ? undefined : '验证码不正确或已过期，请重新获取' }), { status: valid ? 200 : 400, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
     } catch {
       return new Response(JSON.stringify({ success: false, error: '验证码校验失败' }), { status: 500, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
@@ -390,10 +475,10 @@ export const onRequest = async (context: any) => {
       }
 
       if (inputEmail) {
-        if (!/^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/.test(inputEmail) || !env.KV) {
+        if (!/^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/.test(inputEmail) || (!env.DB && !env.KV)) {
           return new Response(JSON.stringify({ success: false, error: '邮箱注册需要有效邮箱和验证码服务' }), { status: 400, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
         }
-        const validCode = await verifyStoredCode(env.KV, inputEmail, String(verificationCode || '').trim());
+        const validCode = await verifyStoredCode(env, inputEmail, String(verificationCode || '').trim());
         if (!validCode) {
           return new Response(JSON.stringify({ success: false, error: '验证码不正确或已过期，请重新获取' }), { status: 400, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
         }
@@ -433,9 +518,9 @@ export const onRequest = async (context: any) => {
         }
       }
 
-      if (inputEmail && env.KV) {
+      if (inputEmail) {
         try {
-          await Promise.all([env.KV.delete(`verify_code_${inputEmail}`), env.KV.delete(`verify_attempt_${inputEmail}`)]);
+          await consumeStoredCode(env, inputEmail);
         } catch {}
       }
 
@@ -519,7 +604,7 @@ export const onRequest = async (context: any) => {
 
   // Cross-device sync store & retrieve (/api/sync/:key)
   // Allows device A to push records, and device B to poll updates in real-time.
-  // Stores in KV if available, or D1 table `fox3_sync`, or in-memory edge cache.
+  // Prefer D1 to avoid exhausting the daily KV write allowance; retain KV as fallback.
   if (path.startsWith('/sync/')) {
     const syncKey = path.replace('/sync/', '');
 
@@ -538,23 +623,23 @@ export const onRequest = async (context: any) => {
       let data: any = null;
       let fromCloud = false;
 
-      // Check KV
-      if (env.KV) {
+      // Check D1 first because it is the primary persistent store for sync data.
+      if (env.DB) {
         try {
-          const val = await env.KV.get(`fox3_sync_${syncKey}`);
-          if (val) {
-            data = JSON.parse(val);
+          const row = await env.DB.prepare(`SELECT value FROM fox3_sync WHERE key = ?`).bind(syncKey).first();
+          if (row && row.value) {
+            data = JSON.parse(row.value);
             fromCloud = true;
           }
         } catch (e) {}
       }
 
-      // Check D1 if KV didn't return
-      if (!data && env.DB) {
+      // Read legacy KV data only when D1 has no value.
+      if (!data && env.KV) {
         try {
-          const row = await env.DB.prepare(`SELECT value FROM fox3_sync WHERE key = ?`).bind(syncKey).first();
-          if (row && row.value) {
-            data = JSON.parse(row.value);
+          const val = await env.KV.get(`fox3_sync_${syncKey}`);
+          if (val) {
+            data = JSON.parse(val);
             fromCloud = true;
           }
         } catch (e) {}
@@ -587,19 +672,19 @@ export const onRequest = async (context: any) => {
         }
         (globalThis as any).__fox3_memory_sync[syncKey] = payload;
 
-        if (env.KV) {
-          try {
-            await env.KV.put(`fox3_sync_${syncKey}`, stringified, { expirationTtl: 86400 * 90 });
-            syncedToCloud = true;
-          } catch (e) {}
-        }
-
         if (env.DB) {
           try {
             await env.DB.prepare(
               `INSERT INTO fox3_sync (key, value, updatedAt) VALUES (?, ?, ?)
                ON CONFLICT(key) DO UPDATE SET value = excluded.value, updatedAt = excluded.updatedAt`
             ).bind(syncKey, stringified, Date.now()).run();
+            syncedToCloud = true;
+          } catch (e) {}
+        }
+
+        if (!syncedToCloud && env.KV) {
+          try {
+            await env.KV.put(`fox3_sync_${syncKey}`, stringified, { expirationTtl: 86400 * 90 });
             syncedToCloud = true;
           } catch (e) {}
         }
