@@ -363,9 +363,16 @@ export const onRequest = async (context: any) => {
 
       const validAdminName = (env.ADMIN_USERNAME || 'fox').trim().toLowerCase();
 
-      const inputUser = (username || '').trim();
+      const inputUser = typeof username === 'string' ? username.trim() : '';
       const inputEmail = normalizeEmail(email);
-      const inputPass = (password || '').trim();
+      const inputPass = typeof password === 'string' ? password.trim() : '';
+
+      if (inputUser.length < 2) {
+        return new Response(JSON.stringify({ success: false, error: '用户名至少需要 2 个字符' }), { status: 400, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+      }
+      if (inputPass.length < 6) {
+        return new Response(JSON.stringify({ success: false, error: '密码长度至少需 6 位字符' }), { status: 400, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+      }
 
       // Forbid registration of reserved administrator names
       if (

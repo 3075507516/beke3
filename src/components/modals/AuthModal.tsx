@@ -7,6 +7,26 @@ interface AuthModalProps {
   onClose: () => void;
 }
 
+async function readApiJson(response: Response, endpointLabel: string): Promise<any> {
+  const body = await response.text();
+  try {
+    return JSON.parse(body);
+  } catch {
+    const contentType = response.headers.get('content-type') || '未知';
+    const title = body.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]?.replace(/\s+/g, ' ').trim();
+    const excerpt = body
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;|&#\d+;|&[a-z]+;/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 140);
+    const detail = title || excerpt || '响应内容为空';
+    throw new Error(`${endpointLabel}返回非 JSON（HTTP ${response.status}，${contentType}）：${detail}`);
+  }
+}
+
 export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   const {
     currentUser,
@@ -225,7 +245,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
           clientEmailSettings: emailSettings,
         }),
       });
-      const data = await resp.json();
+      const data = await readApiJson(resp, '验证码发送接口');
       if (resp.ok && data?.success && data?.externalDispatched) {
         setSentCode('sent');
         setSentCodeLength(Number(data.codeLength) || emailSettings.verificationCodeLength || 6);
