@@ -301,7 +301,7 @@ export const onRequest = async (context: any) => {
       }
       await Promise.all([
         env.KV.put(rateEmailKey, '1', { expirationTtl: 60 }),
-        env.KV.put(rateIpKey, '1', { expirationTtl: 20 }),
+        env.KV.put(rateIpKey, '1', { expirationTtl: 60 }),
       ]);
 
       const clientEmailSettings = body.clientEmailSettings || {};
