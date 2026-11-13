@@ -487,7 +487,7 @@ export const DEFAULT_PAYMENT_SETTINGS: PaymentSettings = {
 
 export const DEFAULT_EMAIL_SETTINGS: EmailSettings = {
   enabled: true,
-  provider: 'smtp',
+  provider: 'resend',
   apiKey: '',
   apiEndpoint: 'https://api.resend.com/emails',
   smtpHost: 'smtp.resend.com',

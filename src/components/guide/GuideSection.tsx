@@ -217,7 +217,7 @@ export const GuideSection: React.FC = () => {
                 4. 部署密码与管理员账号环境变量 (Environment Variables)
               </h5>
               <p className="text-xs text-slate-500 mb-2">
-                在 <b>Settings</b> -&gt; <b>Variables and Secrets</b> 中配置管理员环境变量；密码应使用 Secret：
+                管理员自行设定一组强密码，并在 <b>Settings</b> -&gt; <b>Variables and Secrets</b> 中配置；密码应使用 Secret。网站前台不能修改 Cloudflare 部署变量：
               </p>
               <div className="space-y-2 text-xs">
                 <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-between">
@@ -229,7 +229,7 @@ export const GuideSection: React.FC = () => {
                 <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-between">
                   <div>
                     <code className="text-rose-500 font-mono font-bold">ADMIN_PASSWORD</code>
-                    <span className="text-slate-500 dark:text-slate-400 ml-2">必需的强随机生产管理员密码（至少12字符）；应用前端不能修改此 Cloudflare Secret</span>
+                    <span className="text-slate-500 dark:text-slate-400 ml-2">管理员自选的生产登录密码（至少12字符，建议使用随机密码）；仅在 Cloudflare Pages Secret 中修改，未配置时管理员登录会被拒绝，不提供免密默认登录</span>
                   </div>
                 </div>
                 <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-between">
@@ -455,13 +455,13 @@ export const GuideSection: React.FC = () => {
         <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl p-6 space-y-4 shadow-sm">
           <div className="flex items-center gap-2 text-indigo-500 font-bold text-sm">
             <Key className="w-5 h-5" />
-            <span>邮箱区 (邮件中枢与 Cloudflare Routing) 使用说明</span>
+            <span>邮箱区 (邮件中枢与 Resend Receiving) 使用说明</span>
           </div>
           <div className="space-y-2 text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-            <p><b>1. 发信通道：</b>当前实际支持 SMTP、Resend API、Brevo API、SendGrid API；前台配置保存在本浏览器，后台变量需在 Cloudflare Pages 设置。绿色灯仅表示测试邮件被服务商接受，不保证最终送达。</p>
+            <p><b>1. 发信通道：</b>推荐 Resend API（HTTPS），也支持 SMTP、Brevo API、SendGrid API；前台配置保存在本浏览器，验证码应使用 Cloudflare Pages 后台 Secret。Resend API 连接检查只读域名信息，不发邮件；真实测试投递需使用单独的测试邮件按钮。</p>
             <p><b>2. 注册验证码：</b>验证码由服务端生成和验证；Cloudflare 部署需绑定 D1 并配置可用的后台邮件发送通道。后台配置状态与前台配置分开测试。</p>
-            <p><b>3. 收信能力：</b>IMAP 轮询、Email Routing 入站处理与邮件 Webhook 当前均未实现；页面中的收信参数只是本地配置，不代表本站能收件。</p>
-            <p><b>4. 站内信：</b>管理员可在本地站内信列表撰写和回复；发送 API 需管理员短期会话。注册邮箱回信优先从 D1 用户记录解析；邮件列表本身保存在浏览器本机，管理员共享同步使用 D1。</p>
+            <p><b>3. 收信能力：</b>Resend <code>email.received</code> Webhook 已由 Pages Functions 验签，收件正文会通过 Receiving API 拉取并存入 D1。启用前需配置接收域名/MX、Webhook URL、<code>RESEND_WEBHOOK_SECRET</code> 和 <code>RESEND_API_KEY</code>；仅填写前台参数或转发到外部邮箱不会让来信进入本站。</p>
+            <p><b>4. 站内信：</b>管理员可在邮件中枢查看服务器收件箱、撰写和回复；发送及收件箱 API 需有效管理员会话。注册邮箱回信优先从 D1 用户记录解析；本机发件历史保存在浏览器，Resend 收件正文保存在 D1。</p>
           </div>
         </div>
       </div>

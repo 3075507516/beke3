@@ -407,7 +407,7 @@ export const SettingsSection: React.FC = () => {
     e.preventDefault();
     const isLocalDevelopment = ['localhost', '127.0.0.1'].includes(window.location.hostname);
     if (!isLocalDevelopment) {
-      setPasswordMsg('生产部署密码由 Cloudflare Dashboard → Pages → Settings → Variables and Secrets 管理；本页不能修改 ADMIN_PASSWORD。');
+      setPasswordMsg('生产管理员自行设定密码，并仅在 Cloudflare Dashboard → Pages → Settings → Variables and Secrets 修改 ADMIN_PASSWORD，然后重新部署。本页不能修改部署 Secret；未配置时管理员登录会被拒绝。');
       return;
     }
     if (!newPassword || newPassword !== confirmPassword) {
@@ -1411,7 +1411,7 @@ export const SettingsSection: React.FC = () => {
 
             <div>
               <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                本机开发管理员密码（生产环境请在 Cloudflare Pages 修改 ADMIN_PASSWORD）
+                本机开发管理员密码（生产环境由管理员自行在 Cloudflare Pages Secret 设置 ADMIN_PASSWORD）
               </label>
               <input
                 type="password"

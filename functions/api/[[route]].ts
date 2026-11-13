@@ -1,4 +1,4 @@
-import { createVerificationCode, dispatchEmail, escapeHtml, normalizeEmail, type MailProvider, type OutboundMailSettings } from '../mail';
+import { createVerificationCode, dispatchEmail, escapeHtml, normalizeEmail, probeResendConnection, type MailProvider, type OutboundMailSettings } from '../mail';
 
 // Cloudflare Pages Functions API Handler
 // Routes: /api/*
@@ -16,6 +16,7 @@ interface Env {
   MAIL_SENDER?: string;
   MAIL_API_KEY?: string;
   RESEND_API_KEY?: string;
+  RESEND_WEBHOOK_SECRET?: string;
   BREVO_API_KEY?: string;
   SENDGRID_API_KEY?: string;
   SMTP_HOST?: string;
@@ -31,7 +32,17 @@ interface Env {
 
 function getOutboundSettings(client: any, env: any): OutboundMailSettings {
   const smtpHost = (env.SMTP_HOST || client?.smtpHost || '').trim();
-  const providerValue = (env.MAIL_PROVIDER || client?.provider || (smtpHost ? 'smtp' : (env.RESEND_API_KEY || env.MAIL_API_KEY) ? 'resend' : 'smtp')).toLowerCase();
+  const explicitProvider = String(env.MAIL_PROVIDER || client?.provider || '').trim().toLowerCase();
+  const inferredProvider = (env.RESEND_API_KEY || env.MAIL_API_KEY || client?.apiKey)
+    ? 'resend'
+    : env.BREVO_API_KEY
+      ? 'brevo'
+      : env.SENDGRID_API_KEY
+        ? 'sendgrid'
+        : smtpHost
+          ? 'smtp'
+          : 'resend';
+  const providerValue = (explicitProvider || inferredProvider).toLowerCase();
   const supportedProviders: MailProvider[] = ['smtp', 'resend', 'brevo', 'sendgrid'];
   const provider = (supportedProviders.includes(providerValue as MailProvider) ? providerValue : 'smtp') as MailProvider;
   const smtpPort = Number(env.SMTP_PORT || client?.smtpPort || 465);
@@ -254,6 +265,56 @@ function applyFileSafetyHeaders(headers: Headers): void {
   headers.set('Content-Security-Policy', "default-src 'none'; sandbox");
 }
 
+function constantTimeStringEqual(left: string, right: string): boolean {
+  const length = Math.max(left.length, right.length);
+  let mismatch = left.length ^ right.length;
+  for (let i = 0; i < length; i++) mismatch |= (left.charCodeAt(i) || 0) ^ (right.charCodeAt(i) || 0);
+  return mismatch === 0;
+}
+
+async function verifyResendWebhookSignature(request: Request, rawBody: string, secret: string): Promise<boolean> {
+  try {
+    const messageId = request.headers.get('svix-id') || '';
+    const timestamp = request.headers.get('svix-timestamp') || '';
+    const signatureHeader = request.headers.get('svix-signature') || '';
+    const timestampNumber = Number(timestamp);
+    if (!messageId || !/^\d+$/.test(timestamp) || !Number.isFinite(timestampNumber)) return false;
+    if (Math.abs(Math.floor(Date.now() / 1000) - timestampNumber) > 300) return false;
+    if (!secret.startsWith('whsec_')) return false;
+
+    const secretBytes = Uint8Array.from(atob(secret.slice('whsec_'.length)), char => char.charCodeAt(0));
+    const key = await crypto.subtle.importKey('raw', secretBytes, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const signedContent = new TextEncoder().encode(`${messageId}.${timestamp}.${rawBody}`);
+    const digest = new Uint8Array(await crypto.subtle.sign('HMAC', key, signedContent));
+    let binary = '';
+    for (const byte of digest) binary += String.fromCharCode(byte);
+    const expectedSignature = btoa(binary);
+    return signatureHeader.split(' ').some(part => {
+      const [version, signature] = part.split(',', 2);
+      return version === 'v1' && Boolean(signature) && constantTimeStringEqual(signature, expectedSignature);
+    });
+  } catch {
+    return false;
+  }
+}
+
+function emailHtmlToText(html: string): string {
+  return html
+    .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, ' ')
+    .replace(/<\s*br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|li|tr|h[1-6])\s*>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n\s*\n+/g, '\n\n')
+    .trim();
+}
+
 export const onRequest = async (context: any) => {
   const { request } = context;
   const rawEnv: Env = context.env || {};
@@ -276,6 +337,92 @@ export const onRequest = async (context: any) => {
 
   if (request.method === 'OPTIONS') {
     return new Response(null, { headers });
+  }
+
+  if (path === '/mail/webhook' && request.method === 'POST') {
+    const contentLength = Number(request.headers.get('content-length') || 0);
+    if (contentLength > 1_048_576) {
+      return new Response('Webhook payload too large', { status: 413, headers });
+    }
+    if (!env.RESEND_WEBHOOK_SECRET) {
+      return new Response('Resend webhook signing secret is not configured', { status: 503, headers });
+    }
+    const rawBody = await request.text();
+    if (new TextEncoder().encode(rawBody).byteLength > 1_048_576) {
+      return new Response('Webhook payload too large', { status: 413, headers });
+    }
+    if (!await verifyResendWebhookSignature(request, rawBody, env.RESEND_WEBHOOK_SECRET)) {
+      return new Response('Invalid webhook signature', { status: 401, headers });
+    }
+
+    let event: any;
+    try { event = JSON.parse(rawBody); } catch { return new Response('Invalid webhook JSON', { status: 400, headers }); }
+    if (event?.type !== 'email.received') {
+      return new Response(JSON.stringify({ success: true, ignored: true }), { headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+    }
+    const resendEmailId = String(event?.data?.email_id || '').trim();
+    const eventId = request.headers.get('svix-id') || '';
+    if (!resendEmailId || resendEmailId.length > 200 || !eventId || eventId.length > 200) {
+      return new Response('Invalid received email event', { status: 400, headers });
+    }
+    if (!env.DB) return new Response('D1 binding DB is required for inbound email storage', { status: 503, headers });
+    const resendApiKey = String(env.RESEND_API_KEY || '').trim();
+    if (!resendApiKey) return new Response('RESEND_API_KEY is required to retrieve inbound email content', { status: 503, headers });
+
+    try {
+      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS fox3_inbound_emails (
+        id TEXT PRIMARY KEY,
+        eventId TEXT NOT NULL UNIQUE,
+        sender TEXT NOT NULL,
+        recipient TEXT NOT NULL,
+        subject TEXT NOT NULL,
+        body TEXT NOT NULL,
+        attachments TEXT NOT NULL DEFAULT '[]',
+        receivedAt INTEGER NOT NULL
+      )`).run();
+      await env.DB.prepare('CREATE INDEX IF NOT EXISTS fox3_inbound_emails_received_at ON fox3_inbound_emails(receivedAt DESC)').run();
+      const duplicate = await env.DB.prepare('SELECT id FROM fox3_inbound_emails WHERE id = ? OR eventId = ? LIMIT 1').bind(resendEmailId, eventId).first();
+      if (duplicate) return new Response(JSON.stringify({ success: true, duplicate: true }), { headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+
+      const contentResponse = await fetch(`https://api.resend.com/emails/receiving/${encodeURIComponent(resendEmailId)}?html_format=cid`, {
+        headers: { Authorization: `Bearer ${resendApiKey}`, Accept: 'application/json' },
+      });
+      if (!contentResponse.ok) {
+        console.warn(`[Mail Backend] Resend inbound retrieval failed with HTTP ${contentResponse.status}`);
+        return new Response('Unable to retrieve received email from Resend', { status: 502, headers });
+      }
+      const contentText = await contentResponse.text();
+      if (contentText.length > 4_000_000) return new Response('Received email content exceeds storage processing limit', { status: 413, headers });
+      const received: any = JSON.parse(contentText);
+      const sender = String(received?.from || event?.data?.from || '').slice(0, 500);
+      const recipients = Array.isArray(received?.to) ? received.to : Array.isArray(event?.data?.to) ? event.data.to : [];
+      const recipient = recipients.map((item: any) => String(item)).join(', ').slice(0, 1000);
+      const subject = String(received?.subject || event?.data?.subject || '(无主题)').replace(/[\r\n]+/g, ' ').slice(0, 500);
+      const sourceBody = typeof received?.text === 'string' && received.text.trim()
+        ? received.text
+        : emailHtmlToText(typeof received?.html === 'string' ? received.html : '');
+      const body = sourceBody.slice(0, 250_000);
+      const attachments = JSON.stringify((Array.isArray(received?.attachments) ? received.attachments : []).slice(0, 100).map((item: any) => ({
+        id: String(item?.id || '').slice(0, 200),
+        filename: String(item?.filename || '').slice(0, 300),
+        contentType: String(item?.content_type || '').slice(0, 200),
+        contentDisposition: String(item?.content_disposition || '').slice(0, 100),
+        contentId: String(item?.content_id || '').slice(0, 200),
+        size: Math.max(0, Number(item?.size) || 0),
+      })));
+      const parsedDate = Date.parse(String(received?.created_at || event?.data?.created_at || ''));
+      const receivedAt = Number.isFinite(parsedDate) ? parsedDate : Date.now();
+      const insert = await env.DB.prepare(`INSERT OR IGNORE INTO fox3_inbound_emails
+        (id, eventId, sender, recipient, subject, body, attachments, receivedAt)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+        .bind(resendEmailId, eventId, sender, recipient, subject, body, attachments, receivedAt).run();
+      await env.DB.prepare('DELETE FROM fox3_inbound_emails WHERE receivedAt < ?').bind(Date.now() - 180 * 24 * 60 * 60 * 1000).run();
+      await env.DB.prepare('DELETE FROM fox3_inbound_emails WHERE id NOT IN (SELECT id FROM fox3_inbound_emails ORDER BY receivedAt DESC LIMIT 500)').run();
+      return new Response(JSON.stringify({ success: true, stored: Number(insert?.meta?.changes || 0) > 0 }), { headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+    } catch (error: any) {
+      console.error(`[Mail Backend] Failed to store Resend inbound email: ${String(error?.message || error).slice(0, 180)}`);
+      return new Response('Failed to process received email', { status: 500, headers });
+    }
   }
 
   if (path === '/auth/session' && request.method === 'GET') {
@@ -1089,24 +1236,76 @@ export const onRequest = async (context: any) => {
     });
   }
 
+  if (path === '/mail/inbox' && request.method === 'GET') {
+    if (!await hasAdminSession(request, env)) {
+      return new Response(JSON.stringify({ success: false, error: '查看站内收件箱需要管理员重新登录' }), { status: 401, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+    }
+    if (!env.DB) {
+      return new Response(JSON.stringify({ success: false, error: '站内收件箱需要绑定 D1 数据库 DB' }), { status: 503, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+    }
+    try {
+      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS fox3_inbound_emails (
+        id TEXT PRIMARY KEY,
+        eventId TEXT NOT NULL UNIQUE,
+        sender TEXT NOT NULL,
+        recipient TEXT NOT NULL,
+        subject TEXT NOT NULL,
+        body TEXT NOT NULL,
+        attachments TEXT NOT NULL DEFAULT '[]',
+        receivedAt INTEGER NOT NULL
+      )`).run();
+      const result = await env.DB.prepare('SELECT id, sender, recipient, subject, body, receivedAt FROM fox3_inbound_emails ORDER BY receivedAt DESC LIMIT 200').all();
+      const mails = (result?.results || []).map((row: any) => ({
+        id: `resend-inbound-${row.id}`,
+        folder: 'inbox',
+        sender: String(row.sender || ''),
+        recipient: String(row.recipient || ''),
+        subject: String(row.subject || '(无主题)'),
+        body: String(row.body || ''),
+        date: new Date(Number(row.receivedAt) || Date.now()).toISOString().replace('T', ' ').slice(0, 19),
+        read: false,
+        isStarred: false,
+        createdAt: Number(row.receivedAt) || Date.now(),
+        updatedAt: Number(row.receivedAt) || Date.now(),
+      }));
+      return new Response(JSON.stringify({ success: true, mails }), { headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+    } catch {
+      return new Response(JSON.stringify({ success: false, error: '读取 D1 收件箱失败，请检查数据库绑定与迁移状态' }), { status: 500, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+    }
+  }
+
+  if (path === '/mail/test-connection' && request.method === 'POST') {
+    if (!await hasAdminSession(request, env)) {
+      return new Response(JSON.stringify({ success: false, error: '连接测试需要管理员重新登录' }), { status: 401, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+    }
+    try {
+      const probe = await probeResendConnection(getOutboundSettings({}, env));
+      return new Response(JSON.stringify({ success: true, ...probe }), { headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+    } catch (err: any) {
+      return new Response(JSON.stringify({ success: false, error: err?.message || 'Resend API 连接检查失败' }), { status: 502, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+    }
+  }
+
   // Send an email through the selected SMTP/API provider; never claim success on local-only fallback.
   if (path === '/mail/test' && request.method === 'POST') {
     if (!await hasAdminSession(request, env)) {
       return new Response(JSON.stringify({ success: false, error: '邮件连通测试需要管理员重新登录' }), { status: 401, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
     }
     try {
-      if (!env.DB) {
-        return new Response(JSON.stringify({ success: false, error: '后台邮件测试需要绑定 D1 以执行防滥用限流' }), { status: 503, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+      if (env.DB) {
+        try {
+          await env.DB.prepare(`CREATE TABLE IF NOT EXISTS fox3_mail_test_rates (ipHash TEXT PRIMARY KEY, expiresAt INTEGER NOT NULL)`).run();
+          const ipHash = await hashRateLimitIp(request.headers.get('CF-Connecting-IP') || 'unknown');
+          const now = Date.now();
+          await env.DB.prepare('DELETE FROM fox3_mail_test_rates WHERE ipHash = ? AND expiresAt <= ?').bind(ipHash, now).run();
+          const reservation = await env.DB.prepare('INSERT OR IGNORE INTO fox3_mail_test_rates (ipHash, expiresAt) VALUES (?, ?)').bind(ipHash, now + 60_000).run();
+          if (Number(reservation?.meta?.changes || 0) === 0) {
+            return new Response(JSON.stringify({ success: false, error: '测试邮件每分钟仅允许一次，请稍后再试' }), { status: 429, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+          }
+        } catch (rateLimitError: any) {
+          console.warn(`[Mail Backend] D1 rate limit unavailable; admin-only test continues: ${String(rateLimitError?.message || rateLimitError).slice(0, 120)}`);
+        }
       }
-      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS fox3_mail_test_rates (ipHash TEXT PRIMARY KEY, expiresAt INTEGER NOT NULL)`).run();
-      const ipHash = await hashRateLimitIp(request.headers.get('CF-Connecting-IP') || 'unknown');
-      const now = Date.now();
-      await env.DB.prepare('DELETE FROM fox3_mail_test_rates WHERE ipHash = ? AND expiresAt <= ?').bind(ipHash, now).run();
-      const reservation = await env.DB.prepare('INSERT OR IGNORE INTO fox3_mail_test_rates (ipHash, expiresAt) VALUES (?, ?)').bind(ipHash, now + 60_000).run();
-      if (Number(reservation?.meta?.changes || 0) === 0) {
-        return new Response(JSON.stringify({ success: false, error: '测试邮件每分钟仅允许一次，请稍后再试' }), { status: 429, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
-      }
-
       const body = await request.json() as any;
       const source = body.source === 'backend' ? 'backend' : 'frontend';
       const settings = source === 'backend'
@@ -1114,7 +1313,7 @@ export const onRequest = async (context: any) => {
         : getOutboundSettings(body.clientEmailSettings || {}, {});
       const to = normalizeEmail(settings.senderEmail || '');
       if (!/^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/.test(to)) {
-        return new Response(JSON.stringify({ success: false, source, error: source === 'backend' ? '后台 MAIL_SENDER/SMTP 发件人地址未正确配置' : '前台发件人邮箱不是有效地址' }), { status: 400, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+        return new Response(JSON.stringify({ success: false, source, error: source === 'backend' ? '后台 MAIL_SENDER 未配置为有效邮箱地址' : '前台发件人邮箱不是有效地址' }), { status: 400, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
       }
       const result = await dispatchEmail(settings, {
         to,
@@ -1194,28 +1393,39 @@ export const onRequest = async (context: any) => {
     const outboundConfigured = outboundSettings.provider === 'smtp'
       ? Boolean(outboundSettings.smtpHost && outboundSettings.smtpUser && outboundSettings.smtpPass && outboundSettings.senderEmail)
       : Boolean(outboundSettings.apiKey && outboundSettings.senderEmail);
-    const inboundConfigured = Boolean(
-      env.CF_EMAIL_ROUTING_ADDRESS ||
-      env.CF_EMAIL_DESTINATION ||
-      (env.IMAP_HOST && env.IMAP_USER && env.IMAP_PASS)
-    );
+    const outboundApiKeyConfigured = outboundSettings.provider !== 'smtp' && Boolean(outboundSettings.apiKey);
+    const inboundApiKeyAvailable = Boolean(env.RESEND_API_KEY);
+    const inboundServerReady = Boolean(env.DB && env.RESEND_WEBHOOK_SECRET && inboundApiKeyAvailable);
+    let lastReceivedAt: number | null = null;
+    if (env.DB) {
+      try {
+        const lastReceived = await env.DB.prepare('SELECT MAX(receivedAt) AS lastReceivedAt FROM fox3_inbound_emails').first();
+        const value = Number(lastReceived?.lastReceivedAt);
+        if (Number.isFinite(value) && value > 0) lastReceivedAt = value;
+      } catch {}
+    }
 
     return new Response(JSON.stringify({
       success: true,
       outbound: {
         configured: outboundConfigured,
+        apiKeyConfigured: outboundApiKeyConfigured,
+        senderConfigured: Boolean(outboundSettings.senderEmail),
         provider: outboundSettings.provider,
+        connectionProbeSupported: outboundSettings.provider === 'resend',
         verified: false,
         status: outboundConfigured ? 'configured_unverified' : 'unconfigured',
         senderEmail: outboundSettings.senderEmail || '',
       },
       inbound: {
-        configured: inboundConfigured,
-        implemented: false,
-        verified: false,
-        routingAddress: env.CF_EMAIL_ROUTING_ADDRESS || 'contact@whitefox.blog',
-        destination: env.CF_EMAIL_DESTINATION || 'admin@whitefox.blog',
-        status: 'not_implemented',
+        configured: inboundServerReady,
+        implemented: true,
+        verified: Boolean(lastReceivedAt),
+        d1Available: Boolean(env.DB),
+        webhookSecretConfigured: Boolean(env.RESEND_WEBHOOK_SECRET),
+        resendApiKeyConfigured: inboundApiKeyAvailable,
+        lastReceivedAt,
+        status: lastReceivedAt ? 'receiving' : inboundServerReady ? 'server_ready_waiting_for_first_email' : 'missing_server_configuration',
       },
       quotaLimit: 3000,
       timestamp: Date.now(),

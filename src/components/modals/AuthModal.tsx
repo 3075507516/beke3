@@ -274,7 +274,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     const isLocalDevelopment = ['localhost', '127.0.0.1'].includes(window.location.hostname);
 
     if (!isLocalDevelopment) {
-      setStatusMsg({ type: 'error', text: '此操作无法修改 Cloudflare Pages Secret。请在 Cloudflare Dashboard → Pages → Settings → Variables and Secrets 修改 ADMIN_PASSWORD，然后重新部署。' });
+      setStatusMsg({ type: 'error', text: '生产管理员密码由管理员自行设定，并仅能在 Cloudflare Dashboard → Pages → Settings → Variables and Secrets 中修改 ADMIN_PASSWORD，然后重新部署。未配置密码时管理员登录会被拒绝，不提供免密默认登录。' });
       return;
     }
 
@@ -617,7 +617,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
           <form onSubmit={handleResetAdminPassword} className="space-y-4">
             <div className="p-3 rounded-xl bg-sky-50 dark:bg-sky-950/40 border border-sky-200/80 dark:border-sky-900/50 text-xs text-sky-800 dark:text-sky-300">
               <span className="font-semibold">管理员密码管理：</span>
-              生产环境密码只能在 Cloudflare Pages 的 Variables and Secrets 中更改；本页仅允许 localhost 开发环境设置本机密码。
+              生产管理员自行设定登录密码，并只能在 Cloudflare Pages → Settings → Variables and Secrets 中设置或修改 Secret <code>ADMIN_PASSWORD</code>，随后重新部署。本页仅允许 localhost 开发环境设置本机密码；生产环境未配置该变量时，管理员登录会被拒绝，不会开放免密登录。
             </div>
 
             <div>
@@ -638,7 +638,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
 
             <div>
               <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                指定新管理员密码 <span className="text-rose-500">*</span>
+                指定本机开发管理员密码 <span className="text-rose-500">*</span>
               </label>
               <div className="relative">
                 <Lock className="absolute left-3 top-3 w-4 h-4 text-slate-400" />

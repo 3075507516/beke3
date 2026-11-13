@@ -242,7 +242,8 @@ async function providerApiSend(settings: OutboundMailSettings, mail: OutboundMai
       sender: { email: from },
       to: [{ email: to }],
       subject: safeHeaderValue(mail.subject),
-      ...(mail.html ? { htmlContent: mail.html } : { textContent: mail.text || '' }),
+      ...(mail.html ? { htmlContent: mail.html } : {}),
+      ...(mail.text ? { textContent: mail.text } : {}),
     };
   } else if (settings.provider === 'sendgrid') {
     endpoint = 'https://api.sendgrid.com/v3/mail/send';
@@ -263,7 +264,8 @@ async function providerApiSend(settings: OutboundMailSettings, mail: OutboundMai
       from,
       to: [to],
       subject: safeHeaderValue(mail.subject),
-      ...(mail.html ? { html: mail.html } : { text: mail.text || '' }),
+      ...(mail.html ? { html: mail.html } : {}),
+      ...(mail.text ? { text: mail.text } : {}),
     };
   }
 
@@ -273,10 +275,68 @@ async function providerApiSend(settings: OutboundMailSettings, mail: OutboundMai
     body: JSON.stringify(payload),
   });
   if (!response.ok) {
-    console.warn(`[Mail Backend] ${settings.provider} rejected message with HTTP ${response.status}`);
-    throw new Error(`${settings.provider} 拒绝发送邮件（HTTP ${response.status}），请检查 API Key、发件域名和收件地址`);
+    const responseText = await response.text();
+    let providerMessage = '';
+    try {
+      const responseJson = JSON.parse(responseText);
+      providerMessage = String(responseJson?.message || responseJson?.error?.message || responseJson?.name || '');
+    } catch {}
+    providerMessage = providerMessage.replace(/[\r\n]+/g, ' ').slice(0, 180);
+    console.warn(`[Mail Backend] ${settings.provider} rejected message with HTTP ${response.status}: ${providerMessage || 'no detail'}`);
+    throw new Error(`${settings.provider} 拒绝发送（HTTP ${response.status}）${providerMessage ? `：${providerMessage}` : '；请检查 API Key、发件域名和收件地址'}`);
   }
   return settings.provider;
+}
+
+export interface ResendConnectionProbe {
+  provider: 'resend';
+  apiKeyValid: true;
+  senderDomain: string;
+  senderDomainFound: boolean;
+  sendingEnabled: boolean;
+  message: string;
+}
+
+export async function probeResendConnection(settings: OutboundMailSettings): Promise<ResendConnectionProbe> {
+  if (settings.provider !== 'resend') {
+    throw new Error('无副作用的 API 连接检查当前仅支持 Resend；其他通道请发送测试邮件验证');
+  }
+  const apiKey = (settings.apiKey || '').trim();
+  if (!apiKey || apiKey === '********') throw new Error('后台 RESEND_API_KEY 尚未配置');
+
+  const response = await fetch('https://api.resend.com/domains?limit=100', {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
+  });
+  const responseText = await response.text();
+  let responseJson: any = {};
+  try { responseJson = JSON.parse(responseText); } catch {}
+  if (!response.ok) {
+    const providerMessage = String(responseJson?.message || responseJson?.error?.message || responseJson?.name || '').replace(/[\r\n]+/g, ' ').slice(0, 180);
+    throw new Error(`Resend API 连接失败（HTTP ${response.status}）${providerMessage ? `：${providerMessage}` : '；请确认 API Key 有效且具备域名读取权限'}`);
+  }
+
+  const senderAddress = (settings.senderEmail || '').match(/<([^<>]+)>/)?.[1] || settings.senderEmail || '';
+  const senderDomain = senderAddress.trim().toLowerCase().split('@').pop() || '';
+  const domains = Array.isArray(responseJson?.data) ? responseJson.data : [];
+  const matchingDomain = domains.find((domain: any) => String(domain?.name || '').toLowerCase() === senderDomain);
+  const sendingEnabled = matchingDomain?.capabilities?.sending === 'enabled';
+  const message = !senderDomain
+    ? 'Resend API Key 有效，但 MAIL_SENDER 不是有效邮箱地址'
+    : !matchingDomain
+      ? `Resend API Key 有效，但发件域名 ${senderDomain} 不在当前 Resend 账户的域名列表中`
+      : !sendingEnabled
+        ? `Resend API Key 有效，但域名 ${senderDomain} 的发送能力尚未启用`
+        : `Resend API Key 已验证，发件域名 ${senderDomain} 的发送能力已启用`;
+
+  return {
+    provider: 'resend',
+    apiKeyValid: true,
+    senderDomain,
+    senderDomainFound: Boolean(matchingDomain),
+    sendingEnabled,
+    message,
+  };
 }
 
 export async function dispatchEmail(settings: OutboundMailSettings, mail: OutboundMail): Promise<MailDispatchResult> {
