@@ -217,7 +217,7 @@ export const GuideSection: React.FC = () => {
                 4. 部署密码与管理员账号环境变量 (Environment Variables)
               </h5>
               <p className="text-xs text-slate-500 mb-2">
-                管理员自行设定一组强密码，并在 <b>Settings</b> -&gt; <b>Variables and Secrets</b> 中配置；密码应使用 Secret。网站前台不能修改 Cloudflare 部署变量：
+                管理员自行设定至少 6 个字符的登录密码（可使用数字、字母、符号或组合），并在 <b>Settings</b> -&gt; <b>Variables and Secrets</b> 中配置；网站前台不能修改 Cloudflare 部署变量：
               </p>
               <div className="space-y-2 text-xs">
                 <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-between">
@@ -229,16 +229,19 @@ export const GuideSection: React.FC = () => {
                 <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-between">
                   <div>
                     <code className="text-rose-500 font-mono font-bold">ADMIN_PASSWORD</code>
-                    <span className="text-slate-500 dark:text-slate-400 ml-2">管理员自选的生产登录密码（至少12字符，建议使用随机密码）；仅在 Cloudflare Pages Secret 中修改，未配置时管理员登录会被拒绝，不提供免密默认登录</span>
+                    <span className="text-slate-500 dark:text-slate-400 ml-2">管理员自选的生产登录密码（至少 6 个字符，可用纯数字或其他字符）；仅在 Cloudflare Pages Secret 中修改，未配置时管理员登录会被拒绝</span>
                   </div>
                 </div>
                 <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-between">
                   <div>
                     <code className="text-rose-500 font-mono font-bold">ADMIN_SESSION_SECRET</code>
-                    <span className="text-slate-500 dark:text-slate-400 ml-2">建议必配独立高熵随机 Secret（至少32字符）；过短会话密钥将被拒绝</span>
+                    <span className="text-slate-500 dark:text-slate-400 ml-2">必须独立配置至少 32 个字符的高熵随机会话签名 Secret；此项不是登录密码，不能用 ADMIN_PASSWORD 替代</span>
                   </div>
                 </div>
               </div>
+              <p className="mt-3 rounded-xl bg-sky-50 dark:bg-sky-950/30 p-3 text-xs leading-relaxed text-sky-800 dark:text-sky-200">
+                普通用户建议使用真实可访问的邮箱注册。邮箱验证码校验通过后，账户资料和密码哈希写入 D1（绑定名 DB）；忘记密码可通过邮箱验证码重置，重置服务依赖 D1 与已配置的后台邮件发信变量。未绑定邮箱的账号不能自助找回密码。
+              </p>
             </div>
           </div>
         </div>

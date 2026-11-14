@@ -6,7 +6,6 @@ import {
   Settings,
   Palette,
   Image as ImageIcon,
-  Users,
   HardDrive,
   ShieldAlert,
   ChevronDown,
@@ -40,8 +39,6 @@ export const SettingsSection: React.FC = () => {
   const {
     systemSettings,
     updateSystemSettings,
-    users,
-    setUsers,
     currentUser,
     setCurrentUser,
     deviceMode,
@@ -111,15 +108,16 @@ export const SettingsSection: React.FC = () => {
 
   // Collapsible section toggles: default to collapsed (true = collapsed, false = open)
   // State is persisted in localStorage so user preferences are remembered!
-  const [collapsedSections, setCollapsedSections] = useState<{ [key: string]: boolean }>(() =>
-    loadLocalStorage<{ [key: string]: boolean }>('fox3_settings_collapsed_state', {
+  const [collapsedSections, setCollapsedSections] = useState<{ [key: string]: boolean }>(() => {
+    const saved = loadLocalStorage<{ [key: string]: boolean }>('fox3_settings_collapsed_state', {
       theme: true,
-      privacyUsers: true,
+      privacy: true,
       storage: true,
       webdav: true,
       password: true,
-    })
-  );
+    });
+    return { ...saved, privacy: saved.privacy ?? saved.privacyUsers ?? true };
+  });
 
   const toggleSection = (key: string) => {
     setCollapsedSections(prev => {
@@ -370,52 +368,19 @@ export const SettingsSection: React.FC = () => {
     updateSystemSettings({ heroIntroImage: res.url });
   };
 
-  const toggleUserStatus = (userId: string) => {
-    setUsers(prev =>
-      prev.map(u => {
-        if (u.id === userId && u.role !== 'admin') {
-          return {
-            ...u,
-            status: u.status === 'active' ? ('disabled' as const) : ('active' as const),
-          };
-        }
-        return u;
-      })
-    );
-  };
-
-  const handleDeleteUser = (userId: string, username: string) => {
-    if (window.confirm(`确定彻底删除注册用户【${username}】吗？删除后该用户将无法再登录。`)) {
-      setUsers(prev => prev.filter(u => u.id !== userId));
-      // Remove local password record
-      try {
-        const rawPasswords = localStorage.getItem('fox3_user_passwords');
-        if (rawPasswords) {
-          const map = JSON.parse(rawPasswords);
-          delete map[userId];
-          delete map[username];
-          delete map[username.toLowerCase()];
-          localStorage.setItem('fox3_user_passwords', JSON.stringify(map));
-        }
-      } catch (err) {
-        console.warn('Failed to clear user password from storage:', err);
-      }
-    }
-  };
-
   const handleChangePassword = (e: React.FormEvent) => {
     e.preventDefault();
     const isLocalDevelopment = ['localhost', '127.0.0.1'].includes(window.location.hostname);
     if (!isLocalDevelopment) {
-      setPasswordMsg('生产管理员自行设定密码，并仅在 Cloudflare Dashboard → Pages → Settings → Variables and Secrets 修改 ADMIN_PASSWORD，然后重新部署。本页不能修改部署 Secret；未配置时管理员登录会被拒绝。');
+      setPasswordMsg('生产管理员自行选择至少 6 个字符的登录密码（可为数字或任意字符），仅在 Cloudflare Pages → Settings → Variables and Secrets 设置 ADMIN_PASSWORD 后重新部署。本页不能修改部署 Secret；ADMIN_SESSION_SECRET 是独立且至少 32 字符的会话密钥。');
       return;
     }
     if (!newPassword || newPassword !== confirmPassword) {
       setPasswordMsg('两次输入的新密码不一致，请重新核对！');
       return;
     }
-    if (newPassword.length < 12) {
-      setPasswordMsg('密码长度不能少于 12 位！');
+    if (newPassword.length < 6) {
+      setPasswordMsg('密码长度不能少于 6 位！');
       return;
     }
 
@@ -452,7 +417,7 @@ export const SettingsSection: React.FC = () => {
             <span>系统设置与外观隐私控制中枢</span>
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            全站定制调色、夜间模式、背景照片、全站隐私保护、已注册用户与存储云盘管理
+            全站定制调色、夜间模式、背景照片、隐私保护与存储云盘管理
           </p>
         </div>
 
@@ -773,30 +738,30 @@ export const SettingsSection: React.FC = () => {
         )}
       </div>
 
-      {/* SECTION 2: 网站隐私保护开关与已注册用户管理列表合并选区 */}
+      {/* SECTION 2: 网站隐私与邮箱注册开关 */}
       <div className={`rounded-3xl border shadow-sm overflow-hidden transition-all duration-300 ${
         systemSettings.transparentCards
           ? 'bg-white/70 dark:bg-slate-900/70 backdrop-blur-md border-white/20'
           : 'bg-white dark:bg-slate-900 border-slate-200/80 dark:border-slate-800'
       }`}>
         <div
-          onClick={() => toggleSection('privacyUsers')}
+          onClick={() => toggleSection('privacy')}
           className="p-5 flex items-center justify-between cursor-pointer hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition border-b border-slate-100 dark:border-slate-800"
         >
           <div className="flex items-center gap-2">
             <ShieldAlert className="w-5 h-5 text-sky-500" />
             <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
-              全站隐私保护与已注册用户管理选区 (合并管理)
+              全站隐私与注册设置
             </h3>
           </div>
-          {collapsedSections.privacyUsers ? (
+          {collapsedSections.privacy ? (
             <ChevronDown className="w-5 h-5 text-slate-400" />
           ) : (
             <ChevronUp className="w-5 h-5 text-slate-400" />
           )}
         </div>
 
-        {!collapsedSections.privacyUsers && (
+        {!collapsedSections.privacy && (
           <div className="p-6 space-y-6">
             {/* 3 Privacy Switches */}
             <div className="space-y-3">
@@ -835,69 +800,6 @@ export const SettingsSection: React.FC = () => {
               </div>
             </div>
 
-            {/* Registered Users List */}
-            <div className="pt-4 border-t border-slate-100 dark:border-slate-800">
-              <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 mb-3 flex items-center gap-2">
-                <Users className="w-4 h-4 text-sky-500" />
-                已注册用户管理列表 ({users.length} 位用户)
-              </h4>
-
-              <div className="divide-y divide-slate-100 dark:divide-slate-800 border rounded-2xl overflow-hidden">
-                {users.map(u => (
-                  <div key={u.id} className="p-3.5 flex items-center justify-between gap-4 bg-slate-50/50 dark:bg-slate-800/40">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full overflow-hidden bg-sky-50 dark:bg-sky-950 flex items-center justify-center border border-sky-200 dark:border-sky-900">
-                        {u.avatar ? (
-                          <SafeImage src={u.avatar} alt={u.username} className="w-full h-full object-cover" />
-                        ) : (
-                          <span className="font-bold text-sky-500 uppercase">{u.username[0]}</span>
-                        )}
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
-                            {u.username}
-                          </span>
-                          {u.role === 'admin' ? (
-                            <span className="text-[10px] bg-sky-50 dark:bg-sky-950 text-sky-600 dark:text-sky-400 px-2 py-0.5 rounded-full font-bold">
-                              超级管理员 (唯一控制权)
-                            </span>
-                          ) : (
-                            <span className="text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-500 px-2 py-0.5 rounded-full">
-                              注册用户
-                            </span>
-                          )}
-                        </div>
-                        <span className="text-[11px] text-slate-400">{u.email}</span>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      {u.role !== 'admin' && (
-                        <>
-                          <button
-                            onClick={() => toggleUserStatus(u.id)}
-                            className={`px-2.5 py-1 rounded-xl text-xs font-medium transition ${
-                              u.status === 'active'
-                                ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-600 hover:bg-amber-100'
-                                : 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 hover:bg-emerald-100'
-                            }`}
-                          >
-                            {u.status === 'active' ? '禁用账号' : '启用账号'}
-                          </button>
-                          <button
-                            onClick={() => handleDeleteUser(u.id, u.username)}
-                            className="px-2.5 py-1 rounded-xl text-xs font-medium bg-rose-50 dark:bg-rose-950/40 text-rose-600 hover:bg-rose-100 transition"
-                          >
-                            删除用户
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
           </div>
         )}
       </div>
@@ -1185,7 +1087,7 @@ export const SettingsSection: React.FC = () => {
                   className="flex items-center gap-1.5 px-3.5 py-1.5 bg-sky-500 hover:bg-sky-600 text-white text-xs font-semibold rounded-xl shadow-md transition"
                 >
                   <Database className="w-3.5 h-3.5" />
-                  <span>发起备份</span>
+                  <span>{t('action.backupNow')}</span>
                 </button>
               </div>
             </div>
@@ -1237,7 +1139,7 @@ export const SettingsSection: React.FC = () => {
                           className="flex items-center gap-1 px-3 py-1 bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 text-emerald-600 dark:text-emerald-400 text-xs font-medium rounded-xl transition border border-emerald-200/50"
                         >
                           <RotateCcw className="w-3.5 h-3.5" />
-                          <span>选择恢复</span>
+                          <span>{t('action.restoreBackup')}</span>
                         </button>
                         <button
                           onClick={() => handleDeleteBackup(item.id)}
@@ -1403,21 +1305,21 @@ export const SettingsSection: React.FC = () => {
                 type="password"
                 value={currentPassword}
                 onChange={e => setCurrentPassword(e.target.value)}
-                placeholder="输入当前使用的密码"
+                placeholder={adminPassword ? '输入当前使用的密码' : '首次设置时可留空'}
                 className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100"
-                required
+                required={Boolean(adminPassword)}
               />
             </div>
 
             <div>
               <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                本机开发管理员密码（生产环境由管理员自行在 Cloudflare Pages Secret 设置 ADMIN_PASSWORD）
+              本机开发管理员密码（至少 6 个字符；可使用数字或任意字符；生产环境在 Pages Secret 设置 ADMIN_PASSWORD）
               </label>
               <input
                 type="password"
                 value={newPassword}
                 onChange={e => setNewPassword(e.target.value)}
-                placeholder="设置新密码（至少 12 位；仅 localhost 有效）"
+                placeholder="设置新密码（至少 6 个字符；仅 localhost 有效）"
                 className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100"
                 required
               />

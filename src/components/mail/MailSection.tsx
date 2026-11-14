@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useApp } from '../../context/AppContext';
-import { MailMessage } from '../../types';
+import { MailMessage, User } from '../../types';
 import {
   Mail,
   Inbox,
@@ -17,6 +17,9 @@ import {
   ChevronRight,
   Reply,
   KeyRound,
+  Users,
+  UserCheck,
+  UserX,
 } from 'lucide-react';
 
 async function readMailApiJson(response: Response, label: string): Promise<any> {
@@ -39,6 +42,7 @@ export const MailSection: React.FC = () => {
     updateEmailSettings,
     currentUser,
     users,
+    setUsers,
     moveToTrash,
     showToast,
   } = useApp();
@@ -63,6 +67,10 @@ export const MailSection: React.FC = () => {
   const [inboundServerStatus, setInboundServerStatus] = useState<any>(null);
   const [inboxLoadError, setInboxLoadError] = useState('');
   const [isRefreshingInbox, setIsRefreshingInbox] = useState(false);
+  const [registeredUsers, setRegisteredUsers] = useState<User[]>([]);
+  const [registeredUsersLoading, setRegisteredUsersLoading] = useState(true);
+  const [registeredUsersError, setRegisteredUsersError] = useState('');
+  const [registeredUserActionId, setRegisteredUserActionId] = useState<string | null>(null);
   const [frontendTestFingerprint, setFrontendTestFingerprint] = useState('');
   const [frontendTestFailedFingerprint, setFrontendTestFailedFingerprint] = useState('');
   const [backendTestResult, setBackendTestResult] = useState<boolean | null>(null);
@@ -125,6 +133,122 @@ export const MailSection: React.FC = () => {
   }, [currentUser?.role, setMails]);
 
   useEffect(() => { void refreshServerInbox(); }, [refreshServerInbox]);
+
+  const refreshRegisteredUsers = useCallback(async () => {
+    if (currentUser?.role !== 'admin') return;
+    let token = '';
+    try { token = sessionStorage.getItem('fox3_admin_session') || ''; } catch {}
+    if (!token) {
+      setRegisteredUsers([]);
+      setRegisteredUsersError('缺少管理员会话。请通过已部署的管理员账号重新登录后刷新；不会显示本地缓存或示例账号。');
+      return;
+    }
+
+    setRegisteredUsersLoading(true);
+    setRegisteredUsersError('');
+    try {
+      const response = await fetch('/api/admin/users', {
+        method: 'GET',
+        headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
+      });
+      const result = await readMailApiJson(response, '已注册用户接口');
+      if (response.status === 401) throw new Error('管理员会话无效或已过期（HTTP 401）。请重新登录管理员账号后重试。');
+      if (response.status === 503) throw new Error(`账户服务暂不可用（HTTP 503）：${result?.error || '请检查 Pages Functions 与 D1 绑定 DB。'}`);
+      if (!response.ok || result?.success !== true || !Array.isArray(result?.users)) {
+        throw new Error(result?.error || result?.message || `读取 D1 用户失败（HTTP ${response.status}）。`);
+      }
+      const remoteUsers: User[] = result.users.map((item: any) => {
+        const createdAtValue = item?.createdAt;
+        const createdAt = typeof createdAtValue === 'number'
+          ? createdAtValue
+          : (Date.parse(String(createdAtValue || '')) || 0);
+        return {
+          id: String(item?.id ?? ''),
+          username: String(item?.username ?? ''),
+          email: String(item?.email ?? ''),
+          role: item?.role === 'admin' ? 'admin' : 'user',
+          createdAt,
+          status: item?.status === 'disabled' ? 'disabled' : 'active',
+        };
+      });
+      setRegisteredUsers(remoteUsers);
+      setUsers(remoteUsers);
+    } catch (error: any) {
+      setRegisteredUsersError(error?.message || '读取 D1 用户失败，请稍后重试。');
+    } finally {
+      setRegisteredUsersLoading(false);
+    }
+  }, [currentUser?.role, setUsers]);
+
+  useEffect(() => {
+    if (currentUser?.role === 'admin') void refreshRegisteredUsers();
+  }, [currentUser?.role, refreshRegisteredUsers]);
+
+  const handleRegisteredUserStatus = async (user: User) => {
+    if (user.role === 'admin') return;
+    const status: User['status'] = user.status === 'active' ? 'disabled' : 'active';
+    const token = sessionStorage.getItem('fox3_admin_session');
+    if (!token) {
+      setRegisteredUsersError('管理员会话已失效。请重新登录后再操作。');
+      showToast('管理员会话已失效，请重新登录后再操作。', 'error');
+      return;
+    }
+    setRegisteredUserActionId(user.id);
+    setRegisteredUsersError('');
+    try {
+      const response = await fetch('/api/admin/users', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ id: user.id, status }),
+      });
+      const result = await readMailApiJson(response, '用户状态更新接口');
+      if (response.status === 401) throw new Error('管理员会话无效或已过期（HTTP 401），请重新登录。');
+      if (response.status === 503) throw new Error(`账户服务暂不可用（HTTP 503）：${result?.error || '请检查 D1 绑定 DB。'}`);
+      if (!response.ok || result?.success !== true) throw new Error(result?.error || result?.message || `更新失败（HTTP ${response.status}）。`);
+      setRegisteredUsers(previous => previous.map(item => item.id === user.id ? { ...item, status } : item));
+      setUsers(previous => previous.map(item => item.id === user.id ? { ...item, status } : item));
+      showToast(`已在 D1 中${status === 'active' ? '启用' : '禁用'}账号「${user.username}」。`, 'success');
+    } catch (error: any) {
+      const message = error?.message || '更新账号状态失败。';
+      setRegisteredUsersError(message);
+      showToast(message, 'error');
+    } finally {
+      setRegisteredUserActionId(null);
+    }
+  };
+
+  const handleDeleteRegisteredUser = async (user: User) => {
+    if (user.role === 'admin') return;
+    if (!window.confirm(`确定从 D1 永久删除注册账号「${user.username}」（${user.email || '未填写邮箱'}）吗？此操作无法撤销。`)) return;
+    const token = sessionStorage.getItem('fox3_admin_session');
+    if (!token) {
+      setRegisteredUsersError('管理员会话已失效。请重新登录后再操作。');
+      showToast('管理员会话已失效，请重新登录后再操作。', 'error');
+      return;
+    }
+    setRegisteredUserActionId(user.id);
+    setRegisteredUsersError('');
+    try {
+      const response = await fetch('/api/admin/users', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ id: user.id }),
+      });
+      const result = await readMailApiJson(response, '用户删除接口');
+      if (response.status === 401) throw new Error('管理员会话无效或已过期（HTTP 401），请重新登录。');
+      if (response.status === 503) throw new Error(`账户服务暂不可用（HTTP 503）：${result?.error || '请检查 D1 绑定 DB。'}`);
+      if (!response.ok || result?.success !== true) throw new Error(result?.error || result?.message || `删除失败（HTTP ${response.status}）。`);
+      setRegisteredUsers(previous => previous.filter(item => item.id !== user.id));
+      setUsers(previous => previous.filter(item => item.id !== user.id));
+      showToast(`已从 D1 删除账号「${user.username}」。`, 'success');
+    } catch (error: any) {
+      const message = error?.message || '删除账号失败。';
+      setRegisteredUsersError(message);
+      showToast(message, 'error');
+    } finally {
+      setRegisteredUserActionId(null);
+    }
+  };
 
   // Filled parameters are never called connected until an actual test message succeeds.
   const frontendOutboundConfigured = Boolean(
@@ -952,6 +1076,88 @@ export const MailSection: React.FC = () => {
             </form>
           </div>
         </div>
+      )}
+
+      {currentUser?.role === 'admin' && (
+        <section className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl p-4 sm:p-6 shadow-sm space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h3 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                <Users className="w-5 h-5 text-indigo-500" />
+                <span>已注册用户管理</span>
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">数据直接读取 Cloudflare D1；不会使用本地示例或缓存用户代替服务器结果。</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => void refreshRegisteredUsers()}
+              disabled={registeredUsersLoading}
+              className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 disabled:opacity-50 text-xs font-semibold text-slate-700 dark:text-slate-200"
+            >
+              <RotateCcw className={`w-4 h-4 ${registeredUsersLoading ? 'animate-spin' : ''}`} />
+              {registeredUsersLoading ? '加载中…' : '刷新用户'}
+            </button>
+          </div>
+
+          <div className="text-xs font-semibold text-slate-600 dark:text-slate-300" aria-live="polite">
+            {registeredUsersLoading ? '正在从 D1 加载账号…' : `D1 账号数：${registeredUsers.length}`}
+          </div>
+
+          {registeredUsersError && (
+            <div role="alert" className="rounded-xl border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/40 p-3 text-xs leading-relaxed text-rose-700 dark:text-rose-300">
+              <b>无法读取或更新服务器账号：</b> {registeredUsersError}
+            </div>
+          )}
+
+          {!registeredUsersLoading && !registeredUsersError && registeredUsers.length === 0 && (
+            <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 p-5 text-center text-xs text-slate-500 dark:text-slate-400">
+              D1 当前没有已注册账号。
+            </div>
+          )}
+
+          {!registeredUsersLoading && registeredUsers.length > 0 && (
+            <div className="space-y-3">
+              {registeredUsers.map(user => (
+                <article key={user.id} className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-800/40 p-3 sm:p-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="min-w-0 space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-bold text-slate-900 dark:text-slate-100 break-all">{user.username || '（无用户名）'}</span>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300">{user.role === 'admin' ? '管理员' : '普通用户'}</span>
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full ${user.status === 'active' ? 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300' : 'bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300'}`}>
+                          {user.status === 'active' ? '已启用' : '已禁用'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-600 dark:text-slate-300 break-all">邮箱：{user.email || '未绑定邮箱'}</p>
+                      <p className="text-[11px] text-slate-400">注册时间：{user.createdAt ? new Date(user.createdAt).toLocaleString() : '未知'}</p>
+                    </div>
+                    {user.role !== 'admin' && (
+                      <div className="flex flex-wrap gap-2 sm:shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => void handleRegisteredUserStatus(user)}
+                          disabled={registeredUserActionId !== null}
+                          className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold disabled:opacity-50 ${user.status === 'active' ? 'bg-amber-100 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300' : 'bg-emerald-100 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300'}`}
+                        >
+                          {user.status === 'active' ? <UserX className="w-3.5 h-3.5" /> : <UserCheck className="w-3.5 h-3.5" />}
+                          {user.status === 'active' ? '禁用账号' : '启用账号'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleDeleteRegisteredUser(user)}
+                          disabled={registeredUserActionId !== null}
+                          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-rose-100 dark:bg-rose-950/50 text-rose-700 dark:text-rose-300 text-xs font-semibold disabled:opacity-50"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />删除
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
       )}
     </div>
   );

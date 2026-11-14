@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
-import { X, Mail, Lock, User, ShieldAlert, CheckCircle, AlertCircle, Key, Sparkles, UserCheck, KeyRound } from 'lucide-react';
+import { X, Mail, Lock, User, CheckCircle, AlertCircle, Key, Sparkles, UserCheck, KeyRound } from 'lucide-react';
 import { hashPassword, verifyPassword } from '../../utils/password';
 
 interface AuthModalProps {
@@ -42,8 +42,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     emailSettings,
   } = useApp();
 
-  // Mode: 'login' | 'register' | 'reset-admin'
-  const [mode, setMode] = useState<'login' | 'register' | 'reset-admin'>('login');
+  // Mode: 'login' | 'register' | 'reset-password' | 'reset-admin'
+  const [mode, setMode] = useState<'login' | 'register' | 'reset-password' | 'reset-admin'>('login');
   // Registration submode: 'standard' (username + password) | 'email' (username + email + password)
   const [registerType, setRegisterType] = useState<'standard' | 'email'>('standard');
 
@@ -57,6 +57,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   const [countdown, setCountdown] = useState(0);
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [resetEmail, setResetEmail] = useState('');
+  const [resetCode, setResetCode] = useState('');
+  const [resetNewPassword, setResetNewPassword] = useState('');
+  const [resetConfirmPassword, setResetConfirmPassword] = useState('');
+  const [resetCountdown, setResetCountdown] = useState(0);
   const [deploymentSecret, setDeploymentSecret] = useState(''); // Secret to reset or authenticate admin
   const [newAdminPassword, setNewAdminPassword] = useState('');
   const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -69,6 +74,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     }
     return () => clearTimeout(timer);
   }, [countdown]);
+
+  React.useEffect(() => {
+    let timer: NodeJS.Timeout;
+    if (resetCountdown > 0) {
+      timer = setTimeout(() => setResetCountdown(resetCountdown - 1), 1000);
+    }
+    return () => clearTimeout(timer);
+  }, [resetCountdown]);
 
   // Reset modal mode to login whenever modal opens or closes
   React.useEffect(() => {
@@ -85,6 +98,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
       setSentCode(null);
       setSentCodeLength(emailSettings.verificationCodeLength || 6);
       setCountdown(0);
+      setResetEmail('');
+      setResetCode('');
+      setResetNewPassword('');
+      setResetConfirmPassword('');
+      setResetCountdown(0);
       setDeploymentSecret('');
       setNewAdminPassword('');
     }
@@ -151,8 +169,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     if (isAdminAccount) {
       const isLocalDevelopment = ['localhost', '127.0.0.1'].includes(window.location.hostname);
       const localAdminPass = (adminPassword || '').trim();
-      const isKnownWeakDefault = ['123456', 'fox3admin2026'].includes(localAdminPass);
-      if (isLocalDevelopment && localAdminPass.length >= 12 && !isKnownWeakDefault && inputPass === localAdminPass) {
+      if (isLocalDevelopment && localAdminPass.length >= 6 && inputPass === localAdminPass) {
         const adminUser = users.find(u => u.role === 'admin' || u.username.toLowerCase() === configuredAdminName) || {
           id: 'user_fox_admin',
           username: configuredAdminName,
@@ -166,7 +183,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
         setTimeout(() => { onClose(); }, 500);
         return;
       }
-      setStatusMsg({ type: 'error', text: '管理员远端验证失败。请确认 Cloudflare Pages Functions 已部署，并在后台配置 ADMIN_PASSWORD；离线管理员登录仅允许 localhost 的自定义强密码。' });
+      setStatusMsg({ type: 'error', text: '管理员远端验证失败。请确认 Cloudflare Pages Functions 已部署，并在后台配置 ADMIN_PASSWORD；本机开发登录仅使用已设置的管理员登录密码。' });
       return;
     }
 
@@ -264,6 +281,75 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     }
   };
 
+  const handleSendResetCode = async () => {
+    const trimmedEmail = resetEmail.trim();
+    if (!trimmedEmail || !trimmedEmail.includes('@') || !trimmedEmail.includes('.')) {
+      setStatusMsg({ type: 'error', text: '请输入有效的邮箱地址' });
+      return;
+    }
+    setStatusMsg({ type: 'success', text: '正在向您的邮箱投递验证码，请稍候...' });
+    try {
+      const resp = await fetch('/api/auth/reset/send-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: trimmedEmail }),
+      });
+      const data = await readApiJson(resp, '密码重置验证码发送接口');
+      if (!resp.ok || !data?.success) {
+        setStatusMsg({ type: 'error', text: data?.error || data?.message || '验证码发送失败，请稍后重试。' });
+        return;
+      }
+      setResetCountdown(60);
+      setStatusMsg({ type: 'success', text: data.message || '若该邮箱已注册，验证码将发送至邮箱。' });
+    } catch (error: any) {
+      setStatusMsg({ type: 'error', text: error?.message || '无法连接密码重置服务，请稍后重试。' });
+    }
+  };
+
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setStatusMsg(null);
+    const email = resetEmail.trim();
+    const code = resetCode.trim();
+    const newPassword = resetNewPassword.trim();
+    const confirmNewPassword = resetConfirmPassword.trim();
+    if (!email || !email.includes('@') || !email.includes('.')) {
+      setStatusMsg({ type: 'error', text: '请输入有效的邮箱地址' });
+      return;
+    }
+    if (!code) {
+      setStatusMsg({ type: 'error', text: '请输入邮箱验证码' });
+      return;
+    }
+    if (newPassword.length < 6) {
+      setStatusMsg({ type: 'error', text: '新密码长度至少需 6 位字符' });
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      setStatusMsg({ type: 'error', text: '两次输入的新密码不一致，请核对' });
+      return;
+    }
+    try {
+      const resp = await fetch('/api/auth/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, code, newPassword }),
+      });
+      const data = await readApiJson(resp, '密码重置接口');
+      if (!resp.ok || !data?.success) {
+        setStatusMsg({ type: 'error', text: data?.error || '密码重置失败，请检查验证码后重试。' });
+        return;
+      }
+      setResetCode('');
+      setResetNewPassword('');
+      setResetConfirmPassword('');
+      setMode('login');
+      setStatusMsg({ type: 'success', text: '密码已重置成功，请使用新密码登录。' });
+    } catch (error: any) {
+      setStatusMsg({ type: 'error', text: error?.message || '无法连接密码重置服务，请稍后重试。' });
+    }
+  };
+
   // Reset or specify admin password via deployment variable secret
   const handleResetAdminPassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -278,8 +364,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
       return;
     }
 
-    if (!newPass || newPass.length < 12) {
-      setStatusMsg({ type: 'error', text: '新管理员密码至少需要 12 个字符' });
+    if (!newPass || newPass.length < 6) {
+      setStatusMsg({ type: 'error', text: '新管理员登录密码至少需要 6 个字符' });
       return;
     }
 
@@ -359,7 +445,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email: trimmedEmail, code: verificationCode.trim() }),
         });
-        const verificationData = await verificationResp.json();
+        const verificationData = await readApiJson(verificationResp, '邮箱验证码验证接口');
         if (!verificationResp.ok || !verificationData?.success) {
           setStatusMsg({ type: 'error', text: verificationData?.error || '验证码不正确或已过期，请重新获取' });
           return;
@@ -375,7 +461,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
       return;
     }
 
-    if (confirmPassword && confirmPassword.trim() !== trimmedPass) {
+    if (confirmPassword.trim() !== trimmedPass) {
       setStatusMsg({ type: 'error', text: '两次输入的密码不一致，请核对' });
       return;
     }
@@ -407,40 +493,46 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
       return;
     }
 
-    // Construct new user entity
-    const newUser = {
-      id: `user_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-      username: trimmedUsername,
-      email: trimmedEmail || `${lowerUsername}@user.blog`,
-      role: 'user' as const,
-      createdAt: Date.now(),
-      status: 'active' as const,
+    let newUser: {
+      id: string;
+      username: string;
+      email: string;
+      role: 'user';
+      createdAt: number;
+      status: 'active';
     };
-
     try {
       const registerResp = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          id: newUser.id,
-          username: newUser.username,
+          username: trimmedUsername,
           email: trimmedEmail,
           password: trimmedPass,
           verificationCode: trimmedEmail ? verificationCode.trim() : undefined,
         }),
       });
-      const registerData = await registerResp.json();
-      if (!registerResp.ok || !registerData?.success) {
-        if (trimmedEmail) {
-          setStatusMsg({ type: 'error', text: registerData?.error || '注册失败，请稍后重试。' });
-          return;
-        }
-      }
-    } catch (error: any) {
-      if (trimmedEmail) {
-        setStatusMsg({ type: 'error', text: error?.message || '无法连接注册服务，邮箱注册暂不可用。' });
+      const registerData = await readApiJson(registerResp, '账号注册接口');
+      if (!registerResp.ok || !registerData?.success || !registerData?.user) {
+        setStatusMsg({ type: 'error', text: registerData?.error || '注册失败，请稍后重试。' });
         return;
       }
+      const serverUser = registerData.user;
+      if (!serverUser.id || !serverUser.username || !serverUser.createdAt) {
+        setStatusMsg({ type: 'error', text: '注册服务返回的用户信息不完整，请稍后重试。' });
+        return;
+      }
+      newUser = {
+        id: String(serverUser.id),
+        username: String(serverUser.username),
+        email: String(serverUser.email || ''),
+        role: 'user',
+        createdAt: Number(serverUser.createdAt),
+        status: 'active',
+      };
+    } catch (error: any) {
+      setStatusMsg({ type: 'error', text: error?.message || '无法连接注册服务，注册已中止。' });
+      return;
     }
 
     // Save password mapping into localStorage
@@ -459,6 +551,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
       localStorage.setItem('fox3_user_passwords', JSON.stringify(currentPassMap));
     } catch (e) {
       console.warn('Password persistence error:', e);
+      setStatusMsg({ type: 'error', text: '注册已由服务器处理，但无法保存本地密码映射，因此未自动登录。请尝试直接登录。' });
+      return;
     }
 
     // If email registration, send welcome notification email to system mailbox
@@ -469,7 +563,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
         sender: 'service@whitefox.blog',
         recipient: trimmedEmail,
         subject: '【fox3 博客】恭喜账号注册成功',
-        body: `尊敬的 ${trimmedUsername}：\n\n欢迎加入 fox3 博客社区！您的账号（邮箱：${trimmedEmail}）已成功完成注册。\n\n【重要提示】\n本博客系统不提供密码找回服务，请务必妥善记录并保管好您的账号和登录密码。\n\n祝您阅读愉快！`,
+        body: `尊敬的 ${newUser.username}：\n\n欢迎加入 fox3 博客社区！您的账号（邮箱：${newUser.email}）已成功完成注册。\n\n【重要提示】\n如忘记密码，您可以使用邮箱验证码重置登录密码，请确保能够访问注册邮箱。\n\n祝您阅读愉快！`,
         date: new Date().toISOString().replace('T', ' ').substring(0, 19),
         read: false,
         isStarred: true,
@@ -500,39 +594,35 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   const isForcedEmailReg = systemSettings.emailRegistrationOnly;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
-      <div className="relative w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 p-6 md:p-8 overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 bg-black/60 backdrop-blur-sm animate-in fade-in">
+      <div className="relative flex flex-col w-full max-w-md max-h-[calc(100dvh-1rem)] bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 p-6 md:p-8 overflow-hidden">
         {/* Close Button */}
         <button
           onClick={onClose}
           aria-label="关闭"
-          className="absolute top-5 right-5 p-2 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+          className="absolute top-4 right-4 z-10 p-2 rounded-full text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
         >
           <X className="w-5 h-5" />
         </button>
 
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain -mx-1 px-1">
         {/* Modal Header */}
         <div className="text-center mb-5">
           <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-rose-500/10 text-rose-500 mb-2">
             {mode === 'login' ? <Key className="w-6 h-6" /> : <Sparkles className="w-6 h-6" />}
           </div>
           <h2 className="text-2xl font-bold bg-gradient-to-r from-rose-500 to-pink-600 bg-clip-text text-transparent">
-            {mode === 'login' ? '用户登录' : '注册新账号'}
+            {mode === 'login' ? '用户登录' : mode === 'reset-password' ? '邮箱验证码重置密码' : mode === 'reset-admin' ? '管理员密码管理' : '注册新账号'}
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
             {mode === 'login'
               ? '支持用户名或邮箱直接登录'
-              : '注册后即刻开启专属个性化数字化空间'}
+              : mode === 'reset-password'
+                ? '通过注册邮箱验证码安全重置登录密码'
+                : mode === 'reset-admin'
+                  ? '管理员登录密码与会话密钥相互独立'
+                  : '注册后即刻开启专属个性化数字化空间'}
           </p>
-        </div>
-
-        {/* Prominent Password Recovery Notice */}
-        <div className="mb-4 p-3 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-900/50 flex items-start gap-2.5 text-xs text-amber-800 dark:text-amber-200">
-          <ShieldAlert className="w-4 h-4 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
-          <div className="leading-relaxed">
-            <span className="font-semibold">特别提醒：</span>
-            本系统不支持密码找回功能，请务必妥善保存并牢记您的账号与密码！
-          </div>
         </div>
 
         {/* Status Alert */}
@@ -598,6 +688,20 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
               立即登录
             </button>
 
+            <div className="text-center">
+              <button
+                type="button"
+                onClick={() => {
+                  setResetEmail(account.includes('@') ? account.trim() : '');
+                  setMode('reset-password');
+                  setStatusMsg(null);
+                }}
+                className="text-xs text-rose-500 font-semibold hover:underline cursor-pointer"
+              >
+                忘记密码？邮箱验证码重置
+              </button>
+            </div>
+
             <div className="pt-1 text-center">
               <button
                 type="button"
@@ -617,7 +721,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
           <form onSubmit={handleResetAdminPassword} className="space-y-4">
             <div className="p-3 rounded-xl bg-sky-50 dark:bg-sky-950/40 border border-sky-200/80 dark:border-sky-900/50 text-xs text-sky-800 dark:text-sky-300">
               <span className="font-semibold">管理员密码管理：</span>
-              生产管理员自行设定登录密码，并只能在 Cloudflare Pages → Settings → Variables and Secrets 中设置或修改 Secret <code>ADMIN_PASSWORD</code>，随后重新部署。本页仅允许 localhost 开发环境设置本机密码；生产环境未配置该变量时，管理员登录会被拒绝，不会开放免密登录。
+              生产管理员自行设定至少 6 个字符的登录密码，可使用纯数字、字母、符号或组合；仅在 Cloudflare Pages → Settings → Variables and Secrets 中设置或修改 Secret <code>ADMIN_PASSWORD</code>，随后重新部署。本页仅允许 localhost 开发环境设置本机密码。<code>ADMIN_SESSION_SECRET</code> 是另一个独立的会话签名密钥，至少 32 个字符，不是登录密码长度要求。
             </div>
 
             <div>
@@ -646,7 +750,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                   type="password"
                   value={newAdminPassword}
                   onChange={e => setNewAdminPassword(e.target.value)}
-                  placeholder="设置至少 12 位的新密码"
+                  placeholder="至少 6 个字符，可自选数字或其他字符"
                   className="w-full pl-9 pr-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-sm focus:outline-none focus:ring-2 focus:ring-sky-500 text-slate-800 dark:text-slate-100"
                   required
                 />
@@ -660,9 +764,88 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
               重置并立即登录管理员
             </button>
           </form>
+        ) : mode === 'reset-password' ? (
+          <form onSubmit={handleResetPassword} className="space-y-4">
+            <div className="p-3 rounded-xl bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-900 text-xs leading-relaxed text-sky-800 dark:text-sky-200">
+              请输入注册时绑定的邮箱。为保护账号隐私，系统会统一提示；只有已注册邮箱且邮件服务可用时才会实际发送验证码。
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">注册邮箱</label>
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <Mail className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
+                  <input
+                    type="email"
+                    value={resetEmail}
+                    onChange={e => setResetEmail(e.target.value)}
+                    placeholder="name@example.com"
+                    className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-sm text-slate-800 dark:text-slate-100"
+                    required
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void handleSendResetCode()}
+                  disabled={resetCountdown > 0}
+                  className="shrink-0 px-3 py-2 rounded-xl border border-rose-200 dark:border-rose-900/50 bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-300 text-xs font-semibold disabled:opacity-50"
+                >
+                  {resetCountdown > 0 ? `${resetCountdown}s 后重试` : '获取验证码'}
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">邮箱验证码</label>
+              <div className="relative">
+                <KeyRound className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={8}
+                  value={resetCode}
+                  onChange={e => setResetCode(e.target.value.trim())}
+                  placeholder="输入收到的验证码"
+                  className="w-full pl-9 pr-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-sm text-slate-800 dark:text-slate-100"
+                  required
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">设置新密码（至少 6 个字符）</label>
+              <input
+                type="password"
+                value={resetNewPassword}
+                onChange={e => setResetNewPassword(e.target.value)}
+                autoComplete="new-password"
+                className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-sm text-slate-800 dark:text-slate-100"
+                required
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">确认新密码</label>
+              <input
+                type="password"
+                value={resetConfirmPassword}
+                onChange={e => setResetConfirmPassword(e.target.value)}
+                autoComplete="new-password"
+                className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-sm text-slate-800 dark:text-slate-100"
+                required
+              />
+            </div>
+
+            <button type="submit" className="w-full py-2.5 bg-gradient-to-r from-rose-500 to-pink-600 text-white font-semibold rounded-xl text-sm shadow-md">
+              确认重置密码
+            </button>
+          </form>
         ) : (
           /* REGISTRATION FORM */
           <div className="space-y-4">
+            <div className="p-3 rounded-xl bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-900 text-xs leading-relaxed text-sky-800 dark:text-sky-200">
+              <b>推荐使用邮箱注册：</b>验证并绑定可访问的邮箱后，可通过邮箱验证码找回并重置密码。普通用户名注册未绑定真实邮箱，无法自助找回密码。
+            </div>
             {/* Registration Mode Selector Tabs */}
             {!isForcedEmailReg ? (
               <div className="flex p-1 bg-slate-100 dark:bg-slate-800 rounded-xl text-xs font-semibold">
@@ -831,8 +1014,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
           </div>
         )}
 
-        {/* Mode Switch Footer */}
-        <div className="mt-5 pt-4 border-t border-slate-100 dark:border-slate-800 text-center">
+        </div>
+        {/* Mode Switch Footer remains visible while the form above scrolls on phones. */}
+        <div className="shrink-0 mt-3 pt-3 border-t border-slate-100 dark:border-slate-800 text-center">
           {mode === 'login' ? (
             <div className="flex items-center justify-center gap-4 text-xs text-slate-500 dark:text-slate-400">
               <span>还没有账号？</span>

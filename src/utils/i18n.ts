@@ -85,6 +85,8 @@ export interface Translations {
     readNow: string;
     addToCart: string;
     buyNow: string;
+    backupNow: string;
+    restoreBackup: string;
   };
   // View Modes
   views: {
@@ -277,6 +279,8 @@ export const i18nDict: Record<Locale, Translations> = {
       readNow: '立即阅读',
       addToCart: '加入清单',
       buyNow: '立即下单',
+      backupNow: '发起备份',
+      restoreBackup: '选择恢复',
     },
     views: {
       big: '大图模式',
@@ -462,6 +466,8 @@ export const i18nDict: Record<Locale, Translations> = {
       readNow: '立即閱讀',
       addToCart: '加入清單',
       buyNow: '立即下單',
+      backupNow: '立即備份',
+      restoreBackup: '選擇還原',
     },
     views: {
       big: '大圖模式',
@@ -647,6 +653,8 @@ export const i18nDict: Record<Locale, Translations> = {
       readNow: 'Read Now',
       addToCart: 'Add to List',
       buyNow: 'Order Now',
+      backupNow: 'Back Up Now',
+      restoreBackup: 'Restore',
     },
     views: {
       big: 'Big Card',
@@ -832,6 +840,8 @@ export const i18nDict: Record<Locale, Translations> = {
       readNow: '지금 읽기',
       addToCart: '장바구니 담기',
       buyNow: '주문하기',
+      backupNow: '지금 백업',
+      restoreBackup: '복원',
     },
     views: {
       big: '크게 보기',
@@ -1017,6 +1027,8 @@ export const i18nDict: Record<Locale, Translations> = {
       readNow: 'اقرأ الآن',
       addToCart: 'إضافة للسلة',
       buyNow: 'اطلب الآن',
+      backupNow: 'نسخ احتياطي الآن',
+      restoreBackup: 'استعادة',
     },
     views: {
       big: 'كبير',
@@ -1202,6 +1214,8 @@ export const i18nDict: Record<Locale, Translations> = {
       readNow: 'अभी पढ़ें',
       addToCart: 'सूची में जोड़ें',
       buyNow: 'अभी ऑर्डर करें',
+      backupNow: 'अभी बैकअप लें',
+      restoreBackup: 'पुनर्स्थापित करें',
     },
     views: {
       big: 'बड़ा कार्ड',

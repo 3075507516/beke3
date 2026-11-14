@@ -185,6 +185,13 @@ interface AppContextType {
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
+const GLOBAL_THEME_MODES: GlobalThemeMode[] = [
+  'modern', 'win98', 'mac-classic', 'terminal', 'parchment', 'gameboy',
+  'cyberpunk', 'steampunk', 'nordic', 'leather', 'blueprint', 'retro',
+];
+const isGlobalThemeMode = (value: unknown): value is GlobalThemeMode =>
+  typeof value === 'string' && GLOBAL_THEME_MODES.includes(value as GlobalThemeMode);
+
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // The administrator password is never initialized with a universal/default credential.
   const [adminUsername, setAdminUsernameState] = useState<string>(() =>
@@ -192,10 +199,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   );
   const [adminPassword, setAdminPasswordState] = useState<string>(() => {
     const saved = loadLocalStorage<string>(STORAGE_KEYS.ADMIN_PASSWORD, '');
-    if (['123456', 'fox3admin2026'].includes(String(saved).trim())) {
-      try { localStorage.removeItem(STORAGE_KEYS.ADMIN_PASSWORD); } catch {}
-      return '';
-    }
     return saved;
   });
 
@@ -224,7 +227,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, []);
 
   const updateAdminPassword = (newPass: string): boolean => {
-    if (!newPass || newPass.length < 12) return false;
+    if (!newPass || newPass.length < 6) return false;
     setAdminPasswordState(newPass);
     saveLocalStorage(STORAGE_KEYS.ADMIN_PASSWORD, newPass);
     return true;
@@ -468,8 +471,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   );
 
   const setThemeMode = (mode: GlobalThemeMode) => {
+    if (!isGlobalThemeMode(mode)) return;
     setThemeModeState(mode);
     saveLocalStorage('fox3_global_theme', mode);
+    try {
+      const bc = new BroadcastChannel('fox3_realtime_sync');
+      bc.postMessage({ type: 'SYNC_ALL', payload: { themeMode: mode } });
+      bc.close();
+    } catch {}
   };
 
   const [darkMode, setDarkModeState] = useState<boolean>(false);
@@ -732,6 +741,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           if (payload.webDavConfig) setWebDavConfig(payload.webDavConfig);
           if (payload.trashItems) setTrashItems(payload.trashItems);
           if (payload.systemSettings) setSystemSettings(payload.systemSettings);
+          if (isGlobalThemeMode(payload.themeMode)) {
+            setThemeModeState(payload.themeMode);
+            saveLocalStorage('fox3_global_theme', payload.themeMode);
+          }
         }
       };
     } catch (e) {
@@ -759,6 +772,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         webDavBackups,
         trashItems,
         systemSettings,
+        themeMode,
         updatedAt: Date.now(),
       };
 
@@ -796,6 +810,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             if (Array.isArray(remote.webDavBackups)) setWebDavBackups(remote.webDavBackups);
             if (Array.isArray(remote.trashItems)) setTrashItems(remote.trashItems);
             if (remote.systemSettings) setSystemSettings(remote.systemSettings);
+            if (isGlobalThemeMode(remote.themeMode)) setThemeMode(remote.themeMode);
           }
         }
       }
@@ -820,7 +835,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         message: '数据已在当前设备与多端完成对齐',
       });
     }
-  }, [posts, books, photos, media, mails, products, orders, chatMessages, webDavBackups, webDavConfig, trashItems, systemSettings]);
+  }, [posts, books, photos, media, mails, products, orders, chatMessages, webDavBackups, webDavConfig, trashItems, systemSettings, themeMode]);
 
   // Smart merge function preserving both local and remote unique items so refreshing never wipes data
   const mergeById = <T extends { id: string }>(localList: T[], remoteList: any[]): T[] => {
@@ -878,6 +893,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 heroBadge: remote.systemSettings.heroBadge ?? prev.heroBadge,
               }));
             }
+            if (isGlobalThemeMode(remote.themeMode)) setThemeMode(remote.themeMode);
           }
         }
       } catch (e) {
@@ -902,6 +918,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           products,
           websites,
           systemSettings,
+          themeMode,
           updatedAt: Date.now(),
         };
         const bc = new BroadcastChannel('fox3_realtime_sync');
@@ -921,7 +938,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return () => {
       if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
     };
-  }, [posts, books, photos, media, products, websites, systemSettings]);
+  }, [posts, books, photos, media, products, websites, systemSettings, themeMode]);
 
   // Auto-sync timer: disabled continuous background pinging by default, only sync on user action or window visibility change
   useEffect(() => {
@@ -1069,6 +1086,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
     if (scope === 'full' || scope === 'settings') {
       backupData.systemSettings = systemSettings;
+      backupData.themeMode = themeMode;
       backupData.emailSettings = {
         ...emailSettings,
         apiKey: '',

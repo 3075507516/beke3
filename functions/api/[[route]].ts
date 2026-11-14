@@ -67,6 +67,12 @@ function getOutboundSettings(client: any, env: any): OutboundMailSettings {
   };
 }
 
+function hasOutboundMailService(settings: OutboundMailSettings): boolean {
+  if (!settings.senderEmail) return false;
+  if (settings.provider === 'smtp') return Boolean(settings.smtpHost && settings.smtpPass);
+  return Boolean(settings.apiKey);
+}
+
 async function findRegisteredUserEmail(db: any, identity: string): Promise<string | null> {
   if (!db || !identity) return null;
   try {
@@ -92,6 +98,58 @@ async function ensureVerificationTables(db: any): Promise<void> {
   await db.prepare(`CREATE TABLE IF NOT EXISTS fox3_email_ip_rates (
     ipHash TEXT PRIMARY KEY,
     expiresAt INTEGER NOT NULL
+  )`).run();
+}
+
+async function ensureUsersTable(db: any): Promise<void> {
+  await db.prepare(`CREATE TABLE IF NOT EXISTS fox3_users (
+    id TEXT PRIMARY KEY,
+    username TEXT,
+    email TEXT,
+    password TEXT,
+    role TEXT DEFAULT 'user',
+    createdAt INTEGER,
+    status TEXT DEFAULT 'active'
+  )`).run();
+
+  const info = await db.prepare('PRAGMA table_info(fox3_users)').all();
+  const columns = new Set((info?.results || []).map((column: any) => String(column.name)));
+  const additions: Array<[string, string]> = [
+    ['id', 'TEXT'],
+    ['username', 'TEXT'],
+    ['email', 'TEXT'],
+    ['password', 'TEXT'],
+    ['role', "TEXT DEFAULT 'user'"],
+    ['createdAt', 'INTEGER'],
+    ['status', "TEXT DEFAULT 'active'"],
+  ];
+  for (const [name, definition] of additions) {
+    if (!columns.has(name)) {
+      await db.prepare(`ALTER TABLE fox3_users ADD COLUMN ${name} ${definition}`).run();
+    }
+  }
+  // Non-unique indexes are safe to add even when legacy data has duplicates.
+  await db.prepare('CREATE INDEX IF NOT EXISTS fox3_users_email_idx ON fox3_users(email)').run();
+  await db.prepare('CREATE INDEX IF NOT EXISTS fox3_users_username_idx ON fox3_users(username)').run();
+}
+
+function isValidEmail(value: string): boolean {
+  if (!value || value.length > 254 || /[\s<>]/.test(value)) return false;
+  const parts = value.split('@');
+  if (parts.length !== 2) return false;
+  const [local, domain] = parts;
+  if (!local || local.length > 64 || !domain || !domain.includes('.')) return false;
+  if (!/^[A-Za-z0-9.!#$%&'*+\/=?^_`{|}~-]+$/.test(local) || local.startsWith('.') || local.endsWith('.') || local.includes('..')) return false;
+  return domain.split('.').every(label => label.length > 0 && label.length <= 63 && /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(label));
+}
+
+async function ensurePasswordResetTable(db: any): Promise<void> {
+  await db.prepare(`CREATE TABLE IF NOT EXISTS fox3_password_resets (
+    email TEXT PRIMARY KEY,
+    code TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    expiresAt INTEGER NOT NULL,
+    lastSentAt INTEGER NOT NULL
   )`).run();
 }
 
@@ -197,15 +255,13 @@ async function createAdminSessionToken(env: any): Promise<string> {
 }
 
 function getConfiguredAdminPassword(env: any): string {
-  const password = String(env.ADMIN_PASSWORD || '').trim();
-  return password.length < 12 || ['123456', 'fox3admin2026'].includes(password) ? '' : password;
+  const password = typeof env.ADMIN_PASSWORD === 'string' ? env.ADMIN_PASSWORD : String(env.ADMIN_PASSWORD ?? '');
+  return password.length < 6 ? '' : password;
 }
 
 function getAdminSessionSecret(env: any): string {
   const configuredSecret = String(env.ADMIN_SESSION_SECRET || '').trim();
-  if (configuredSecret) return configuredSecret.length >= 32 ? configuredSecret : '';
-  const fallbackPassword = getConfiguredAdminPassword(env);
-  return fallbackPassword.length >= 32 ? fallbackPassword : '';
+  return configuredSecret.length >= 32 ? configuredSecret : '';
 }
 
 async function hasAdminSession(request: Request, env: any): Promise<boolean> {
@@ -469,7 +525,7 @@ export const onRequest = async (context: any) => {
         const validUser = defaultAdminName.trim().toLowerCase();
 
         const inputUser = (username || '').trim().toLowerCase();
-        const inputPass = (password || '').trim();
+        const inputPass = typeof password === 'string' ? password : '';
 
         // Check if user matches admin name, 'admin', 'fox', or admin email
         const isAdminUser =
@@ -496,7 +552,7 @@ export const onRequest = async (context: any) => {
             createdAt: Date.now(),
             status: 'active',
           } : null,
-          message: isMatch ? '管理员身份鉴权成功' : credentialsMatch ? '请在部署端设置至少 32 个字符的随机 ADMIN_SESSION_SECRET' : '管理员账号或密码不正确',
+          message: isMatch ? '管理员身份鉴权成功' : credentialsMatch ? '请独立配置至少 32 个字符的 ADMIN_SESSION_SECRET（不可使用 ADMIN_PASSWORD 代替）' : '管理员账号或密码不正确',
         }), {
           headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
         });
@@ -519,7 +575,7 @@ export const onRequest = async (context: any) => {
       const validAdminPass = getConfiguredAdminPassword(env);
 
       const inputAccount = (account || '').trim().toLowerCase();
-      const inputPass = (password || '').trim();
+      const inputPass = typeof password === 'string' ? password : '';
 
       // Check admin credentials
       const isAdminAccount =
@@ -531,7 +587,7 @@ export const onRequest = async (context: any) => {
       if (isAdminAccount && validAdminPass && inputPass === validAdminPass) {
         const sessionToken = await createAdminSessionToken(env);
         if (!sessionToken) {
-          return new Response(JSON.stringify({ success: false, authenticated: false, message: '请在部署端设置至少 32 个字符的随机 ADMIN_SESSION_SECRET' }), {
+          return new Response(JSON.stringify({ success: false, authenticated: false, message: '请独立配置至少 32 个字符的 ADMIN_SESSION_SECRET（不可使用 ADMIN_PASSWORD 代替）' }), {
             status: 503,
             headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
           });
@@ -557,17 +613,7 @@ export const onRequest = async (context: any) => {
       // Check regular user from D1 database if bound
       if (env.DB) {
         try {
-          await env.DB.prepare(
-            `CREATE TABLE IF NOT EXISTS fox3_users (
-              id TEXT PRIMARY KEY,
-              username TEXT UNIQUE,
-              email TEXT,
-              password TEXT,
-              role TEXT DEFAULT 'user',
-              createdAt INTEGER,
-              status TEXT DEFAULT 'active'
-            )`
-          ).run();
+          await ensureUsersTable(env.DB);
 
           const userRow = await env.DB.prepare(
             `SELECT id, username, email, password, role, createdAt, status FROM fox3_users
@@ -608,8 +654,9 @@ export const onRequest = async (context: any) => {
               });
             }
           }
-        } catch (dbErr) {
-          // If D1 query error, let client fallback to local check
+        } catch (dbErr: any) {
+          console.error('[Auth] User login D1 schema/query failure:', dbErr?.stack || dbErr?.message || dbErr);
+          // Preserve the existing login fallback response semantics.
         }
       }
 
@@ -701,17 +748,132 @@ export const onRequest = async (context: any) => {
     }
   }
 
+  if (path === '/auth/reset/send-code' && request.method === 'POST') {
+    const genericResponse = () => new Response(JSON.stringify({ success: true, message: '若账号存在，验证码已发送' }), { headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+    try {
+      const body = await request.json() as any;
+      const email = normalizeEmail(body.email);
+      if (!isValidEmail(email)) {
+        return new Response(JSON.stringify({ success: false, error: '请输入有效的邮箱地址' }), { status: 400, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+      }
+      if (!env.DB) {
+        return new Response(JSON.stringify({ success: false, error: '密码重置服务未配置 Cloudflare D1（DB）' }), { status: 503, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+      }
+
+      const settings = getOutboundSettings({}, env);
+      if (!hasOutboundMailService(settings)) {
+        return new Response(JSON.stringify({ success: false, error: '密码重置邮件服务未配置，请检查发信服务、发件人和密钥' }), { status: 503, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+      }
+
+      await ensureUsersTable(env.DB);
+      await ensureVerificationTables(env.DB);
+      await ensurePasswordResetTable(env.DB);
+      const user = await env.DB.prepare(`SELECT id FROM fox3_users WHERE LOWER(email) = ? AND role = 'user' LIMIT 1`).bind(email).first();
+      if (!user) return genericResponse();
+
+      const now = Date.now();
+      const ipHash = await hashRateLimitIp(request.headers.get('CF-Connecting-IP') || 'unknown');
+      const [registrationRate, resetRate, ipRate] = await Promise.all([
+        env.DB.prepare('SELECT lastSentAt FROM fox3_email_verifications WHERE email = ?').bind(email).first(),
+        env.DB.prepare('SELECT lastSentAt FROM fox3_password_resets WHERE email = ?').bind(email).first(),
+        env.DB.prepare('SELECT expiresAt FROM fox3_email_ip_rates WHERE ipHash = ?').bind(ipHash).first(),
+      ]);
+      if ((registrationRate && now - Number(registrationRate.lastSentAt) < 60_000) ||
+          (resetRate && now - Number(resetRate.lastSentAt) < 60_000) ||
+          (ipRate && Number(ipRate.expiresAt) > now)) return genericResponse();
+
+      const code = createVerificationCode(Math.min(8, Math.max(4, Number(env.VERIFY_CODE_LENGTH) || 6)));
+      await env.DB.batch([
+        env.DB.prepare(`INSERT INTO fox3_password_resets (email, code, attempts, expiresAt, lastSentAt)
+          VALUES (?, ?, 0, ?, ?)
+          ON CONFLICT(email) DO UPDATE SET code = excluded.code, attempts = 0,
+            expiresAt = excluded.expiresAt, lastSentAt = excluded.lastSentAt`)
+          .bind(email, code, now + 600_000, now),
+        env.DB.prepare(`INSERT INTO fox3_email_ip_rates (ipHash, expiresAt) VALUES (?, ?)
+          ON CONFLICT(ipHash) DO UPDATE SET expiresAt = excluded.expiresAt`).bind(ipHash, now + 60_000),
+      ]);
+
+      const text = `您好，您正在重置 fox3 账户密码。密码重置验证码：${code}\n验证码 10 分钟内有效，最多可尝试 10 次。若非本人操作，请忽略此邮件。此邮件不会包含您的密码。`;
+      const html = `<div style="font-family:sans-serif;white-space:pre-wrap;line-height:1.7">${escapeHtml(text)}</div>`;
+      const result = await dispatchEmail(settings, { to: email, subject: '【fox3 博客】密码重置验证码', text, html });
+      if (!result.success) {
+        await env.DB.prepare(`UPDATE fox3_password_resets SET code = '' WHERE email = ?`).bind(email).run();
+        console.warn('[Auth] Password reset email dispatch failed:', result.error || 'mail dispatch failed');
+        return new Response(JSON.stringify({ success: false, error: '验证码邮件发送失败，请稍后重试' }), { status: 502, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+      }
+      return genericResponse();
+    } catch (err: any) {
+      console.error('[Auth] Password reset code request failed:', err?.stack || err?.message || err);
+      return new Response(JSON.stringify({ success: false, error: '密码重置验证码服务暂不可用，请稍后重试' }), { status: 503, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+    }
+  }
+
+  if (path === '/auth/reset-password' && request.method === 'POST') {
+    try {
+      const body = await request.json() as any;
+      const email = normalizeEmail(body.email);
+      const code = typeof body.code === 'string' ? body.code.trim() : '';
+      const newPassword = typeof body.newPassword === 'string' ? body.newPassword : '';
+      if (!isValidEmail(email) || !code || newPassword.length < 6) {
+        return new Response(JSON.stringify({ success: false, error: !isValidEmail(email) ? '请输入有效的邮箱地址' : !code ? '请输入验证码' : '新密码长度至少需 6 位字符' }), { status: 400, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+      }
+      if (!env.DB) {
+        return new Response(JSON.stringify({ success: false, error: '密码重置服务未配置 Cloudflare D1（DB）' }), { status: 503, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+      }
+
+      await ensureUsersTable(env.DB);
+      await ensurePasswordResetTable(env.DB);
+      const user = await env.DB.prepare(`SELECT id FROM fox3_users WHERE LOWER(email) = ? AND role = 'user' LIMIT 1`).bind(email).first();
+      const row = await env.DB.prepare('SELECT code, attempts, expiresAt FROM fox3_password_resets WHERE email = ?').bind(email).first();
+      const now = Date.now();
+      if (!row) {
+        return new Response(JSON.stringify({ success: false, error: '验证码无效或已过期，请重新获取' }), { status: 400, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+      }
+      const attempts = Number(row.attempts) || 0;
+      if (Number(row.expiresAt) <= now || attempts >= 10 || !row.code) {
+        await env.DB.prepare(`UPDATE fox3_password_resets SET code = '', attempts = 10 WHERE email = ?`).bind(email).run();
+        return new Response(JSON.stringify({ success: false, error: '验证码无效或已过期，请重新获取' }), { status: 400, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+      }
+      if (!user || String(row.code) !== code) {
+        const nextAttempts = attempts + 1;
+        await env.DB.prepare(`UPDATE fox3_password_resets SET attempts = ?, code = CASE WHEN ? >= 10 THEN '' ELSE code END WHERE email = ? AND expiresAt > ?`)
+          .bind(nextAttempts, nextAttempts, email, now).run();
+        return new Response(JSON.stringify({ success: false, error: '验证码无效或已过期，请重新获取' }), { status: 400, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+      }
+
+      const passwordHash = await hashUserPassword(newPassword);
+      const results = await env.DB.batch([
+        env.DB.prepare(`UPDATE fox3_users SET password = ? WHERE id = ? AND role = 'user'
+          AND EXISTS (SELECT 1 FROM fox3_password_resets WHERE email = ? AND code = ? AND expiresAt > ? AND attempts < 10)`)
+          .bind(passwordHash, user.id, email, code, now),
+        env.DB.prepare(`UPDATE fox3_password_resets SET code = '', attempts = 10 WHERE email = ? AND code = ? AND expiresAt > ? AND attempts < 10`)
+          .bind(email, code, now),
+      ]);
+      if (Number(results?.[0]?.meta?.changes || 0) !== 1) {
+        return new Response(JSON.stringify({ success: false, error: '验证码无效或已过期，请重新获取' }), { status: 400, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+      }
+      return new Response(JSON.stringify({ success: true, message: '密码已重置，请使用新密码登录' }), { headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+    } catch (err: any) {
+      console.error('[Auth] Password reset failed:', err?.stack || err?.message || err);
+      return new Response(JSON.stringify({ success: false, error: '密码重置失败，请稍后重试' }), { status: 503, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+    }
+  }
+
   // Registration endpoint (Option A: strictly forbid registering admin reserved names)
   if (path === '/auth/register' && request.method === 'POST') {
     try {
       const body = await request.json() as any;
-      const { id, username, email, password, verificationCode } = body;
+      const { username, email, password, verificationCode } = body;
 
       const validAdminName = (env.ADMIN_USERNAME || 'fox').trim().toLowerCase();
 
       const inputUser = typeof username === 'string' ? username.trim() : '';
       const inputEmail = normalizeEmail(email);
       const inputPass = typeof password === 'string' ? password.trim() : '';
+
+      if (!env.DB) {
+        return new Response(JSON.stringify({ success: false, error: '注册服务暂不可用：必须配置 Cloudflare D1（DB）以安全保存账户' }), { status: 503, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+      }
 
       if (inputUser.length < 2) {
         return new Response(JSON.stringify({ success: false, error: '用户名至少需要 2 个字符' }), { status: 400, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
@@ -735,9 +897,16 @@ export const onRequest = async (context: any) => {
         });
       }
 
+      if (email != null && String(email).trim() !== '' && !isValidEmail(inputEmail)) {
+        return new Response(JSON.stringify({ success: false, error: '请输入格式正确的邮箱地址' }), { status: 400, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+      }
+
       if (inputEmail) {
-        if (!/^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/.test(inputEmail) || (!env.DB && !env.KV)) {
-          return new Response(JSON.stringify({ success: false, error: '邮箱注册需要有效邮箱和验证码服务' }), { status: 400, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+        if (!isValidEmail(inputEmail)) {
+          return new Response(JSON.stringify({ success: false, error: '请输入格式正确的邮箱地址' }), { status: 400, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+        }
+        if (!env.DB && !env.KV) {
+          return new Response(JSON.stringify({ success: false, error: '验证码服务未配置' }), { status: 503, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
         }
         const validCode = await verifyStoredCode(env, inputEmail, String(verificationCode || '').trim());
         if (!validCode) {
@@ -747,37 +916,31 @@ export const onRequest = async (context: any) => {
 
       const assignedRole = 'user';
 
-      // Persist to D1 if available
-      if (env.DB) {
-        try {
-          await env.DB.prepare(
-            `CREATE TABLE IF NOT EXISTS fox3_users (
-              id TEXT PRIMARY KEY,
-              username TEXT UNIQUE,
-              email TEXT,
-              password TEXT,
-              role TEXT DEFAULT 'user',
-              createdAt INTEGER,
-              status TEXT DEFAULT 'active'
-            )`
-          ).run();
+      try {
+        await ensureUsersTable(env.DB);
+      } catch (dbErr: any) {
+        console.error('[Auth] Registration users-table migration failed:', dbErr?.stack || dbErr?.message || dbErr);
+        return new Response(JSON.stringify({ success: false, error: '账户数据库结构初始化失败，请联系管理员检查 fox3_users 表结构或稍后重试' }), { status: 503, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+      }
 
-          const existing = await env.DB.prepare(
-            `SELECT id FROM fox3_users WHERE LOWER(username) = ? OR (? <> '' AND LOWER(email) = ?) LIMIT 1`
-          ).bind(inputUser.toLowerCase(), inputEmail, inputEmail).first();
-          if (existing) {
-            return new Response(JSON.stringify({ success: false, error: '该用户名或邮箱已被注册' }), { status: 409, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
-          }
+      const existing = await env.DB.prepare(
+        `SELECT id FROM fox3_users WHERE LOWER(username) = ? OR (? <> '' AND LOWER(email) = ?) LIMIT 1`
+      ).bind(inputUser.toLowerCase(), inputEmail, inputEmail).first();
+      if (existing) {
+        return new Response(JSON.stringify({ success: false, error: '该用户名或邮箱已被注册' }), { status: 409, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+      }
 
-          const passwordHash = await hashUserPassword(inputPass);
-          await env.DB.prepare(
-            `INSERT INTO fox3_users (id, username, email, password, role, createdAt, status)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`
-          ).bind(id || `user_${Date.now()}`, inputUser, inputEmail, passwordHash, assignedRole, Date.now(), 'active').run();
-        } catch (dbErr: any) {
-          console.warn('[Auth] Registration persistence failed:', dbErr?.message || 'database error');
-          return new Response(JSON.stringify({ success: false, error: '注册信息无法保存到数据库，请稍后重试' }), { status: 503, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
-        }
+      const userId = `user_${crypto.randomUUID()}`;
+      const createdAt = Date.now();
+      const passwordHash = await hashUserPassword(inputPass);
+      try {
+        await env.DB.prepare(
+          `INSERT INTO fox3_users (id, username, email, password, role, createdAt, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`
+        ).bind(userId, inputUser, inputEmail, passwordHash, assignedRole, createdAt, 'active').run();
+      } catch (dbErr: any) {
+        console.error('[Auth] Registration D1 insert failed:', dbErr?.stack || dbErr?.message || dbErr);
+        return new Response(JSON.stringify({ success: false, error: '账户无法写入数据库，请检查 fox3_users 表结构及数据库配置后重试' }), { status: 503, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
       }
 
       if (inputEmail) {
@@ -789,11 +952,11 @@ export const onRequest = async (context: any) => {
       return new Response(JSON.stringify({
         success: true,
         user: {
-          id: id || `user_${Date.now()}`,
+          id: userId,
           username: inputUser,
           email: inputEmail,
           role: assignedRole,
-          createdAt: Date.now(),
+          createdAt,
           status: 'active',
         },
         message: '用户注册成功',
@@ -805,6 +968,64 @@ export const onRequest = async (context: any) => {
         status: 400,
         headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
       });
+    }
+  }
+
+  // D1-backed registered-user management. Never expose password hashes to the client.
+  if (path === '/admin/users' && ['GET', 'PATCH', 'DELETE'].includes(request.method)) {
+    const jsonResponse = (payload: any, status = 200) => new Response(JSON.stringify(payload), {
+      status,
+      headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' },
+    });
+    if (!await hasAdminSession(request, env)) {
+      return jsonResponse({ success: false, error: '需要有效的管理员会话' }, 401);
+    }
+    if (!env.DB) {
+      return jsonResponse({ success: false, error: '用户数据库不可用，请检查 D1 绑定 DB' }, 503);
+    }
+
+    try {
+      await ensureUsersTable(env.DB);
+      if (request.method === 'GET') {
+        const result = await env.DB.prepare(`SELECT id, username, email, role, createdAt, status
+          FROM fox3_users ORDER BY COALESCE(createdAt, 0) DESC LIMIT 1000`).all();
+        const users = (result?.results || []).map((row: any) => ({
+          id: String(row.id || ''),
+          username: String(row.username || ''),
+          email: String(row.email || ''),
+          role: row.role === 'admin' ? 'admin' : 'user',
+          createdAt: Number(row.createdAt) || 0,
+          status: row.status === 'disabled' ? 'disabled' : 'active',
+        }));
+        return jsonResponse({ success: true, users });
+      }
+
+      const body = await request.json() as any;
+      const id = typeof body?.id === 'string' ? body.id.trim() : '';
+      if (!id || id.length > 200) return jsonResponse({ success: false, error: '用户 ID 无效' }, 400);
+
+      if (request.method === 'PATCH') {
+        const status = body?.status;
+        if (status !== 'active' && status !== 'disabled') {
+          return jsonResponse({ success: false, error: '账号状态只能设置为 active 或 disabled' }, 400);
+        }
+        const result = await env.DB.prepare(`UPDATE fox3_users SET status = ? WHERE id = ? AND COALESCE(role, 'user') <> 'admin'`)
+          .bind(status, id).run();
+        if (Number(result?.meta?.changes || 0) !== 1) {
+          return jsonResponse({ success: false, error: '用户不存在，或不可修改管理员账号' }, 404);
+        }
+        return jsonResponse({ success: true, id, status });
+      }
+
+      const result = await env.DB.prepare(`DELETE FROM fox3_users WHERE id = ? AND COALESCE(role, 'user') <> 'admin'`)
+        .bind(id).run();
+      if (Number(result?.meta?.changes || 0) !== 1) {
+        return jsonResponse({ success: false, error: '用户不存在，或不可删除管理员账号' }, 404);
+      }
+      return jsonResponse({ success: true, id });
+    } catch (err: any) {
+      console.error('[Admin] D1 user management failed:', err?.stack || err?.message || err);
+      return jsonResponse({ success: false, error: 'D1 用户管理操作失败，请检查 fox3_users 表结构和 DB 绑定' }, 503);
     }
   }
 
