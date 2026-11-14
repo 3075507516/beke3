@@ -284,7 +284,8 @@ async function hasAdminSession(request: Request, env: any): Promise<boolean> {
 }
 
 async function hashUserPassword(password: string): Promise<string> {
-  const iterations = 120_000;
+  // Cloudflare Workers Web Crypto currently rejects PBKDF2 counts above 100,000.
+  const iterations = 100_000;
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
   const bits = new Uint8Array(await crypto.subtle.deriveBits({ name: 'PBKDF2', salt, iterations, hash: 'SHA-256' }, key, 256));

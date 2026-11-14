@@ -1,4 +1,6 @@
-const ITERATIONS = 120_000;
+// Keep this aligned with the Pages Functions implementation. Cloudflare Workers
+// Web Crypto rejects PBKDF2 iteration counts above 100,000.
+const ITERATIONS = 100_000;
 
 function toBase64Url(bytes: Uint8Array): string {
   let binary = '';
