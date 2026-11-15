@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import { X, Mail, Lock, User, CheckCircle, AlertCircle, Key, Sparkles, UserCheck, KeyRound } from 'lucide-react';
 import { hashPassword, verifyPassword } from '../../utils/password';
+import { clearAdminSessionToken, setAdminSessionToken } from '../../utils/adminSession';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -126,7 +127,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     const normalizedInput = inputAccount.toLowerCase();
     const configuredAdminName = (adminUsername || 'fox').trim().toLowerCase();
     const isAdminAccount = normalizedInput === configuredAdminName || normalizedInput === 'fox' || normalizedInput === 'admin' || normalizedInput === 'service@whitefox.blog';
-    sessionStorage.removeItem('fox3_admin_session');
 
     // 1. Probe backend Cloudflare Pages Functions endpoint (/api/auth/login or /api/auth/admin)
     try {
@@ -148,7 +148,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
               setStatusMsg({ type: 'error', text: '管理员登录未取得服务端授权会话，请检查部署端 ADMIN_PASSWORD 和 Functions 配置。' });
               return;
             }
-            sessionStorage.setItem('fox3_admin_session', resJson.sessionToken);
+            setAdminSessionToken(resJson.sessionToken);
+          } else {
+            clearAdminSessionToken();
           }
           setCurrentUser(remoteUser);
           // Sync with local users list
@@ -170,6 +172,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
       const isLocalDevelopment = ['localhost', '127.0.0.1'].includes(window.location.hostname);
       const localAdminPass = (adminPassword || '').trim();
       if (isLocalDevelopment && localAdminPass.length >= 6 && inputPass === localAdminPass) {
+        clearAdminSessionToken();
         const adminUser = users.find(u => u.role === 'admin' || u.username.toLowerCase() === configuredAdminName) || {
           id: 'user_fox_admin',
           username: configuredAdminName,
@@ -235,6 +238,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
         localStorage.setItem('fox3_user_passwords', JSON.stringify(userPasswords));
       }
 
+      clearAdminSessionToken();
       setCurrentUser(matchedUser);
       setStatusMsg({ type: 'success', text: `登录成功，欢迎 ${matchedUser.username}！` });
       setTimeout(() => { onClose(); }, 500);

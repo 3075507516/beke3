@@ -1,4 +1,5 @@
 import { createVerificationCode, dispatchEmail, escapeHtml, normalizeEmail, probeResendConnection, type MailProvider, type OutboundMailSettings } from '../mail';
+import { getExternalObjectStoreConfig, getExternalObject, putExternalObject, probeExternalObjectStore } from '../object-storage';
 
 // Cloudflare Pages Functions API Handler
 // Routes: /api/*
@@ -19,6 +20,20 @@ interface Env {
   RESEND_WEBHOOK_SECRET?: string;
   BREVO_API_KEY?: string;
   SENDGRID_API_KEY?: string;
+  OBJECT_STORAGE_PROVIDER?: string;
+  COS_SECRET_ID?: string;
+  COS_SECRET_KEY?: string;
+  COS_REGION?: string;
+  COS_BUCKET?: string;
+  OSS_ACCESS_KEY_ID?: string;
+  OSS_ACCESS_KEY_SECRET?: string;
+  OSS_REGION?: string;
+  OSS_BUCKET?: string;
+  S3_ACCESS_KEY_ID?: string;
+  S3_SECRET_ACCESS_KEY?: string;
+  S3_REGION?: string;
+  S3_BUCKET?: string;
+  S3_ENDPOINT?: string;
   SMTP_HOST?: string;
   SMTP_PORT?: string;
   SMTP_SECURITY?: string;
@@ -248,7 +263,7 @@ function base64UrlEncode(bytes: Uint8Array): string {
 async function createAdminSessionToken(env: any): Promise<string> {
   const secret = getAdminSessionSecret(env);
   if (!secret) return '';
-  const payload = base64UrlEncode(new TextEncoder().encode(JSON.stringify({ role: 'admin', exp: Date.now() + 12 * 60 * 60 * 1000 })));
+  const payload = base64UrlEncode(new TextEncoder().encode(JSON.stringify({ role: 'admin', exp: Date.now() + 7 * 24 * 60 * 60 * 1000 })));
   const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
   const signature = new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(payload)));
   return `${payload}.${base64UrlEncode(signature)}`;
@@ -396,7 +411,7 @@ export const onRequest = async (context: any) => {
     return new Response(null, { headers });
   }
 
-  if (path === '/mail/webhook' && request.method === 'POST') {
+  if ((path === '/mail/webhook' || path === '/webhook') && request.method === 'POST') {
     const contentLength = Number(request.headers.get('content-length') || 0);
     if (contentLength > 1_048_576) {
       return new Response('Webhook payload too large', { status: 413, headers });
@@ -1031,11 +1046,13 @@ export const onRequest = async (context: any) => {
   }
 
   // Health check & genuine connectivity status indicator
-  // channelOnline means at least one primary Cloudflare service (D1 or R2) passed its probe.
+  // Each cloud service is reported only after a live read-only connectivity probe.
   if (path === '/status' || path === '') {
     let d1Healthy = false;
     let r2Healthy = false;
     let kvHealthy = false;
+    let externalObjectStorageHealthy = false;
+    const externalObjectStore = getExternalObjectStoreConfig(env);
 
     // Active live connectivity probing
     if (env.DB) {
@@ -1065,7 +1082,14 @@ export const onRequest = async (context: any) => {
       }
     }
 
-    const channelOnline = d1Healthy || r2Healthy;
+    if (externalObjectStore && await hasAdminSession(request, env)) {
+      try {
+        externalObjectStorageHealthy = await probeExternalObjectStore(externalObjectStore);
+      } catch {
+        externalObjectStorageHealthy = false;
+      }
+    }
+    const channelOnline = d1Healthy || r2Healthy || externalObjectStorageHealthy;
 
     return new Response(JSON.stringify({
       success: true,
@@ -1076,10 +1100,12 @@ export const onRequest = async (context: any) => {
         d1: d1Healthy,
         r2: r2Healthy,
         kv: kvHealthy,
+        objectStorage: externalObjectStorageHealthy,
+        objectStorageProvider: externalObjectStore?.provider || null,
       },
       message: channelOnline
-        ? '至少一个 D1/R2 资源探测成功；请查看 cloudServices 各项状态，单项能力取决于对应绑定'
-        : 'D1 与 R2 均未通过探测；服务端云存储功能不可用',
+        ? '至少一个 D1/R2/COS/OSS/S3-compatible 资源探测成功；请查看 cloudServices 各项状态'
+        : 'D1、R2 与已配置的 COS/OSS/S3-compatible 存储均未通过探测；服务端云存储功能不可用',
       timestamp: Date.now(),
     }), {
       headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
@@ -1087,7 +1113,7 @@ export const onRequest = async (context: any) => {
   }
 
   // Cross-device sync store & retrieve (/api/sync/:key)
-  // Allows device A to push records, and device B to poll updates in real-time.
+  // Devices push on explicit sync or opted-in data changes; this route is not polled in idle intervals.
   // Prefer D1 to avoid exhausting the daily KV write allowance; retain KV as fallback.
   if (path.startsWith('/sync/')) {
     if (!await hasAdminSession(request, env)) {
@@ -1222,8 +1248,9 @@ export const onRequest = async (context: any) => {
       const canUseD1Fallback = file.size <= 1024 * 1024 && Boolean(env.DB);
       const canUseKvFallback = file.size <= 18 * 1024 * 1024 && Boolean(env.KV);
       const canUseMemoryFallback = file.size <= 4 * 1024 * 1024;
-      if (!env.R2_BUCKET && !canUseD1Fallback && !canUseKvFallback && !canUseMemoryFallback) {
-        return new Response(JSON.stringify({ success: false, error: '该文件大小需绑定 Cloudflare R2；D1/KV/内存回退无法安全保存此文件' }), { status: 503, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+      const externalObjectStore = getExternalObjectStoreConfig(env);
+      if (!env.R2_BUCKET && !externalObjectStore && !canUseD1Fallback && !canUseKvFallback && !canUseMemoryFallback) {
+        return new Response(JSON.stringify({ success: false, error: '该文件大小需绑定 Cloudflare R2 或配置服务端 COS/OSS/S3-compatible 存储；D1/KV/内存回退无法安全保存此文件' }), { status: 503, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
       }
 
       const safeFileName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 150) || 'upload.bin';
@@ -1246,7 +1273,17 @@ export const onRequest = async (context: any) => {
           });
           storedTarget = 'r2';
         } catch (r2Err) {
-          console.warn('[fox3] R2 upload error, falling back to D1/KV:', r2Err);
+          console.warn('[fox3] R2 upload error; trying configured external object storage or bounded fallback:', r2Err);
+        }
+      }
+
+      // 2. Secondary object storage: Tencent COS / Alibaba OSS via server-side credentials.
+      if (storedTarget === 'none' && externalObjectStore) {
+        try {
+          await putExternalObject(externalObjectStore, key, file.stream(), contentType, file.name);
+          storedTarget = externalObjectStore.provider;
+        } catch (externalErr) {
+          console.warn(`[fox3] ${externalObjectStore.provider.toUpperCase()} upload failed; trying bounded fallback:`, externalErr);
         }
       }
 
@@ -1263,7 +1300,7 @@ export const onRequest = async (context: any) => {
         base64Data = btoa(binary);
       }
 
-      // 2. Secondary: Cloudflare D1 SQLite database (fox3_files table)
+      // 3. Cloudflare D1 SQLite database (fox3_files table), limited to 1 MiB.
       if (storedTarget === 'none' && canUseD1Fallback) {
         try {
           await env.DB.prepare(
@@ -1287,7 +1324,7 @@ export const onRequest = async (context: any) => {
         }
       }
 
-      // 3. Tertiary: Cloudflare KV
+      // 4. Cloudflare KV, limited to 18 MiB.
       if (storedTarget === 'none' && canUseKvFallback) {
         try {
           await env.KV.put(`fox3_file_${key}`, JSON.stringify({
@@ -1303,7 +1340,7 @@ export const onRequest = async (context: any) => {
         }
       }
 
-      // 4. In-Memory Edge Cache Fallback
+      // 5. In-Memory Edge Cache Fallback, limited to 4 MiB and not durable.
       if (storedTarget === 'none' && canUseMemoryFallback) {
         if (!(globalThis as any).__fox3_file_store) {
           (globalThis as any).__fox3_file_store = {};
@@ -1319,7 +1356,7 @@ export const onRequest = async (context: any) => {
       }
 
       if (storedTarget === 'none') {
-        return new Response(JSON.stringify({ success: false, error: '远程存储不可用，文件未保存；请检查 R2/D1/KV 绑定和额度' }), { status: 503, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+        return new Response(JSON.stringify({ success: false, error: '文件未保存：请检查 R2 绑定；若配置 COS/OSS/S3-compatible，请核对 provider、Bucket、地域、endpoint、访问密钥与写入权限；小文件还可检查 D1/KV 绑定和可用额度。' }), { status: 503, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
       }
 
       const publicUrl = `/api/files/${key}`;
@@ -1342,7 +1379,7 @@ export const onRequest = async (context: any) => {
     }
   }
 
-  // Universal File Access & Stream (Serves from R2, D1, KV, or In-Memory Store)
+  // Universal file stream from R2, configured external object storage, D1, KV, or memory.
   if (path.startsWith('/files/')) {
     const key = path.replace('/files/', '');
     const isDownload = url.searchParams.get('download') === '1';
@@ -1367,7 +1404,29 @@ export const onRequest = async (context: any) => {
       } catch (e) {}
     }
 
-    // 2. Try fetch from D1
+    // 2. Read from the configured COS/OSS object provider when available.
+    const externalObjectStore = getExternalObjectStoreConfig(env);
+    if (externalObjectStore) {
+      try {
+        const object = await getExternalObject(externalObjectStore, key);
+        if (object) {
+          const responseHeaders = new Headers(headers);
+          applyFileSafetyHeaders(responseHeaders);
+          responseHeaders.set('Content-Type', object.headers.get('content-type') || 'application/octet-stream');
+          responseHeaders.set('Cache-Control', 'public, max-age=31536000, immutable');
+          const originalName = object.headers.get('x-amz-meta-original-name') || object.headers.get('x-oss-meta-original-name') || key;
+          if (isDownload) {
+            const asciiName = key.split('-').slice(2).join('-') || 'download';
+            responseHeaders.set('Content-Disposition', `attachment; filename="${asciiName}"; filename*=UTF-8''${originalName}`);
+          }
+          return new Response(object.body, { headers: responseHeaders });
+        }
+      } catch (e) {
+        console.warn(`[fox3] ${externalObjectStore.provider.toUpperCase()} read failed; trying bounded fallback:`, e);
+      }
+    }
+
+    // 3. Try fetch from D1
     if (env.DB) {
       try {
         const row = await env.DB.prepare(

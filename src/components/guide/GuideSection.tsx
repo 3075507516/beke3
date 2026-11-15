@@ -303,10 +303,10 @@ export const GuideSection: React.FC = () => {
           <div className="space-y-2">
             <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
               <Server className="w-5 h-5 text-blue-500" />
-              <span>腾讯云静态部署说明（COS 尚未接入）</span>
+              <span>腾讯云部署说明（COS 服务端对象存储后备）</span>
             </h3>
             <p className="text-xs text-slate-500">
-              可将前端静态页面部署到 EdgeOne 或轻量服务器；该部署不会自动提供 Cloudflare Pages Functions、D1/R2/KV，本站账户、邮件验证码、后台邮件和共享同步 API 将不可用。
+              可将前端静态页面部署到 EdgeOne 或轻量服务器；纯静态托管不会自动提供 Cloudflare Pages Functions、D1/R2/KV，也不会运行本文介绍的 COS 适配器。本站账户、邮件验证码、后台邮件和共享同步 API 仍需部署 Pages Functions 与相应绑定。
             </p>
           </div>
 
@@ -321,14 +321,15 @@ export const GuideSection: React.FC = () => {
 
           <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/70 dark:border-slate-700 space-y-3">
             <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200">
-              腾讯云 COS 存储状态：当前未实现
+              腾讯云 COS 对象存储后备（由 Cloudflare Pages Functions 调用）
             </h4>
             <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-              仓库没有读取 COS 凭据或 COS SDK 适配代码。不要为本站填写或上传腾讯云 Secret；设置这些变量不会让文件改存 COS。
+              Pages Functions 已提供腾讯 COS S3-compatible 对象接口适配器。文件首先写入/读取 Cloudflare R2；R2 不可用时才尝试 COS。COS 配置只在 Cloudflare Pages 的 Functions Variables/Secrets 中填写，不要放进前端设置、构建参数或公开仓库。
             </p>
             <div className="p-3 bg-slate-950 text-slate-200 rounded-xl text-xs font-mono space-y-1">
-              <p>当前文件服务实际支持 Cloudflare R2 → D1 → KV → 易失性内存回退。</p>
-              <p>静态托管只提供前端资源；本机浏览器数据仍只保存在用户浏览器。</p>
+              <p>设置 <code>OBJECT_STORAGE_PROVIDER=cos</code>、<code>COS_SECRET_ID</code>、<code>COS_SECRET_KEY</code>、<code>COS_REGION</code>（例如 <code>ap-guangzhou</code>）与 <code>COS_BUCKET</code>。</p>
+              <p><code>COS_BUCKET</code> 必须填写带 APPID 的完整桶名（例如 <code>mybucket-1250000000</code>）。未单独适配的平台可选择 <code>OBJECT_STORAGE_PROVIDER=s3</code>，并提供 HTTPS <code>S3_ENDPOINT</code>、地域、桶名和 SigV4 凭据；通用接口要求兼容 path-style 请求。文件顺序为 R2 → 已选对象桶 → D1（≤1 MiB）/KV（≤18 MiB）/易失内存（≤4 MiB）；对象存储状态灯会执行只读连通探测。</p>
+              <p>EdgeOne/OSS 静态部署仅提供前端，不会自动执行 Pages Functions；D1 中的账户和博客共享数据不会迁移到 COS。</p>
             </div>
           </div>
 
@@ -357,10 +358,10 @@ export const GuideSection: React.FC = () => {
           <div className="space-y-2">
             <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
               <Server className="w-5 h-5 text-orange-500" />
-              <span>阿里云静态部署说明（OSS 尚未接入）</span>
+              <span>阿里云部署说明（OSS 服务端对象存储后备）</span>
             </h3>
             <p className="text-xs text-slate-500">
-              可将前端静态页面放到 OSS/ESA 或 ECS；静态托管不会自动运行 Cloudflare Pages Functions、D1/R2/KV，账户、验证码发信及云同步 API 不可用。
+              可将前端静态页面放到 OSS/ESA 或 ECS；纯静态托管不会自动运行 Cloudflare Pages Functions、D1/R2/KV，也不会执行下方 OSS 适配器。账户、验证码发信及云同步 API 仍需 Pages Functions 运行环境。
             </p>
           </div>
 
@@ -378,14 +379,15 @@ export const GuideSection: React.FC = () => {
 
           <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/70 dark:border-slate-700 space-y-3">
             <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200">
-              阿里云 OSS 存储状态：当前未实现
+              阿里云 OSS 对象存储后备（由 Cloudflare Pages Functions 调用）
             </h4>
             <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-              仓库没有读取 OSS 凭据或 OSS SDK 适配代码。不要为本站填写或上传阿里云 AccessKey；设置这些变量不会让文件改存 OSS。
+              Pages Functions 已提供 OSS Signature V4 对象接口适配器。文件首先使用 Cloudflare R2；R2 不可用时才尝试 OSS。访问密钥只在 Cloudflare Pages 的 Functions Variables/Secrets 配置，不要写入网页代码或公开仓库。
             </p>
             <div className="p-3 bg-slate-950 text-slate-200 rounded-xl text-xs font-mono space-y-1">
-              <p>当前文件服务实际支持 Cloudflare R2 → D1 → KV → 易失性内存回退。</p>
-              <p>请不要在客户端或静态网站中嵌入任何云存储 Secret。</p>
+              <p>设置 <code>OBJECT_STORAGE_PROVIDER=oss</code>、<code>OSS_ACCESS_KEY_ID</code>、<code>OSS_ACCESS_KEY_SECRET</code>、<code>OSS_REGION</code>（例如 <code>cn-hangzhou</code>）与 <code>OSS_BUCKET</code>。</p>
+              <p>文件顺序为 R2 → OSS → D1（≤1 MiB）/KV（≤18 MiB）/易失内存（≤4 MiB）。连通灯会发起只读 Bucket 请求；D1 账户、验证码和同步数据不会迁移到 OSS。</p>
+              <p>OSS 静态托管只提供前端；请勿在浏览器客户端或公开静态资源中嵌入任何云存储密钥。</p>
             </div>
           </div>
         </div>
@@ -461,10 +463,13 @@ export const GuideSection: React.FC = () => {
             <span>邮箱区 (邮件中枢与 Resend Receiving) 使用说明</span>
           </div>
           <div className="space-y-2 text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-            <p><b>1. 发信通道：</b>推荐 Resend API（HTTPS），也支持 SMTP、Brevo API、SendGrid API；前台配置保存在本浏览器，验证码应使用 Cloudflare Pages 后台 Secret。Resend API 连接检查只读域名信息，不发邮件；真实测试投递需使用单独的测试邮件按钮。</p>
+            <p><b>1. 发信通道：</b>推荐 Resend API（HTTPS），也支持 SMTP、Brevo API、SendGrid API；前台配置保存在本浏览器，验证码应使用 Cloudflare Pages 后台 Secret。Resend API 连接检查只读域名信息，不发邮件；真实测试投递需使用单独的测试邮件按钮。目前服务器收件箱入站 webhook 使用 Resend Receiving，不要把其他发件服务商误认为也已配置入站接收。</p>
             <p><b>2. 注册验证码：</b>验证码由服务端生成和验证；Cloudflare 部署需绑定 D1 并配置可用的后台邮件发送通道。后台配置状态与前台配置分开测试。</p>
-            <p><b>3. 收信能力：</b>Resend <code>email.received</code> Webhook 已由 Pages Functions 验签，收件正文会通过 Receiving API 拉取并存入 D1。启用前需配置接收域名/MX、Webhook URL、<code>RESEND_WEBHOOK_SECRET</code> 和 <code>RESEND_API_KEY</code>；仅填写前台参数或转发到外部邮箱不会让来信进入本站。</p>
-            <p><b>4. 站内信：</b>管理员可在邮件中枢查看服务器收件箱、撰写和回复；发送及收件箱 API 需有效管理员会话。注册邮箱回信优先从 D1 用户记录解析；本机发件历史保存在浏览器，Resend 收件正文保存在 D1。</p>
+            <p><b>3. 获取 <code>RESEND_API_KEY</code>：</b>登录 resend.com，进入左侧菜单 API Keys，点 Create API Key，选好权限和域名，创建后立即复制。</p>
+            <p><b>4. 获取 <code>RESEND_WEBHOOK_SECRET</code> 和配置 Webhook URL：</b>进入 Webhooks，创建一个新的 Webhook。Endpoint / URL 填你的 Pages Functions 地址，例如 <code className="break-all">https://你的项目名.pages.dev/api/webhook</code>；选择监听事件 <code>email.received</code>。创建成功后，Resend 返回的 signing secret 就是 <code>RESEND_WEBHOOK_SECRET</code>。接口也兼容旧地址 <code className="break-all">/api/mail/webhook</code>。</p>
+            <p><b>5. 配置接收域名 / MX：</b>在 Domains 里添加你的域名，然后去域名 DNS 管理后台添加 Resend 给出的记录。如果要收邮件，需要在域名详情里开启 Receiving，并按 Resend 提示配置 MX 记录。</p>
+            <p><b>注意：</b>Webhook URL 不是 Resend 给你的，而是你自己 Pages Functions 的接口地址。<code>RESEND_API_KEY</code> 和 <code>RESEND_WEBHOOK_SECRET</code> 都只在创建时完整显示一次，丢了通常需要重新生成。这些密钥不要放到前端代码或公开仓库里，建议放在 Cloudflare Pages 的环境变量 / Secrets 中。收件正文会经 webhook 验签后由 Receiving API 拉取并保存到 D1；还需绑定名称为 <code>DB</code> 的 D1。仅把邮件转发到外部邮箱不会让来信进入本站。</p>
+            <p><b>6. 站内信：</b>管理员可在邮件中枢查看服务器收件箱、撰写和回复；发送及收件箱 API 需有效管理员会话。注册邮箱回信优先从 D1 用户记录解析；本机发件历史保存在浏览器，Resend 收件正文保存在 D1。</p>
           </div>
         </div>
       </div>

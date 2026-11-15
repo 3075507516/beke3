@@ -221,7 +221,12 @@ export type GlobalThemeMode =
   | 'nordic'
   | 'leather'
   | 'blueprint'
-  | 'retro';
+  | 'retro'
+  | 'aurora-glass'
+  | 'neo-brutal'
+  | 'soft-pastel'
+  | 'midnight-luxe'
+  | 'editorial';
 export type DeviceViewMode = 'responsive' | 'mobile';
 
 export interface SystemSettings {

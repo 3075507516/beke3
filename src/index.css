@@ -302,3 +302,36 @@ body.retro-theme .btn-retro-secondary {
 body.retro-theme .btn-retro-secondary:hover {
   background: linear-gradient(to bottom, #fff8ee, #e5d8c4);
 }
+
+/* 12. Aurora Glass */
+.theme-aurora-glass {
+  background: radial-gradient(ellipse at 12% 0%, rgba(20, 184, 166, .32), transparent 38%), linear-gradient(145deg, #102a43, #172554 58%, #0f172a) !important;
+  color: #e2f8f6 !important;
+}
+.theme-aurora-glass header { background: rgba(12, 28, 50, .72) !important; border-bottom: 1px solid rgba(94, 234, 212, .35) !important; backdrop-filter: blur(18px); color: #ecfeff !important; }
+.theme-aurora-glass [class*="rounded-3xl"], .theme-aurora-glass [class*="rounded-2xl"] { border-color: rgba(153, 246, 228, .28) !important; box-shadow: 0 14px 42px rgba(2, 8, 23, .22); }
+.theme-aurora-glass button:not([class*="bg-transparent"]) { border-color: rgba(94, 234, 212, .4) !important; }
+
+/* 13. Neo-Brutal */
+.theme-neo-brutal { background-color: #fff7d6 !important; color: #171717 !important; font-family: 'Arial Black', 'Arial', sans-serif !important; }
+.theme-neo-brutal [class*="rounded-3xl"], .theme-neo-brutal [class*="rounded-2xl"] { border: 3px solid #171717 !important; border-radius: 8px !important; box-shadow: 5px 5px 0 #171717 !important; }
+.theme-neo-brutal header { background: #facc15 !important; border-bottom: 3px solid #171717 !important; color: #171717 !important; }
+.theme-neo-brutal button:not([class*="bg-transparent"]) { border: 2px solid #171717 !important; border-radius: 6px !important; box-shadow: 3px 3px 0 #171717 !important; color: #171717 !important; font-weight: 800 !important; }
+
+/* 14. Soft Pastel */
+.theme-soft-pastel { background: linear-gradient(145deg, #fbf5ff, #fff7f3 60%, #eff8ff) !important; color: #493d59 !important; }
+.theme-soft-pastel [class*="rounded-3xl"], .theme-soft-pastel [class*="rounded-2xl"] { border-color: #eadcf4 !important; border-radius: 24px !important; box-shadow: 0 12px 34px rgba(133, 87, 153, .09) !important; }
+.theme-soft-pastel header { background: rgba(255, 250, 255, .9) !important; border-bottom: 1px solid #eadcf4 !important; color: #493d59 !important; }
+.theme-soft-pastel button:not([class*="bg-transparent"]) { border-radius: 999px !important; }
+
+/* 15. Midnight Luxe */
+.theme-midnight-luxe { background: radial-gradient(ellipse at top, #27252a, #111318 65%) !important; color: #eee9df !important; font-family: 'Georgia', 'Noto Serif SC', serif !important; }
+.theme-midnight-luxe [class*="rounded-3xl"], .theme-midnight-luxe [class*="rounded-2xl"] { border-color: rgba(214, 179, 106, .28) !important; box-shadow: 0 16px 48px rgba(0, 0, 0, .3) !important; }
+.theme-midnight-luxe header { background: rgba(17, 19, 24, .92) !important; border-bottom: 1px solid rgba(214, 179, 106, .48) !important; color: #f5e8c8 !important; }
+.theme-midnight-luxe button:not([class*="bg-transparent"]) { border-color: rgba(214, 179, 106, .55) !important; }
+
+/* 16. Editorial */
+.theme-editorial { background-color: #f7f5f0 !important; color: #25221f !important; font-family: 'Georgia', 'Noto Serif SC', serif !important; }
+.theme-editorial header { background: #fbfaf7 !important; border-bottom: 2px solid #25221f !important; color: #25221f !important; }
+.theme-editorial [class*="rounded-3xl"], .theme-editorial [class*="rounded-2xl"] { border-color: #d8d2c8 !important; border-radius: 4px !important; box-shadow: none !important; }
+.theme-editorial button:not([class*="bg-transparent"]) { border-radius: 3px !important; border-bottom-width: 2px !important; }

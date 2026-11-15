@@ -129,8 +129,8 @@ export const DEFAULT_SETTINGS: SystemSettings = {
     bucketType: 'r2',
     kvType: 'cf_kv',
   },
-  autoSync: true,
-  syncIntervalSeconds: 30,
+  autoSync: false,
+  syncIntervalSeconds: 600,
   globalTheme: 'modern',
   deviceView: 'responsive',
 };

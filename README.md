@@ -15,8 +15,8 @@
   * 普通注册用户仅能发布博文与删除自己发布的博文，禁止编辑他人内容及书架/相册/影音。
   * 博文详情与卡片高亮标注作者角色徽标，例如 `[用户名] (注册用户)` 与 `fox (超级管理员)`。
   * 【备份区】、【邮箱中枢】、【系统设置】及【网站图床】严格对非管理员隐藏，普通用户无权访问。
-* **11 款系统级怀旧与设计风格主题中心**：
-  * 内置微软 Windows 98 怀旧、麦金塔 Classic Platinum、Matrix 极客终端、复古报纸羊皮纸、8-Bit 掌机像素、赛博朋克霓虹、蒸汽朋克黄铜、北欧极简原木、复古皮质笔记本、工程架构蓝图、现代流体玻璃等 11 款独立完整主题（不仅是调色，深度重塑边框质感与系统气质）。
+* **16 款系统级怀旧与现代设计主题中心**：
+  * 内置微软 Windows 98 怀旧、麦金塔 Classic Platinum、Matrix 极客终端、复古报纸羊皮纸、8-Bit 掌机像素、赛博朋克霓虹、蒸汽朋克黄铜、北欧极简原木、复古皮质笔记本、工程架构蓝图、现代流体玻璃、极光玻璃、新野兽派、柔雾粉彩、午夜奢华与编辑部留白等 16 款主题。
   * 彻底移除夜间深色模式强制覆盖。
 * **网站图床与网址导航中枢 (Sites & Image Host Hub)**：
   * 管理员专属板块，支持快捷添加和管理网站与图床，默认集成高速公共图床 (`https://img.001315.xyz/`)，支持海报预览与一键跳转。
@@ -55,14 +55,14 @@
    * **环境变量设置 (Environment Variables)**：
      * `ADMIN_USERNAME`：自定义管理员账号名（默认 `fox`）。
      * `ADMIN_PASSWORD`：管理员自行选择的生产登录密码，至少 6 个字符，可用数字、字母、符号或组合；未设置时管理员登录被拒绝。仅在 Cloudflare Pages 的 Variables and Secrets 中设置或修改。
-     * `ADMIN_SESSION_SECRET`：必须独立设置至少 32 个字符的高熵随机 Secret，用于签发/验证短期 API 会话；它不是登录密码，不能用 `ADMIN_PASSWORD` 替代，缺少或过短会 fail closed。
+     * `ADMIN_SESSION_SECRET`：必须独立设置至少 32 个字符的高熵随机 Secret，用于签发/验证最长 7 天的 API 会话；它不是登录密码，不能用 `ADMIN_PASSWORD` 替代，缺少或过短会 fail closed。
      * 邮件与收件变量：按下方“邮件配置”设置 Resend API Key、发件地址和 webhook 签名 Secret。
 
 ---
 
 ### 管理员登录与云端 API 权限
 
-Cloudflare 部署时，管理员自行设置至少 6 个字符的 `ADMIN_PASSWORD`（可为数字、字母或其他字符），并单独设置至少 32 个字符的随机 `ADMIN_SESSION_SECRET`。二者用途不同，登录密码不能替代会话签名密钥。成功登录会签发 12 小时签名令牌，前端会定期向服务端验证；邮件发送、用户管理与 D1 共享同步 API 均要求有效令牌。缺少任一变量时管理员登录会 fail closed；不会免密直登。Cloudflare 部署变量只能在 Dashboard 修改，应用前台设置不能更改平台 Secret。纯静态部署没有 Cloudflare Functions，无法启用这些服务端权限与 API。
+Cloudflare 部署时，管理员自行设置至少 6 个字符的 `ADMIN_PASSWORD`（可为数字、字母或其他字符），并单独设置至少 32 个字符的随机 `ADMIN_SESSION_SECRET`。二者用途不同，登录密码不能替代会话签名密钥。成功登录会签发有效期 7 天的签名令牌，保存在当前浏览器的 `localStorage`，关闭并重新打开浏览器仍可恢复会话；只有显式退出或服务端明确返回未授权时才清除。网络中断、HTML 错误页或临时 5xx 不会被误判成密码错误并强制退出。服务端会在应用启动、恢复网络或重新切回前台时验证会话，不进行分钟级后台轮询。邮件发送、用户管理与 D1 共享同步 API 仍由服务端校验签名及有效期。缺少任一变量时管理员登录会 fail closed；不会免密直登。Cloudflare 部署变量只能在 Dashboard 修改，应用前台设置不能更改平台 Secret。纯静态部署没有 Cloudflare Functions，无法启用这些服务端权限与 API。
 
 ---
 
@@ -144,6 +144,10 @@ http://<你的服务器IP>:8080
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_SECURITY` / `SMTP_USER` / `SMTP_PASS` | Pages Variables/Secrets | 可选 SMTP 备用通道；Resend SMTP 示例：`smtp.resend.com` / `465` / `ssl` / `resend` / Resend API Key | 仅选择 SMTP 时使用；密码用 Secret |
 | `BREVO_API_KEY` / `SENDGRID_API_KEY` / `MAIL_API_KEY` | Pages Secret | 备用服务商 API 凭据；`MAIL_API_KEY` 可作兼容别名 | 仅选对应 API 通道时使用 |
 | `VERIFY_CODE_LENGTH` / `VERIFY_EMAIL_SUBJECT` / `VERIFY_EMAIL_TEMPLATE` | Pages Environment Variables | 后台注册验证码位数、主题和模板 | 可选 |
+| `OBJECT_STORAGE_PROVIDER` | Pages Environment Variable | 可选 `cos`、`oss` 或 `s3`；未设置时根据已完整配置的凭据选择 | R2 仍是文件主存储；外部对象存储仅作后备 |
+| `COS_SECRET_ID` / `COS_SECRET_KEY` / `COS_REGION` / `COS_BUCKET` | Pages Variables/Secrets | 腾讯 COS SecretId/SecretKey、地域（如 `ap-guangzhou`）、完整桶名（如 `mybucket-1250000000`） | 选择 COS 后配置；SecretId/SecretKey 设为 Secrets |
+| `OSS_ACCESS_KEY_ID` / `OSS_ACCESS_KEY_SECRET` / `OSS_REGION` / `OSS_BUCKET` | Pages Variables/Secrets | 阿里 OSS AccessKey ID/Secret、地域（如 `cn-hangzhou`）、Bucket 名称 | 选择 OSS 后配置；AccessKey 设为 Secrets |
+| `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` / `S3_REGION` / `S3_BUCKET` / `S3_ENDPOINT` | Pages Variables/Secrets | 通用 AWS SigV4 S3-compatible endpoint、地域、Bucket 与密钥 | 为未单独适配的平台提供对象存储后备；需支持 path-style 请求 |
 
 ### Resend 发信、连接测试与收件配置
 
@@ -151,7 +155,7 @@ http://<你的服务器IP>:8080
 
 邮箱中枢的“检查 Resend API 连接”会以 HTTPS 调用 `GET https://api.resend.com/domains`，不会发送邮件；绿色连接结果只表示 API Key 可读取域名，面板还会检查 `MAIL_SENDER` 域名是否存在并启用发送。要验证实际发信，请另按“发送后台测试邮件”，它会真实投递至发件地址。Resend API 发送端点为 `POST https://api.resend.com/emails`。
 
-收件时，在 Resend Dashboard 的 Emails → Receiving 启用 Resend 管理域名，或按 Resend 指引为自有域名设置 MX。随后创建订阅 `email.received` 事件的 Webhook，URL 填 `https://<你的 Pages 域名>/api/mail/webhook`，把 webhook Signing Secret 保存为 `RESEND_WEBHOOK_SECRET`，并将 D1 绑定名设为 `DB`。收到事件后，Functions 会先验证 Svix 签名和时间戳，再通过 Resend Receiving API 获取邮件正文并保存进 D1；管理员邮件中枢读取 `/api/mail/inbox` 展示来信。配置变量本身不代表 Resend Dashboard 已启用收件，状态灯会等到实际收到邮件后才显示“已收到邮件”。D1 自动清理 180 天前的邮件并最多保留最近 500 封；当前只保留附件元数据，不下载附件文件。
+收件配置步骤：登录 `resend.com`，进入左侧菜单 **API Keys**，点击 **Create API Key**，选好权限和域名后创建，并立即复制 `RESEND_API_KEY`。接着进入 **Webhooks** 创建新 Webhook，Endpoint / URL 填你自己的 Pages Functions 地址，例如 `https://你的项目名.pages.dev/api/webhook`，监听事件选择 `email.received`。创建成功后复制 Resend 返回的 signing secret，保存为 `RESEND_WEBHOOK_SECRET`。然后在 **Domains** 添加域名；要收邮件，需在域名详情开启 **Receiving**，并按 Resend 提示在域名 DNS 中配置 MX 记录。Webhook URL 不是 Resend 提供的，而是你自己的 Pages Functions 接口；`RESEND_API_KEY` 和 `RESEND_WEBHOOK_SECRET` 创建时通常只完整显示一次，遗失后需重新生成。不要把密钥写进前端代码或公开仓库，应保存到 Cloudflare Pages 环境变量/Secrets。当前接口同时兼容 `/api/webhook` 与旧路径 `/api/mail/webhook`。收到事件后，Functions 会验证 Svix 签名和时间戳，再通过 Resend Receiving API 获取邮件正文并保存进 D1；管理员邮件中枢读取 `/api/mail/inbox` 展示来信。配置变量本身不代表 Resend Dashboard 已启用收件，状态灯会等到实际收到邮件后才显示“已收到邮件”。D1 自动清理 180 天前的邮件并最多保留最近 500 封；当前只保留附件元数据，不下载附件文件。
 
 ### 注册账户与密码重置
 
@@ -162,10 +166,10 @@ http://<你的服务器IP>:8080
 - **浏览器 `localStorage`**：当前设备的博客文章、书籍、照片元数据、媒体、站内邮件列表、商品/订单、聊天、站点与系统设置、前台邮箱设置（SMTP/API 密钥）等应用状态。前台密钥保存在本机浏览器且未加密；不随共享同步上传，导出备份会剔除邮件密钥。公用设备不要保存密钥。
 - **浏览器 IndexedDB**：浏览器本地文件/Blob 缓存与部分上传文件回退数据。清除浏览器站点数据会影响这些本机数据。
 - **Cloudflare D1 (`DB`)**：`fox3_users` 保存注册账户和 PBKDF2 密码哈希；`fox3_email_verifications`、`fox3_password_resets`、`fox3_email_ip_rates` 用于注册/找回验证码及限流；`fox3_inbound_emails` 保存经过 Resend webhook 验签并拉取的来信正文和附件元数据；`fox3_sync` 保存管理员手动同步的共享 JSON（包括当前全局主题模式）；`fox3_files` 是无 R2 时的文件回退表。邮件凭据/WebDAV 凭据不在共享同步载荷中。
-- **Cloudflare R2 (`R2_BUCKET`)**：上传文件对象的首选存储；单文件上传上限为 90 MiB，并拒绝常见可执行/活动内容扩展名。R2 写失败时，文件不超过 1 MiB 才可回退 D1 文件表；KV 回退上限为 18 MiB；最后的 Worker 内存回退仅适用于 4 MiB 以内文件。内存回退会在实例重启/切换后丢失，无法视为持久存储；D1/KV 回退也不是等价的大文件对象存储。超过可用后备容量时 API 返回 JSON 503，不会报告虚假成功。
+- **Cloudflare R2 (`R2_BUCKET`)**：上传文件对象的首选存储，下载同样优先从 R2 读取；单文件上传上限为 90 MiB，并拒绝常见可执行/活动内容扩展名。R2 不可用时可按 `OBJECT_STORAGE_PROVIDER` 选择服务端 Tencent COS、Alibaba OSS 或通用 AWS SigV4 S3-compatible 对象存储后备。COS/OSS/S3 密钥只配置在 Pages Functions Secrets，绝不写入浏览器；COS Bucket 要填写带 APPID 的完整桶名（`bucketname-APPID`），COS region 形如 `ap-guangzhou`；OSS region 形如 `cn-hangzhou`。通用 S3 需提供 HTTPS endpoint、地域、桶名及密钥，并使用适配器支持的 path-style 请求。外部对象存储仍由当前 Cloudflare Pages Functions 代为签名读写，不会自动迁移 D1 用户/博客数据，也不代表前端静态部署已带有后端 API。对象存储失败时，文件不超过 1 MiB 才可回退 D1 文件表；KV 回退上限为 18 MiB；最后的 Worker 内存回退仅适用于 4 MiB 以内文件。内存回退会在实例重启/切换后丢失，无法视为持久存储；D1/KV 回退也不是等价的大文件对象存储。超过可用后备容量时 API 返回 JSON 503，不会报告虚假成功。
 - **Cloudflare KV (`KV`)**：仅作兼容回退/短期记录；正常验证码和共享同步优先 D1，只有 D1 不可用时才回退。成功发送邮件的回执由 API 返回并保存在前端应用状态，不再额外写 KV。KV 免费配额仍可能在回退数据写入频繁时耗尽。
 - **邮箱配置归属**：前台邮箱配置只保存在配置它的浏览器；后台环境变量适用于服务端/注册邮件。二者可分别检查或发送测试邮件，手动站内信可明确选择使用哪一方。Resend webhook 收件正文保存于 D1，应用不会通过 IMAP 轮询，也不会把 Email Routing 转发误认为本站收件。
-- **重要部署限制**：纯静态部署（例如 Pages Direct Upload、Vercel 静态目录、OSS 静态托管）不会自动带上 Cloudflare Pages Functions、D1/R2/KV 绑定；账户、验证码、服务端邮件和云同步 API 需要 Functions 运行环境与相应绑定。未配置时仅能使用本地功能或得到明确的服务错误。
+- **重要部署限制**：纯静态部署（例如 Pages Direct Upload、Vercel 静态目录、OSS 静态托管）不会自动带上 Cloudflare Pages Functions、D1/R2/KV 绑定或上述服务端 COS/OSS 适配代码；账户、验证码、服务端邮件和云同步 API 需要 Pages Functions 运行环境与相应绑定。当前 COS/OSS 是文件对象层后备，不是数据库或完整后端部署适配器。未配置后端时仅能使用本地功能或得到明确的服务错误。自动云端同步默认关闭；开启后仅在应用数据变化时写入，不会按固定间隔轮询，管理员也可手动触发同步。
 
 ---
 

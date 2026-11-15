@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import { SafeImage } from '../common/SafeImage';
 import { Locale } from '../../utils/i18n';
+import { clearAdminSessionToken } from '../../utils/adminSession';
 
 interface HeaderProps {
   currentTab: string;
@@ -89,7 +90,7 @@ export const Header: React.FC<HeaderProps> = ({
   });
 
   const handleLogout = () => {
-    sessionStorage.removeItem('fox3_admin_session');
+    clearAdminSessionToken();
     setCurrentUser(null);
   };
 

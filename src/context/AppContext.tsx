@@ -20,6 +20,7 @@ import {
   DeviceViewMode,
 } from '../types';
 import { Locale, i18nDict, getTranslation } from '../utils/i18n';
+import { clearAdminSessionToken, getAdminSessionToken } from '../utils/adminSession';
 import {
   STORAGE_KEYS,
   loadLocalStorage,
@@ -179,7 +180,7 @@ interface AppContextType {
 
   // Real backend channel connectivity check
   channelConnected: boolean;
-  cloudServicesStatus: { d1: boolean; r2: boolean; kv: boolean };
+  cloudServicesStatus: { d1: boolean; r2: boolean; kv: boolean; objectStorage: boolean; objectStorageProvider: string | null };
   refreshChannelStatus: () => Promise<boolean>;
 }
 
@@ -188,6 +189,7 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 const GLOBAL_THEME_MODES: GlobalThemeMode[] = [
   'modern', 'win98', 'mac-classic', 'terminal', 'parchment', 'gameboy',
   'cyberpunk', 'steampunk', 'nordic', 'leather', 'blueprint', 'retro',
+  'aurora-glass', 'neo-brutal', 'soft-pastel', 'midnight-luxe', 'editorial',
 ];
 const isGlobalThemeMode = (value: unknown): value is GlobalThemeMode =>
   typeof value === 'string' && GLOBAL_THEME_MODES.includes(value as GlobalThemeMode);
@@ -248,8 +250,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
     const saved = loadLocalStorage<User | null>(STORAGE_KEYS.CURRENT_USER, null);
-    // Never trust a persisted administrator profile by itself; a signed server session is required.
-    return saved?.role === 'admin' ? null : saved;
+    // Restore the admin UI across browser restarts only when a signed server token is also present.
+    if (saved?.role === 'admin') {
+      const localDevelopment = ['localhost', '127.0.0.1'].includes(window.location.hostname);
+      return getAdminSessionToken() || localDevelopment ? saved : null;
+    }
+    return saved;
   });
 
   const [users, setUsers] = useState<User[]>(() =>
@@ -258,30 +264,44 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   useEffect(() => {
     let cancelled = false;
-    let token = '';
-    try { token = sessionStorage.getItem('fox3_admin_session') || ''; } catch {}
-    if (!token) {
-      const isLocalDevelopment = ['localhost', '127.0.0.1'].includes(window.location.hostname);
-      if (currentUser?.role === 'admin' && !isLocalDevelopment) setCurrentUser(null);
-      return;
-    }
+    const localDevelopment = ['localhost', '127.0.0.1'].includes(window.location.hostname);
     const validateSession = async () => {
+      const token = getAdminSessionToken();
+      if (!token) {
+        if (!localDevelopment) setCurrentUser(prev => prev?.role === 'admin' ? null : prev);
+        return;
+      }
       try {
         const response = await fetch('/api/auth/session', { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } });
-        const data = await response.json();
-        if (!response.ok || !data?.authenticated || data?.user?.role !== 'admin') throw new Error('Invalid administrator session');
-        if (!cancelled) setCurrentUser(data.user as User);
-      } catch {
-        if (!cancelled) {
-          try { sessionStorage.removeItem('fox3_admin_session'); } catch {}
-          setCurrentUser(prev => prev?.role === 'admin' ? null : prev);
+        if (response.status === 401 || response.status === 403) {
+          clearAdminSessionToken();
+          if (!cancelled) setCurrentUser(prev => prev?.role === 'admin' ? null : prev);
+          return;
         }
+        // Network errors, 5xx responses, HTML fallbacks and malformed JSON are transient;
+        // keep the persisted session and let protected APIs make the final authorization decision.
+        if (!response.ok) return;
+        const contentType = response.headers.get('content-type') || '';
+        if (!contentType.includes('application/json')) return;
+        const data = await response.json();
+        if (data?.authenticated && data?.user?.role === 'admin' && !cancelled) {
+          setCurrentUser(data.user as User);
+        }
+      } catch {
+        // Preserve the signed token/profile on connection loss. It is checked again on resume/online.
       }
     };
+    const onVisibility = () => { if (document.visibilityState === 'visible') void validateSession(); };
+    const onOnline = () => { void validateSession(); };
     void validateSession();
-    const interval = window.setInterval(validateSession, 60_000);
-    return () => { cancelled = true; window.clearInterval(interval); };
-  }, [currentUser?.id, currentUser?.role]);
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('online', onOnline);
+    return () => {
+      cancelled = true;
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('online', onOnline);
+    };
+  }, []);
 
   const [posts, setPosts] = useState<Post[]>(() =>
     loadLocalStorage<Post[]>(STORAGE_KEYS.POSTS, DEFAULT_POSTS)
@@ -466,9 +486,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return getTranslation(dict, path);
   }, [locale]);
 
-  const [themeMode, setThemeModeState] = useState<GlobalThemeMode>(() =>
-    (loadLocalStorage<GlobalThemeMode>('fox3_global_theme', 'modern'))
-  );
+  const [themeMode, setThemeModeState] = useState<GlobalThemeMode>(() => {
+    const saved = loadLocalStorage<unknown>('fox3_global_theme', 'modern');
+    return isGlobalThemeMode(saved) ? saved : 'modern';
+  });
 
   const setThemeMode = (mode: GlobalThemeMode) => {
     if (!isGlobalThemeMode(mode)) return;
@@ -503,15 +524,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const [channelConnected, setChannelConnected] = useState<boolean>(false);
-  const [cloudServicesStatus, setCloudServicesStatus] = useState<{ d1: boolean; r2: boolean; kv: boolean }>({
+  const [cloudServicesStatus, setCloudServicesStatus] = useState<{ d1: boolean; r2: boolean; kv: boolean; objectStorage: boolean; objectStorageProvider: string | null }>({
     d1: false,
     r2: false,
     kv: false,
+    objectStorage: false,
+    objectStorageProvider: null,
   });
 
   const refreshChannelStatus = useCallback(async (): Promise<boolean> => {
     try {
-      const res = await fetch('/api/status', { method: 'GET', headers: { 'Accept': 'application/json' } });
+      const statusHeaders: Record<string, string> = { Accept: 'application/json' };
+      const adminToken = getAdminSessionToken();
+      if (adminToken) statusHeaders.Authorization = `Bearer ${adminToken}`;
+      const res = await fetch('/api/status', { method: 'GET', headers: statusHeaders });
       const contentType = res.headers.get('content-type') || '';
       // Only treat as connected if response is real JSON and channelOnline is true
       if (res.ok && contentType.includes('application/json')) {
@@ -523,27 +549,40 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             d1: Boolean(data.cloudServices.d1),
             r2: Boolean(data.cloudServices.r2),
             kv: Boolean(data.cloudServices.kv),
+            objectStorage: Boolean(data.cloudServices.objectStorage),
+            objectStorageProvider: typeof data.cloudServices.objectStorageProvider === 'string' ? data.cloudServices.objectStorageProvider : null,
           });
         } else {
-          setCloudServicesStatus({ d1: false, r2: false, kv: false });
+          setCloudServicesStatus({ d1: false, r2: false, kv: false, objectStorage: false, objectStorageProvider: null });
         }
         return isOk;
       }
       setChannelConnected(false);
-      setCloudServicesStatus({ d1: false, r2: false, kv: false });
+      setCloudServicesStatus({ d1: false, r2: false, kv: false, objectStorage: false, objectStorageProvider: null });
       return false;
     } catch {
       setChannelConnected(false);
-      setCloudServicesStatus({ d1: false, r2: false, kv: false });
+      setCloudServicesStatus({ d1: false, r2: false, kv: false, objectStorage: false, objectStorageProvider: null });
       return false;
     }
   }, []);
 
   useEffect(() => {
-    refreshChannelStatus();
-    // Low-frequency heartbeat: probe every 60s instead of flooding network traffic
-    const interval = setInterval(refreshChannelStatus, 60000);
-    return () => clearInterval(interval);
+    void refreshChannelStatus();
+    const onVisibility = () => { if (document.visibilityState === 'visible') void refreshChannelStatus(); };
+    const onOnline = () => { void refreshChannelStatus(); };
+    const onOffline = () => {
+      setChannelConnected(false);
+      setCloudServicesStatus({ d1: false, r2: false, kv: false, objectStorage: false, objectStorageProvider: null });
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
+    };
   }, [refreshChannelStatus]);
 
   const [viewModes, setViewModesState] = useState<Record<string, ViewMode>>(() =>
@@ -784,7 +823,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       } catch (e) {}
 
       // Push to backend sync
-      const adminToken = sessionStorage.getItem('fox3_admin_session');
+      const adminToken = getAdminSessionToken();
       const postRes = adminToken ? await fetch('/api/sync/global_state', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${adminToken}` },
@@ -856,7 +895,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     const fetchInitialSync = async () => {
       try {
-        const adminToken = sessionStorage.getItem('fox3_admin_session');
+        const adminToken = getAdminSessionToken();
         if (!adminToken) return;
         const res = await fetch('/api/sync/global_state', { method: 'GET', headers: { 'Authorization': `Bearer ${adminToken}` } }).catch(() => null);
         if (res && res.ok) {
@@ -905,8 +944,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Instant broadcast & debounced trigger sync whenever modules change
   const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const syncEffectsMountedRef = useRef(false);
 
   useEffect(() => {
+    if (!syncEffectsMountedRef.current) {
+      syncEffectsMountedRef.current = true;
+      return;
+    }
     if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
     syncTimeoutRef.current = setTimeout(() => {
       try {
@@ -925,9 +969,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         bc.postMessage({ type: 'SYNC_ALL', payload });
         bc.close();
 
-        // Non-blocking sync to cloud
-        const adminToken = sessionStorage.getItem('fox3_admin_session');
-        if (adminToken) fetch('/api/sync/global_state', {
+        // Cloud write is opt-in and only follows actual data changes; no idle interval is scheduled.
+        const adminToken = getAdminSessionToken();
+        if (adminToken && systemSettings.autoSync) fetch('/api/sync/global_state', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${adminToken}` },
           body: JSON.stringify(payload),
@@ -939,32 +983,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
     };
   }, [posts, books, photos, media, products, websites, systemSettings, themeMode]);
-
-  // Auto-sync timer: disabled continuous background pinging by default, only sync on user action or window visibility change
-  useEffect(() => {
-    if (!systemSettings.autoSync) return;
-
-    // Only sync when user returns to tab, avoiding continuous data stream consumption in background
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        triggerManualSync();
-      }
-    };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    // Minimum interval 10 minutes (600s) to eliminate traffic drain
-    const intervalMs = Math.max(600, (systemSettings.syncIntervalSeconds || 600)) * 1000;
-    const interval = setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        triggerManualSync();
-      }
-    }, intervalMs);
-
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      clearInterval(interval);
-    };
-  }, [systemSettings.autoSync, systemSettings.syncIntervalSeconds, triggerManualSync]);
 
   // Robust file upload with real XMLHttpRequest progress tracking & local fallback
   const uploadFile = async (file: File): Promise<{ url: string; size: number; name: string }> => {

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import { MailMessage, User } from '../../types';
+import { getAdminSessionToken } from '../../utils/adminSession';
 import {
   Mail,
   Inbox,
@@ -15,6 +16,8 @@ import {
   Settings,
   ShieldCheck,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
   Reply,
   KeyRound,
   Users,
@@ -71,6 +74,10 @@ export const MailSection: React.FC = () => {
   const [registeredUsersLoading, setRegisteredUsersLoading] = useState(true);
   const [registeredUsersError, setRegisteredUsersError] = useState('');
   const [registeredUserActionId, setRegisteredUserActionId] = useState<string | null>(null);
+  const [registeredUsersCollapsed, setRegisteredUsersCollapsed] = useState(() => {
+    try { return localStorage.getItem('fox3_mail_users_collapsed') === 'true'; } catch { return false; }
+  });
+  const [registeredUsersQuery, setRegisteredUsersQuery] = useState('');
   const [frontendTestFingerprint, setFrontendTestFingerprint] = useState('');
   const [frontendTestFailedFingerprint, setFrontendTestFailedFingerprint] = useState('');
   const [backendTestResult, setBackendTestResult] = useState<boolean | null>(null);
@@ -103,7 +110,7 @@ export const MailSection: React.FC = () => {
 
   const refreshServerInbox = useCallback(async () => {
     if (currentUser?.role !== 'admin') return;
-    const token = sessionStorage.getItem('fox3_admin_session');
+    const token = getAdminSessionToken();
     if (!token) return;
     setIsRefreshingInbox(true);
     try {
@@ -137,7 +144,7 @@ export const MailSection: React.FC = () => {
   const refreshRegisteredUsers = useCallback(async () => {
     if (currentUser?.role !== 'admin') return;
     let token = '';
-    try { token = sessionStorage.getItem('fox3_admin_session') || ''; } catch {}
+    try { token = getAdminSessionToken() || ''; } catch {}
     if (!token) {
       setRegisteredUsers([]);
       setRegisteredUsersError('缺少管理员会话。请通过已部署的管理员账号重新登录后刷新；不会显示本地缓存或示例账号。');
@@ -187,7 +194,7 @@ export const MailSection: React.FC = () => {
   const handleRegisteredUserStatus = async (user: User) => {
     if (user.role === 'admin') return;
     const status: User['status'] = user.status === 'active' ? 'disabled' : 'active';
-    const token = sessionStorage.getItem('fox3_admin_session');
+    const token = getAdminSessionToken();
     if (!token) {
       setRegisteredUsersError('管理员会话已失效。请重新登录后再操作。');
       showToast('管理员会话已失效，请重新登录后再操作。', 'error');
@@ -220,7 +227,7 @@ export const MailSection: React.FC = () => {
   const handleDeleteRegisteredUser = async (user: User) => {
     if (user.role === 'admin') return;
     if (!window.confirm(`确定从 D1 永久删除注册账号「${user.username}」（${user.email || '未填写邮箱'}）吗？此操作无法撤销。`)) return;
-    const token = sessionStorage.getItem('fox3_admin_session');
+    const token = getAdminSessionToken();
     if (!token) {
       setRegisteredUsersError('管理员会话已失效。请重新登录后再操作。');
       showToast('管理员会话已失效，请重新登录后再操作。', 'error');
@@ -269,7 +276,7 @@ export const MailSection: React.FC = () => {
   const inboundServerReady = Boolean(inboundServerStatus?.configured);
 
   const handleTestMail = async (source: 'frontend' | 'backend') => {
-    const token = sessionStorage.getItem('fox3_admin_session');
+    const token = getAdminSessionToken();
     if (!token) {
       showToast('邮件连通测试需要通过已部署的管理员账号重新登录。', 'error');
       return;
@@ -303,7 +310,7 @@ export const MailSection: React.FC = () => {
   };
 
   const handleTestBackendConnection = async () => {
-    const token = sessionStorage.getItem('fox3_admin_session');
+    const token = getAdminSessionToken();
     if (!token) {
       showToast('Resend API 连接检查需要通过已部署的管理员账号重新登录。', 'error');
       return;
@@ -387,7 +394,7 @@ export const MailSection: React.FC = () => {
     if ((!recipient && !replyIdentity) || !subject || !body) return;
 
     const sender = emailSettings.senderEmail || 'service@whitefox.blog';
-    const token = sessionStorage.getItem('fox3_admin_session');
+    const token = getAdminSessionToken();
     try {
       const response = await fetch('/api/mail/send', {
         method: 'POST',
@@ -545,7 +552,7 @@ export const MailSection: React.FC = () => {
               <p><b>1. 推荐 Resend API (HTTPS)：</b>在 Resend 创建 API Key，并验证发件域名。Cloudflare Pages → Settings → Variables and Secrets 设置 <code>MAIL_PROVIDER=resend</code>、<code>RESEND_API_KEY</code> 与 <code>MAIL_SENDER</code>（例如 <code>Fox3 &lt;no-reply@你的已验证域名&gt;</code>）；此方式无需 SMTP 主机、端口、用户名或密码。新建配置默认选择 Resend API，已有 SMTP 配置仍可手动切换。</p>
               <p><b>2. 区分连接测试和邮件测试：</b>“检查 Resend API 连接”只调用 HTTPS 域名列表接口，不会发送邮件；它同时检查发件域名是否存在且已启用发送能力。若 API Key 是仅发送权限，读取域名可能被拒绝；请使用具备所需域名读取和收件读取权限的 Key。“发送后台测试邮件”会真实发送一封邮件到 MAIL_SENDER。前台 Key 仅保存在当前浏览器本地且未加密；验证码及访客邮件应使用后台 Secret。</p>
               <p><b>3. 注册验证码：</b>验证码在服务端生成和验证。可在 Pages Variables/Secrets 设置 <code>VERIFY_CODE_LENGTH</code>、<code>VERIFY_EMAIL_SUBJECT</code>、<code>VERIFY_EMAIL_TEMPLATE</code>；模板变量为 {'{{code}}'}、{'{{username}}'}、{'{{email}}'}。验证码投递使用后台配置的 Resend API。</p>
-              <p><b>4. Resend 收件接入：</b>绑定 D1，配置 <code>RESEND_API_KEY</code>、<code>RESEND_WEBHOOK_SECRET</code>。在 Resend 的 Emails → Receiving 选择 Resend 收件域名，或为自有域名按其说明设置 MX；再创建 <code>email.received</code> Webhook，地址填写 <code>https://你的 Pages 域名/api/mail/webhook</code>，并把该 Webhook 的 Signing Secret 保存为 <code>RESEND_WEBHOOK_SECRET</code>。通过验签且成功取回正文的来信会存入 D1，并显示在本站收件箱。仅把邮件转发到外部邮箱不会进入本站。</p>
+              <p><b>4. Resend 收件接入：</b>绑定 D1，配置 <code>RESEND_API_KEY</code>、<code>RESEND_WEBHOOK_SECRET</code>。在 Resend 的 Emails → Receiving 选择 Resend 收件域名，或为自有域名按其说明设置 MX；再创建 <code>email.received</code> Webhook，地址填写 <code>https://你的 Pages 域名/api/webhook</code>，并把该 Webhook 的 Signing Secret 保存为 <code>RESEND_WEBHOOK_SECRET</code>。通过验签且成功取回正文的来信会存入 D1，并显示在本站收件箱。也兼容旧路径 <code>/api/mail/webhook</code>；仅把邮件转发到外部邮箱不会进入本站。</p>
             </div>
           </div>
 
@@ -741,7 +748,7 @@ export const MailSection: React.FC = () => {
 
               <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 space-y-3 text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">
                 <p><b>收件接入步骤：</b>在 Resend Dashboard → Emails → Receiving 启用 Resend 收件域名，或为自己的收件域名添加 Resend 要求的 MX 记录；然后创建 <code>email.received</code> Webhook。</p>
-                <p><b>Webhook URL：</b><code className="break-all">https://你的 Pages 域名/api/mail/webhook</code>。将该 Webhook 的 Signing Secret 设为 Cloudflare Pages Secret <code>RESEND_WEBHOOK_SECRET</code>。Webhook 事件经签名验证后，后端使用 <code>RESEND_API_KEY</code> 拉取正文，并写入绑定名为 <code>DB</code> 的 D1 数据库。</p>
+                <p><b>Webhook URL：</b><code className="break-all">https://你的 Pages 域名/api/webhook</code>。将该 Webhook 的 Signing Secret 设为 Cloudflare Pages Secret <code>RESEND_WEBHOOK_SECRET</code>。Webhook 事件经签名验证后，后端使用 <code>RESEND_API_KEY</code> 拉取正文，并写入绑定名为 <code>DB</code> 的 D1 数据库；旧路径 <code>/api/mail/webhook</code> 仍可用。</p>
                 <p><b>状态含义：</b>{inboundReceivingActive && inboundServerStatus?.lastReceivedAt ? `已在 ${new Date(Number(inboundServerStatus.lastReceivedAt)).toLocaleString()} 收到并保存过邮件。` : inboundServerReady ? '后端 D1、API Key 和签名 Secret 已配置，但尚未收到有效 webhook；请确认 Resend 域名/MX 和 webhook URL。' : '需要同时配置 D1、RESEND_API_KEY 与 RESEND_WEBHOOK_SECRET；此状态只判断服务器变量，不代表 Resend Dashboard 已完成配置。'}</p>
                 {inboxLoadError && <p className="text-rose-600 dark:text-rose-400">收件箱读取提示：{inboxLoadError}</p>}
                 <p className="text-slate-500">收件正文会保存到 D1 并载入本站收件箱（最多最近 500 封且清理 180 天前邮件）；当前会保存附件元数据，但不会下载或展示附件文件。</p>
@@ -1081,13 +1088,23 @@ export const MailSection: React.FC = () => {
       {currentUser?.role === 'admin' && (
         <section className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl p-4 sm:p-6 shadow-sm space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div>
+            <button
+              type="button"
+              aria-expanded={!registeredUsersCollapsed}
+              onClick={() => {
+                const next = !registeredUsersCollapsed;
+                setRegisteredUsersCollapsed(next);
+                try { localStorage.setItem('fox3_mail_users_collapsed', String(next)); } catch {}
+              }}
+              className="min-w-0 flex-1 text-left"
+            >
               <h3 className="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
                 <Users className="w-5 h-5 text-indigo-500" />
                 <span>已注册用户管理</span>
+                {registeredUsersCollapsed ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronUp className="w-4 h-4 text-slate-400" />}
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">数据直接读取 Cloudflare D1；不会使用本地示例或缓存用户代替服务器结果。</p>
-            </div>
+            </button>
             <button
               type="button"
               onClick={() => void refreshRegisteredUsers()}
@@ -1099,8 +1116,22 @@ export const MailSection: React.FC = () => {
             </button>
           </div>
 
-          <div className="text-xs font-semibold text-slate-600 dark:text-slate-300" aria-live="polite">
-            {registeredUsersLoading ? '正在从 D1 加载账号…' : `D1 账号数：${registeredUsers.length}`}
+          {!registeredUsersCollapsed && <>
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+            <label className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <input
+                type="search"
+                value={registeredUsersQuery}
+                onChange={event => setRegisteredUsersQuery(event.target.value)}
+                placeholder="搜索用户名或邮箱"
+                aria-label="搜索注册用户用户名或邮箱"
+                className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500"
+              />
+            </label>
+            <div className="text-xs font-semibold text-slate-600 dark:text-slate-300" aria-live="polite">
+              {registeredUsersLoading ? '正在从 D1 加载账号…' : `D1 用户：${registeredUsers.length}，匹配：${registeredUsers.filter(user => `${user.username || ''} ${user.email || ''}`.toLocaleLowerCase().includes(registeredUsersQuery.trim().toLocaleLowerCase())).length}`}
+            </div>
           </div>
 
           {registeredUsersError && (
@@ -1115,9 +1146,15 @@ export const MailSection: React.FC = () => {
             </div>
           )}
 
+          {!registeredUsersLoading && registeredUsers.length > 0 && registeredUsers.filter(user => `${user.username || ''} ${user.email || ''}`.toLocaleLowerCase().includes(registeredUsersQuery.trim().toLocaleLowerCase())).length === 0 && (
+            <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 p-5 text-center text-xs text-slate-500 dark:text-slate-400">
+              没有找到匹配的用户名或邮箱。
+            </div>
+          )}
+
           {!registeredUsersLoading && registeredUsers.length > 0 && (
             <div className="space-y-3">
-              {registeredUsers.map(user => (
+              {registeredUsers.filter(user => `${user.username || ''} ${user.email || ''}`.toLocaleLowerCase().includes(registeredUsersQuery.trim().toLocaleLowerCase())).map(user => (
                 <article key={user.id} className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50/70 dark:bg-slate-800/40 p-3 sm:p-4">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div className="min-w-0 space-y-1">
@@ -1157,6 +1194,7 @@ export const MailSection: React.FC = () => {
               ))}
             </div>
           )}
+          </>}
         </section>
       )}
     </div>

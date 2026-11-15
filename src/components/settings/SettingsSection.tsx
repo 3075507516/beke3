@@ -322,7 +322,7 @@ export const SettingsSection: React.FC = () => {
     setCustomAdminName(adminUsername);
   }, [adminUsername]);
 
-  // Comprehensive Nostalgic & Distinct Aesthetic Themes (11 Full Themes)
+  // Comprehensive Nostalgic & Distinct Aesthetic Themes (16 Full Themes)
   const aestheticThemes: {
     id: GlobalThemeMode;
     name: string;
@@ -342,6 +342,11 @@ export const SettingsSection: React.FC = () => {
     { id: 'nordic', name: '北欧极简原木', icon: '❄️', color: '#5e81ac', bg: '#eceff4', desc: '冷淡雪原灰蓝、舒缓柔和的纯净自然极简' },
     { id: 'leather', name: '复古皮质笔记本', icon: '📔', color: '#cdaa7d', bg: '#3d2314', desc: '深褐皮革压纹质感、手工书缝纫边与暖调内页' },
     { id: 'blueprint', name: '工程架构蓝图', icon: '📐', color: '#328cc1', bg: '#0b3c5d', desc: '经典建筑施工深蓝背景、白色线框坐标网格' },
+    { id: 'aurora-glass', name: '极光玻璃', icon: '🌌', color: '#14b8a6', bg: '#102a43', desc: '深海蓝渐层、青绿极光与通透玻璃层' },
+    { id: 'neo-brutal', name: '新野兽派', icon: '🟨', color: '#facc15', bg: '#fff7d6', desc: '高对比原色、粗黑描边与硬朗投影' },
+    { id: 'soft-pastel', name: '柔雾粉彩', icon: '🌷', color: '#c084fc', bg: '#fbf5ff', desc: '低饱和薰衣草、奶油白和柔和圆角' },
+    { id: 'midnight-luxe', name: '午夜奢华', icon: '🌙', color: '#d6b36a', bg: '#111318', desc: '午夜墨色、香槟金点缀与精致衬线字' },
+    { id: 'editorial', name: '编辑部留白', icon: '📰', color: '#c2410c', bg: '#f7f5f0', desc: '纸本文字排版、克制橘红与清晰分隔线' },
   ];
 
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -447,7 +452,16 @@ export const SettingsSection: React.FC = () => {
           : 'bg-white dark:bg-slate-900 border-slate-200/80 dark:border-slate-800'
       }`}>
         <div
+          role="button"
+          tabIndex={0}
+          aria-expanded={!collapsedSections.theme}
           onClick={() => toggleSection('theme')}
+          onKeyDown={event => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              toggleSection('theme');
+            }
+          }}
           className="p-5 flex items-center justify-between cursor-pointer hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition border-b border-slate-100 dark:border-slate-800"
         >
           <div className="flex items-center gap-2">
@@ -497,12 +511,12 @@ export const SettingsSection: React.FC = () => {
               </div>
             </div>
 
-            {/* 2. 深度定制与全站怀旧/风格主题中心 (11款独立风格主题，不仅是调色) */}
+            {/* 2. 深度定制与全站怀旧/风格主题中心 (16 款独立风格主题) */}
             <div>
               <div className="flex items-center justify-between mb-2">
                 <label className="block text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
                   <Palette className="w-4 h-4 text-sky-500" />
-                  <span>2. 怀旧与设计风格主题中心 (已内置 11 款独立风格主题)</span>
+                  <span>2. 怀旧与设计风格主题中心 (已内置 16 款独立风格主题)</span>
                 </label>
                 <span className="text-[11px] text-slate-400">深度重塑界面边框、质感、阴影与系统气质</span>
               </div>
@@ -833,7 +847,7 @@ export const SettingsSection: React.FC = () => {
             <div>
               <div className="flex items-center justify-between mb-2">
                 <h4 className="text-xs font-semibold text-slate-500">
-                  Cloudflare 绑定探测（本次 R2 列表、D1 查询、KV 读取是否成功）
+                  实时连通探测（R2 列表、D1 查询、KV 读取及已配置 COS/OSS Bucket）
                 </h4>
                 <button
                   type="button"
@@ -845,7 +859,7 @@ export const SettingsSection: React.FC = () => {
                 </button>
               </div>
 
-              <div className={`grid gap-3 ${deviceMode === 'mobile' ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-3'}`}>
+              <div className={`grid gap-3 ${deviceMode === 'mobile' ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2 xl:grid-cols-4'}`}>
                 {/* Storage Bucket Light */}
                 <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 flex items-center justify-between">
                   <div>
@@ -899,6 +913,23 @@ export const SettingsSection: React.FC = () => {
                     <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-rose-50 text-rose-600 dark:bg-rose-950/40 dark:text-rose-400">
                       <span className="w-2 h-2 rounded-full bg-rose-500" />
                       探测失败 / 未绑定
+                    </span>
+                  )}
+                </div>
+                <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 flex items-center justify-between">
+                  <div>
+                    <span className="text-xs font-bold text-slate-800 dark:text-slate-200 block">COS / OSS / S3-compatible</span>
+                    <span className="text-[10px] text-slate-400">Pages Functions 的只读 Bucket 探测</span>
+                  </div>
+                  {cloudServicesStatus.objectStorage ? (
+                    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                      {cloudServicesStatus.objectStorageProvider?.toUpperCase()} 已连通
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-rose-50 text-rose-600 dark:bg-rose-950/40 dark:text-rose-400">
+                      <span className="w-2 h-2 rounded-full bg-rose-500" />
+                      未配置 / 探测失败
                     </span>
                   )}
                 </div>
