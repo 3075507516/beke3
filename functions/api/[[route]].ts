@@ -1144,7 +1144,12 @@ export const onRequest = async (context: any) => {
         return value.slice(0, 5000).filter((item: any) => {
           if (!item || typeof item !== 'object' || typeof item.id !== 'string' || item.id.length > 200 || item.deleted) return false;
           const isPublicOwner = item.ownerId ? item.ownerId === 'user_fox_admin' : !item.ownerUsername || String(item.ownerUsername).toLowerCase() === adminUsername;
-          return isPublicOwner;
+          if (!isPublicOwner) return false;
+          // Browser-only IndexedDB/data/blob URLs cannot be resolved from another device
+          // and must never bloat the canonical D1 snapshot.
+          const fileField = kind === 'books' ? 'fileUrl' : kind === 'photos' ? 'url' : kind === 'media' ? 'src' : '';
+          const fileUrl = fileField ? item[fileField] : '';
+          return !(typeof fileUrl === 'string' && /^(?:idb_file_|data:|blob:)/i.test(fileUrl));
         }).map((item: any) => {
           const allowed: Record<string, string[]> = {
             posts: ['id','title','summary','content','category','tags','cover','author','views','likes','createdAt','updatedAt'],
@@ -1156,7 +1161,15 @@ export const onRequest = async (context: any) => {
             websites: ['id','title','url','poster','description','createdAt','updatedAt'],
           };
           const clean: Record<string, unknown> = {};
-          for (const key of allowed[kind] || []) if (item[key] !== undefined) clean[key] = item[key];
+          for (const key of allowed[kind] || []) {
+            if (item[key] === undefined) continue;
+            if (typeof item[key] === 'string' && /^(?:idb_file_|data:|blob:)/i.test(item[key])) continue;
+            if (key === 'images' && Array.isArray(item.images)) {
+              clean.images = item.images.filter((url: unknown) => typeof url === 'string' && !/^(?:idb_file_|data:|blob:)/i.test(url));
+              continue;
+            }
+            clean[key] = item[key];
+          }
           return clean;
         });
       };
