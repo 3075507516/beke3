@@ -15,7 +15,7 @@
   * 已实现的 Cloudflare Functions 管理 API 会校验由 `ADMIN_SESSION_SECRET` 签名的管理员会话；相关服务端操作不能仅凭前端隐藏界面获得授权。
   * 前端包含用户角色显示及部分按角色显示的界面，但这不等于所有博客、书架、相册、影音等内容都具有后端逐条权限控制。请勿把当前应用当作具备完整多用户内容权限隔离的可信后端。
 * **16 款系统级怀旧与现代设计主题中心**：
-  * 内置微软 Windows 98 怀旧、麦金塔 Classic Platinum、Matrix 极客终端、复古报纸羊皮纸、8-Bit 掌机像素、赛博朋克霓虹、蒸汽朋克黄铜、北欧极简原木、复古皮质笔记本、工程架构蓝图、现代流体玻璃、极光玻璃、新野兽派、柔雾粉彩、午夜奢华与编辑部留白等 16 款主题。
+  * 内置 16 款主题：微软 Windows 98 怀旧、麦金塔 Classic Platinum、赛博朋克霓虹、北欧极简原木、复古皮质笔记本、工程架构蓝图、现代流体玻璃、极光玻璃、新野兽派、柔雾粉彩、编辑部留白，以及珍珠雾白、鼠尾草工坊、陶土暖意、海岸蓝调、丝绒梅紫。
   * 彻底移除夜间深色模式强制覆盖。
 * **网站图床与网址导航中枢 (Sites & Image Host Hub)**：
   * 管理员专属板块，支持快捷添加和管理网站与图床，默认集成高速公共图床 (`https://img.001315.xyz/`)，支持海报预览与一键跳转。
@@ -26,14 +26,14 @@
 * **流量与上传性能极限优化**：
   * 全局图片采用懒加载 (`loading="lazy"`) 与异步解码 (`decoding="async"`)；
   * 标签页处于后台隐藏状态时（Page Visibility API）立即暂停网络长轮询与同步，彻底杜绝无操作流量浪费。
-  * 文件上传采用真正的 `XMLHttpRequest.upload.onprogress` 实时字节速率计算与 25 秒超时保护，彻底杜绝伪进度条卡住问题。
+  * 文件上传采用真正的 `XMLHttpRequest.upload.onprogress` 实时字节速率计算；当前单文件最大 90 MiB，慢速网络等待约 10 分钟，无断点续传。实际可用上限和持久性仍取决于 Pages Functions 配置及对象存储能力。
 * **独立外部翻译 API 配置**：
   * 快速在线互译助手自带独立的“保存外部翻译 API 配置”按键，配置即时生效并持久化。
 * **备份区 (WebDAV)**：
   * 浏览器端直接访问 WebDAV，适合小型结构化数据/文本备份；当前没有大型媒体的可靠分块续传保障，跨域、服务器限制和单次传输时限都会影响可用性。大型图片/视频可能超时、卡住或失败，不应视为可靠的大文件灾备通道。
 * **深层国际化多语言支持**：
-  * 支持 **中文简体 (zh-CN)、中文繁体 (zh-TW)、英语 (en-US)、韩语 (ko-KR)、阿拉伯语 (ar-SA)、印地语 (hi-IN)**。
-  * 可在顶部导航的语言切换按钮循环切换简体中文、繁体中文、英语、韩语、阿拉伯语与印地语；翻译覆盖范围依各页面字典实现而异，并非保证每一处用户内容或所有文案均已翻译。
+  * 提供 10 种语言的下拉切换；翻译覆盖范围依各页面字典实现而异，并非保证每一处用户内容或所有文案均已翻译。
+  * 可在顶部导航下拉选择语言，不是循环切换。
 
 ---
 
@@ -169,6 +169,41 @@ npx wrangler d1 execute <你的数据库名称> --remote --file=migrations/0001_
 邮箱中枢已移除独立的“检查 Resend API 连接”按钮，避免将凭据格式检查误当作真实连通。页面后台状态灯读取 `/api/mail/status` 的服务端变量配置；“发送后台测试邮件”会实际向 `MAIL_SENDER` 投递测试邮件。Resend API 正式发送端点为 `POST https://api.resend.com/emails`。
 
 收件配置步骤：登录 `resend.com`，进入左侧菜单 **API Keys**，点击 **Create API Key**，选好权限和域名后创建，并立即复制 `RESEND_API_KEY`。接着进入 **Webhooks** 创建新 Webhook，Endpoint / URL 填你自己的 Pages Functions 地址，例如 `https://你的项目名.pages.dev/api/webhook`，监听事件选择 `email.received`。创建成功后复制 Resend 返回的 signing secret，保存为 `RESEND_WEBHOOK_SECRET`。然后在 **Domains** 添加域名；要收邮件，需在域名详情开启 **Receiving**，并按 Resend 提示在域名 DNS 中配置 MX 记录。Webhook URL 不是 Resend 提供的，而是你自己的 Pages Functions 接口；`RESEND_API_KEY` 和 `RESEND_WEBHOOK_SECRET` 创建时通常只完整显示一次，遗失后需重新生成。不要把密钥写进前端代码或公开仓库，应保存到 Cloudflare Pages 环境变量/Secrets。当前接口同时兼容 `/api/webhook` 与旧路径 `/api/mail/webhook`。收到事件后，Functions 会验证 Svix 签名和时间戳，再通过 Resend Receiving API 获取邮件正文并保存进 D1；管理员邮件中枢读取 `/api/mail/inbox` 展示来信。收件指示灯读取 `/api/mail/status` 中 inbound 所需变量是否配置；它仅表示部署端配置就绪，不验证 Resend Dashboard 的 Receiving、域名 MX 或 webhook 是否真实生效，也不代表已收到邮件。D1 自动清理 180 天前的邮件并最多保留最近 500 封；当前只保留附件元数据，不下载附件文件。
+
+### 商户支付与部署指南（Cloudflare Pages + Functions + D1）
+
+本项目支付必须部署在 **Cloudflare Pages + Pages Functions + D1**，并绑定 D1 为 `DB`。执行 `migrations/0002_commerce.sql`（或确认应用已按部署流程初始化该迁移）。D1 持久保存订单、站内会话、消息、通知及可编辑法律页面；网站内容数据库与 WebDAV 备份严格分离，WebDAV 不作为订单/站内数据主库。纯静态 Direct Upload/Vercel 不提供这些 Functions 和支付后端。全站及所有支付通知 URL 必须使用 HTTPS；国内服务器上线前完成 ICP 备案，微信 PC 网站支付接入要求备案域名。
+
+**商户资质准备：**通常需准备企业/个体户营业执照、法人身份证、结算账户，并按各支付机构要求提交网站、经营类目和补充材料。商户可用资格、支持币种、结算周期及最终到账以账户审核和实测为准；本代码没有提供 FX/汇率兑换，不承诺支付账户审批或平台实际收款。
+
+**平台开户与产品开通：**
+1. **支付宝**：在支付宝开放平台/商家平台完成主体认证，创建应用并申请开通“电脑网站支付”和“手机网站支付”，按平台要求配置应用公钥、支付宝公钥及异步通知地址。
+2. **微信支付**：在微信支付商户平台申请商户号并开通 PC 网站支付（Native 扫码支付；如业务需要另申请 H5 支付）。按平台流程配置商户 API 证书/私钥、API v3 密钥和回调 URL；PC 网站接入使用已备案域名。
+3. **Stripe**：注册并完成 Stripe 账户启用，在 Dashboard 获取 Publishable Key 与 Secret Key。本项目结账只从服务器使用 Secret Key；Publishable Key 目前不参与结账，不要因拿到该 Key 而把 Secret Key 放进浏览器。
+4. **PayPal**：创建并完成 PayPal 企业账户，建立 REST 应用并取得 Client ID 与 Secret；先用 Sandbox 凭据验证，正式环境另行切换。
+
+**仅在 Cloudflare Pages Settings → Variables and Secrets → Secrets 配置下列密钥/凭据**，按实际部署环境设置，绝不写付款密钥到前端、`localStorage`、D1 或仓库：
+
+- Alipay：`ALIPAY_APP_ID`、`ALIPAY_PRIVATE_KEY`（PKCS#8）、`ALIPAY_PUBLIC_KEY`；可选 `ALIPAY_PID`、`ALIPAY_GATEWAY`。
+- WeChat Pay：`WECHAT_MCHID`、`WECHAT_APPID`、`WECHAT_SERIAL_NO`、`WECHAT_PRIVATE_KEY`（PKCS#8）、`WECHAT_API_V3_KEY`（32 个 ASCII 字节）、`WECHAT_PLATFORM_CERT`、`WECHAT_NOTIFY_URL=https://你的域名/api/payments/webhook/wechat`。
+- Stripe：`STRIPE_SECRET_KEY`、`STRIPE_WEBHOOK_SECRET`。
+- PayPal：`PAYPAL_CLIENT_ID`、`PAYPAL_CLIENT_SECRET`、`PAYPAL_WEBHOOK_ID`、`PAYPAL_API_BASE`。默认 API base 是 Sandbox；正式环境使用 `https://api-m.paypal.com`。
+
+四个异步回调 endpoint 为 `/api/payments/webhook/alipay`、`/api/payments/webhook/wechat`、`/api/payments/webhook/stripe`、`/api/payments/webhook/paypal`。在各平台把对应 HTTPS URL 配为通知地址：支付宝开启异步通知；微信配置支付回调；Stripe Dashboard Webhook 监听 `checkout.session.completed`、`checkout.session.async_payment_succeeded`、`checkout.session.async_payment_failed`、`checkout.session.expired`、`charge.refunded`、`refund.updated`；PayPal 至少订阅 `PAYMENT.CAPTURE.COMPLETED`、`PAYMENT.CAPTURE.DENIED`、`PAYMENT.CAPTURE.REFUNDED`。确认平台向部署 URL 实际投递并由服务端验签。
+
+**Webhook 必须按以下 6 步处理：**
+1. 用户付款。
+2. 支付平台向 `notify_url` POST 通知，携带订单号、金额、状态和签名。
+3. 后端验证签名。
+4. 验签通过后再核对订单与金额，更新订单/会员并持久化，然后返回成功。
+5. 验签失败则返回错误，不更新订单。
+6. 重复回调按幂等方式处理，不重复发货或重复授予会员权益。
+
+最终到账/支付成功以验签通过的服务端异步回调为准，不能依据前端跳转或用户返回页面判定。订单只能由后端数据库创建；用户取消只取消未支付订单。PayPal 回跳后由服务端执行 capture，但订单仍须等 Webhook 才标记 paid；Stripe/PayPal 均可能异步完成。正常支付按已验签回调更新；失败/过期保持未支付或失败状态；取消不覆盖已支付；重复回调幂等；管理员在订单页发货并可原路退款，退款处理中等待渠道通知更新状态。管理员可收到站内通知；接收邮箱可设置，但须配置项目已有邮件服务端 Secrets 和邮件服务，未配置时不能假定邮件已发送。若服务端支付 credentials 未配，结账应失败，不会伪造成功。
+
+**建议上线检查：**先分别使用各平台沙箱/测试密钥完成下单、成功、失败、取消、重复通知及退款测试，检查签名验证、D1 状态、幂等和通知结果；确认回调公网可达、HTTPS 和密钥正确后，再按平台规则切换正式密钥并再次核实商户资格、币种和结算设置。本文不声称已经完成商户生产实测。
+
+**政策页：**站点提供主页/价格（商城）/退款/隐私/服务条款/联系方式页面；站长可在网站法律与联系页编辑并保存到 D1。当前内容是政策草稿，发布前须依据实际经营主体、真实服务和适用法律审查，不构成法律意见。
 
 ### WebDAV 备份与远端文件管理
 

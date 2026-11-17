@@ -31,7 +31,15 @@ const formatFileSize = (bytes: number) => {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(2)} KiB (${bytes.toLocaleString()} B)`;
   return `${(bytes / (1024 * 1024)).toFixed(2)} MiB (${bytes.toLocaleString()} B)`;
 };
-const bookOriginalFilename = (book: Book) => /\.[^./\\]+$/.test(book.title) ? book.title : `${book.title}.${String(book.format || 'txt').toLowerCase()}`;
+const bookOriginalFilename = (book: Book) => {
+  const fromDescription = book.description?.match(/原文件名[：:]\s*([^\s(]+\.[^\s(]+)/)?.[1];
+  const candidate = fromDescription || book.title;
+  const titleFilename = candidate.match(/^(.+?\.[a-z0-9]{1,8})(?:\s+\(.+\))?$/i)?.[1];
+  if (titleFilename) return titleFilename;
+  const base = candidate.replace(/\.[^.\s]+$/, '');
+  const extension = String(book.format || 'txt').toLowerCase();
+  return `${base}.${extension}`;
+};
 
 export const BookshelfSection: React.FC = () => {
   const {
@@ -622,7 +630,7 @@ export const BookshelfSection: React.FC = () => {
                         {book.format}
                       </span>
                       <h4 className="text-sm font-bold text-slate-800 dark:text-slate-100 truncate">
-                        {book.title}
+                        {bookOriginalFilename(book)}
                       </h4>
                     </div>
                     <p className="text-xs text-slate-400 truncate mt-0.5">{book.author}</p>
@@ -699,12 +707,12 @@ export const BookshelfSection: React.FC = () => {
 
               <div className="p-3">
                 <h4 className="text-xs font-bold font-serif-sc text-slate-800 dark:text-slate-100 truncate group-hover:text-sky-500 transition">
-                  {book.title}
+                  {bookOriginalFilename(book)}
                 </h4>
                 <p className="text-[11px] text-slate-400 truncate mt-0.5">{book.author}</p>
 
                 <div className="mt-2 flex items-center justify-between text-[10px] text-slate-400">
-                  <span title={`${book.title} · ${formatFileSize(book.fileSize)}`}>{formatFileSize(book.fileSize)}</span>
+                  <span title={`${bookOriginalFilename(book)} · ${formatFileSize(book.fileSize)}`}>{bookOriginalFilename(book)} · {formatFileSize(book.fileSize)}</span>
                   <span className="text-sky-500 font-medium">开始阅读</span>
                 </div>
               </div>

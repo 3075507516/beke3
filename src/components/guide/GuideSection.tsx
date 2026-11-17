@@ -38,6 +38,7 @@ export const GuideSection: React.FC = () => {
         </h2>
         <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
           {tx('部署存储概览：D1 保存博客、账户和媒体目录；R2/COS/OSS/S3 保存文件本体。成功上传到对象存储的图片和视频可跨设备查看；仅保存到 IndexedDB 的回退文件只在本机可用。电子书正文按需读取原文件，不写入 D1。')}
+          <p className="text-xs text-amber-700 dark:text-amber-300 leading-relaxed">Policies/法律页面内容为政策草稿，不是自动代写的有效法律意见；发布前请按主体、真实服务及适用法律审查。</p>
         </p>
       </div>
 
@@ -455,10 +456,14 @@ export const GuideSection: React.FC = () => {
             <span>商业区 (商品与全渠道支付网关) 使用说明</span>
           </div>
           <div className="space-y-2 text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-            <p><b>1. 展台与商品管理：</b>管理员可在商品区创建多个展示区（数字文创、定制硬件、云服务等），每个商品支持上传和删除多张图片并自动轮播。</p>
-            <p><b>2. 订单提交与信息收集：</b>用户下单时需选择购买数量，并必须填写<b>联系人姓名、电话、邮箱与详细收件地址</b>。提交后订单状态分为“待支付”和“已支付”，支持库存自动扣减与优惠券抵扣（如 FOX3）。</p>
-            <p><b>3. 支付网关预留接口：</b>仅管理员可见支付设置，支持 <b>PayPal、万里汇 (WorldFirst)、微信支付、支付宝、Stripe、USDT 与银联</b>。可填入各渠道的商户号、API Key 或收款二维码。</p>
-            <p><b>4. 展台实时咨询窗口：</b>用户点击“商品展台聊天”即可呼出对话框，向站长进行售前与售后咨询，管理员可在后台与用户实时沟通。</p>
+            <p><b>1. 展台与商品管理：</b>管理员可创建商品展台、管理商品图片；订单由后端数据库创建并持久化。支付生产部署必须使用 Cloudflare Pages + Pages Functions + D1（binding 名称 <code>DB</code>），执行 <code>migrations/0002_commerce.sql</code>。D1 持久保存订单、站内会话、消息、通知和可编辑法律页面；网站内容 D1 与 WebDAV 备份严格分离。</p>
+            <p><b>2. 商户开户与资质：</b>准备企业/个体户营业执照、法人身份证、结算账户。支付宝申请电脑网站支付、手机网站支付；微信支付商户平台申请 PC 网站支付（Native/H5），PC 接入要求备案域名；Stripe 注册账户取得 Publishable/Secret Key（本项目仅由服务器使用 Secret，Publishable key 目前不参与结账）；PayPal 企业账户创建应用取得 Client ID/Secret。国内服务器须完成 ICP 备案；全程必须 HTTPS。商户资格、币种及结算以账户审核和实测为准，本代码不提供 FX，也不承诺审批或平台实际收款。</p>
+            <p><b>3. Pages Secrets（仅服务端）：</b>Alipay：<code>ALIPAY_APP_ID</code>、<code>ALIPAY_PRIVATE_KEY</code>（PKCS#8）、<code>ALIPAY_PUBLIC_KEY</code>，可选 <code>ALIPAY_PID</code>、<code>ALIPAY_GATEWAY</code>；WeChat：<code>WECHAT_MCHID</code>、<code>WECHAT_APPID</code>、<code>WECHAT_SERIAL_NO</code>、<code>WECHAT_PRIVATE_KEY</code>（PKCS#8）、<code>WECHAT_API_V3_KEY</code>（32 ASCII bytes）、<code>WECHAT_PLATFORM_CERT</code>、<code>WECHAT_NOTIFY_URL=https://你的域名/api/payments/webhook/wechat</code>；Stripe：<code>STRIPE_SECRET_KEY</code>、<code>STRIPE_WEBHOOK_SECRET</code>；PayPal：<code>PAYPAL_CLIENT_ID</code>、<code>PAYPAL_CLIENT_SECRET</code>、<code>PAYPAL_WEBHOOK_ID</code>、<code>PAYPAL_API_BASE</code>（默认 Sandbox，正式为 <code>https://api-m.paypal.com</code>）。付款密钥绝不写入前端、localStorage、D1 或仓库。</p>
+            <p><b>4. Webhook 配置：</b>服务端 endpoints：<code>/api/payments/webhook/alipay</code>、<code>/api/payments/webhook/wechat</code>、<code>/api/payments/webhook/stripe</code>、<code>/api/payments/webhook/paypal</code>。支付宝配置异步通知，微信配置回调。Stripe Dashboard 监听 <code>checkout.session.completed</code>、<code>checkout.session.async_payment_succeeded</code>、<code>checkout.session.async_payment_failed</code>、<code>checkout.session.expired</code>、<code>charge.refunded</code>、<code>refund.updated</code>；PayPal 至少订阅 <code>PAYMENT.CAPTURE.COMPLETED</code>、<code>PAYMENT.CAPTURE.DENIED</code>、<code>PAYMENT.CAPTURE.REFUNDED</code>。</p>
+            <p><b>5. Webhook 六步：</b>①用户付款；②平台 POST 到 notify_url，提供订单号/金额/状态/签名；③后端验签；④验签通过后核订单与金额，更新订单/会员并持久化，再返回成功；⑤验签失败返回错误且不更新订单；⑥重复回调幂等。最终支付以验签的服务端异步回调为准，不依据前端跳转。</p>
+            <p><b>6. 订单生命周期：</b>正常、失败、取消、重复回调、退款均由后端状态处理。用户取消只取消未支付订单；PayPal 回跳后服务端执行 capture，但 paid 仍等待 Webhook；Stripe/PayPal 支持异步结果。管理员在订单页发货、原路退款；退款处理中等待渠道通知。管理员可收站内通知；接收邮箱可设置，但须配置已有邮件服务端 Secrets。未配置支付 credentials 时结账失败而非假成功。</p>
+            <p><b>7. 测试与上线：</b>先用各渠道沙箱/测试密钥验证成功、失败、取消、重复回调、退款及 D1 状态，再检查回调可达、验签和幂等后切换正式密钥。本指南不表示已做商户生产实测。政策页包含主页/价格（商城）/退款/隐私/服务条款/联系方式，站长可在网站法律与联系页编辑并保存至 D1；当前为政策草稿，发布前按主体、真实服务与适用法律审查，不构成法律意见。</p>
+            <p><b>8. 展台咨询：</b>用户可向站长发起售前与售后咨询，管理员可在后台沟通。</p>
           </div>
         </div>
 

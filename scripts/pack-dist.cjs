@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
-const archiver = require('archiver');
+const archiverModule = require('archiver');
+const archiver = archiverModule.default || archiverModule;
 
 const distPath = path.resolve(__dirname, '../dist');
 const zipPath = path.resolve(__dirname, '../dist-upload.zip');
@@ -11,9 +12,9 @@ if (!fs.existsSync(distPath)) {
 }
 
 const output = fs.createWriteStream(zipPath);
-const archive = archiver('zip', {
-  zlib: { level: 9 }
-});
+const archive = typeof archiver === 'function'
+  ? archiver('zip', { zlib: { level: 9 } })
+  : new archiverModule.ZipArchive({ zlib: { level: 9 } });
 
 output.on('close', function () {
   console.log(`[fox3 Packager] Successfully packed ${archive.pointer()} total bytes.`);
