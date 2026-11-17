@@ -21,6 +21,7 @@ import {
 } from '../types';
 import { Locale, i18nDict, getTranslation } from '../utils/i18n';
 import { clearAdminSessionToken, getAdminSessionToken } from '../utils/adminSession';
+import { deleteWebDavFile, downloadWebDavFile, listWebDavFiles, testWebDav, uploadWebDavFile } from '../utils/webdav';
 import {
   STORAGE_KEYS,
   loadLocalStorage,
@@ -100,6 +101,13 @@ interface AppContextType {
   startTransfer: (type: TransferProgress['type'], fileName: string) => void;
   updateTransferPercent: (percent: number) => void;
   finishTransfer: () => void;
+  cancelTransfer: () => void;
+  webDavConnectionState: { status: 'unknown' | 'checking' | 'connected' | 'error'; checkedAt: number; message: string };
+  testWebDavConnection: (config?: WebDavConfig) => Promise<boolean>;
+  refreshWebDavBackups: () => Promise<void>;
+  deleteWebDavBackup: (id: string) => Promise<boolean>;
+  uploadWebDavRawFile: (file: File) => Promise<void>;
+  downloadWebDavRawFile: (fileName: string) => Promise<Blob>;
 
   // Multi-transfer progress support
   multiTransferProgress: {
@@ -476,6 +484,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     loadLocalStorage<Locale>(STORAGE_KEYS.LOCALE, 'zh-CN')
   );
 
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    document.documentElement.lang = locale;
+    document.documentElement.dir = locale === 'ar-SA' ? 'rtl' : 'ltr';
+  }, [locale]);
+
   const setLocale = (loc: Locale) => {
     setLocaleState(loc);
     saveLocalStorage(STORAGE_KEYS.LOCALE, loc);
@@ -604,9 +618,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const [syncState, setSyncState] = useState<SyncState>({
     isSyncing: false,
-    lastSyncedAt: Date.now(),
-    status: 'synced',
-    message: '数据已实时同步',
+    lastSyncedAt: 0,
+    status: 'idle',
+    message: '仅保存在当前设备；登录管理员并配置云端存储后可进行跨设备同步',
   });
 
   const [transferProgress, setTransferProgress] = useState<TransferProgress>({
@@ -617,6 +631,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     speed: '',
   });
 
+  const transferAbortRef = useRef<AbortController | null>(null);
+  const [webDavConnectionState, setWebDavConnectionState] = useState<{ status: 'unknown' | 'checking' | 'connected' | 'error'; checkedAt: number; message: string }>({ status: 'unknown', checkedAt: 0, message: '尚未执行远端连通性验证' });
+  const testWebDavConnection = useCallback(async (config: WebDavConfig = webDavConfig): Promise<boolean> => {
+    setWebDavConnectionState({ status: 'checking', checkedAt: Date.now(), message: '正在通过服务端验证 WebDAV…' });
+    try {
+      const result = await testWebDav(config);
+      setWebDavConnectionState({ status: 'connected', checkedAt: result.checkedAt, message: 'WebDAV 服务器认证连接成功' });
+      return true;
+    } catch (error: any) {
+      setWebDavConnectionState({ status: 'error', checkedAt: Date.now(), message: error?.message || 'WebDAV 连接失败' });
+      return false;
+    }
+  }, [webDavConfig]);
+  const refreshWebDavBackups = useCallback(async () => {
+    const files = await listWebDavFiles(webDavConfig);
+    setWebDavBackups(files);
+  }, [webDavConfig]);
+  const cancelTransfer = useCallback(() => {
+    transferAbortRef.current?.abort();
+    transferAbortRef.current = null;
+    setTransferProgress(prev => ({ ...prev, active: false, percent: 0 }));
+  }, []);
   const [multiTransferProgress, setMultiTransferProgress] = useState<{
     active: boolean;
     type: 'upload' | 'download' | 'backup' | 'restore';
@@ -728,7 +764,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       type,
       fileName,
       percent: 8,
-      speed: '2.4 MB/s',
+      speed: '',
     });
   };
 
@@ -794,196 +830,137 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, []);
 
-  // Real-time synchronization
-  const triggerManualSync = useCallback(async () => {
-    setSyncState(prev => ({ ...prev, isSyncing: true, status: 'syncing', message: '正在同步多设备数据...' }));
-    try {
-      // 1. Send all our state to cloud sync endpoint
-      const syncPayload = {
-        posts,
-        books,
-        photos,
-        media,
-        mails,
-        products,
-        orders,
-        chatMessages,
-        webDavBackups,
-        trashItems,
-        systemSettings,
-        themeMode,
-        updatedAt: Date.now(),
-      };
-
-      // Broadcast locally immediately
-      try {
-        const bc = new BroadcastChannel('fox3_realtime_sync');
-        bc.postMessage({ type: 'SYNC_ALL', payload: syncPayload });
-        bc.close();
-      } catch (e) {}
-
-      // Push to backend sync
-      const adminToken = getAdminSessionToken();
-      const postRes = adminToken ? await fetch('/api/sync/global_state', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${adminToken}` },
-        body: JSON.stringify(syncPayload),
-      }).catch(() => null) : null;
-
-      // Try pull remote updates
-      const getRes = adminToken ? await fetch('/api/sync/global_state', { method: 'GET', headers: { 'Authorization': `Bearer ${adminToken}` } }).catch(() => null) : null;
-      if (getRes && getRes.ok) {
-        const data = await getRes.json();
-        if (data && data.data) {
-          const remote = data.data;
-          // If remote has newer updates
-          if (remote.updatedAt && remote.updatedAt > (syncPayload.updatedAt - 10000)) {
-            if (Array.isArray(remote.posts)) setPosts(remote.posts);
-            if (Array.isArray(remote.books)) setBooks(remote.books);
-            if (Array.isArray(remote.photos)) setPhotos(remote.photos);
-            if (Array.isArray(remote.media)) setMedia(remote.media);
-            if (Array.isArray(remote.mails)) setMails(remote.mails);
-            if (Array.isArray(remote.products)) setProducts(remote.products);
-            if (Array.isArray(remote.orders)) setOrders(remote.orders);
-            if (Array.isArray(remote.chatMessages)) setChatMessages(remote.chatMessages);
-            if (Array.isArray(remote.webDavBackups)) setWebDavBackups(remote.webDavBackups);
-            if (Array.isArray(remote.trashItems)) setTrashItems(remote.trashItems);
-            if (remote.systemSettings) setSystemSettings(remote.systemSettings);
-            if (isGlobalThemeMode(remote.themeMode)) setThemeMode(remote.themeMode);
-          }
-        }
-      }
-
-      setSyncState({
-        isSyncing: false,
-        lastSyncedAt: Date.now(),
-        status: 'synced',
-        message: postRes?.ok ? '多设备云端与本地已无缝实时同步' : '本地与多窗口已实时同步',
-      });
-      // Also sync bookmarks and posts to dedicated /api/sync/posts
-      if (adminToken) fetch('/api/sync/posts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${adminToken}` },
-        body: JSON.stringify({ posts, updatedAt: Date.now() }),
-      }).catch(() => null);
-    } catch {
-      setSyncState({
-        isSyncing: false,
-        lastSyncedAt: Date.now(),
-        status: 'synced',
-        message: '数据已在当前设备与多端完成对齐',
-      });
+  // Cross-device synchronization is an explicit authenticated round-trip. Never report
+  // cloud success unless the persistent backend confirms that it stored the payload.
+  const mergeById = <T extends { id: string; updatedAt?: number }>(localList: T[], remoteList: unknown): T[] => {
+    if (!Array.isArray(remoteList)) return localList;
+    const merged = new Map<string, T>();
+    for (const item of localList) if (item && typeof item.id === 'string') merged.set(item.id, item);
+    for (const value of remoteList) {
+      const item = value as T;
+      if (!item || typeof item.id !== 'string') continue;
+      const local = merged.get(item.id);
+      if (!local || Number(item.updatedAt || 0) >= Number(local.updatedAt || 0)) merged.set(item.id, item);
     }
-  }, [posts, books, photos, media, mails, products, orders, chatMessages, webDavBackups, webDavConfig, trashItems, systemSettings, themeMode]);
-
-  // Smart merge function preserving both local and remote unique items so refreshing never wipes data
-  const mergeById = <T extends { id: string }>(localList: T[], remoteList: any[]): T[] => {
-    if (!Array.isArray(remoteList) || remoteList.length === 0) return localList;
-    const map = new Map<string, T>();
-    // Start with remote items
-    for (const item of remoteList) {
-      if (item && item.id) map.set(item.id, item);
-    }
-    // Overlay local items so local newly created items or edits are preserved
-    for (const item of localList) {
-      if (item && item.id) map.set(item.id, item);
-    }
-    return Array.from(map.values());
+    return [...merged.values()];
   };
-
-  // Initial fetch from cloud on load to pull changes made from other devices
-  useEffect(() => {
-    const fetchInitialSync = async () => {
-      try {
-        const adminToken = getAdminSessionToken();
-        if (!adminToken) return;
-        const res = await fetch('/api/sync/global_state', { method: 'GET', headers: { 'Authorization': `Bearer ${adminToken}` } }).catch(() => null);
-        if (res && res.ok) {
-          const json = await res.json();
-          if (json && json.data) {
-            const remote = json.data;
-            if (Array.isArray(remote.posts)) {
-              setPosts(prev => mergeById(prev, remote.posts));
-            }
-            if (Array.isArray(remote.books)) {
-              setBooks(prev => mergeById(prev, remote.books));
-            }
-            if (Array.isArray(remote.photos)) {
-              setPhotos(prev => mergeById(prev, remote.photos));
-            }
-            if (Array.isArray(remote.media)) {
-              setMedia(prev => mergeById(prev, remote.media));
-            }
-            if (Array.isArray(remote.products)) {
-              setProducts(prev => mergeById(prev, remote.products));
-            }
-            if (Array.isArray(remote.websites)) {
-              setWebsites(prev => mergeById(prev, remote.websites));
-            }
-            if (remote.systemSettings && typeof remote.systemSettings === 'object') {
-              setSystemSettings(prev => ({
-                ...prev,
-                ...remote.systemSettings,
-                fullBackgroundUrl: remote.systemSettings.fullBackgroundUrl ?? prev.fullBackgroundUrl,
-                avatarUrl: remote.systemSettings.avatarUrl ?? prev.avatarUrl,
-                heroIntroImage: remote.systemSettings.heroIntroImage ?? prev.heroIntroImage,
-                heroTitle: remote.systemSettings.heroTitle ?? prev.heroTitle,
-                heroSubtitle: remote.systemSettings.heroSubtitle ?? prev.heroSubtitle,
-                heroBadge: remote.systemSettings.heroBadge ?? prev.heroBadge,
-              }));
-            }
-            if (isGlobalThemeMode(remote.themeMode)) setThemeMode(remote.themeMode);
-          }
-        }
-      } catch (e) {
-        console.warn('Initial sync error:', e);
-      }
-    };
-    fetchInitialSync();
-  }, []);
-
-  // Instant broadcast & debounced trigger sync whenever modules change
-  const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const syncEffectsMountedRef = useRef(false);
-
-  useEffect(() => {
-    if (!syncEffectsMountedRef.current) {
-      syncEffectsMountedRef.current = true;
+  const applyRemoteState = (remote: any, replaceLocal = false) => {
+    const combine = <T extends { id: string }>(local: T[], remoteItems: T[]) => replaceLocal ? remoteItems : mergeById(local, remoteItems);
+    if (Array.isArray(remote.posts)) setPosts(prev => combine(prev, remote.posts));
+    if (Array.isArray(remote.books)) setBooks(prev => combine(prev, remote.books));
+    if (Array.isArray(remote.photos)) setPhotos(prev => combine(prev, remote.photos));
+    if (Array.isArray(remote.photoFolders)) setPhotoFolders(prev => combine(prev, remote.photoFolders));
+    if (Array.isArray(remote.media)) setMedia(prev => combine(prev, remote.media));
+    if (Array.isArray(remote.mails)) setMails(prev => combine(prev, remote.mails));
+    if (Array.isArray(remote.products)) setProducts(prev => combine(prev, remote.products));
+    if (Array.isArray(remote.orders)) setOrders(prev => combine(prev, remote.orders));
+    if (Array.isArray(remote.chatMessages)) setChatMessages(prev => combine(prev, remote.chatMessages));
+    if (Array.isArray(remote.websites)) setWebsites(prev => combine(prev, remote.websites));
+    if (Array.isArray(remote.webDavBackups)) setWebDavBackups(prev => combine(prev, remote.webDavBackups));
+    if (Number.isFinite(Number(remote.webDavMeta?.lastBackupTime)) && Number(remote.webDavMeta?.lastBackupTime) >= 0) {
+      setWebDavConfig(prev => ({ ...prev, lastBackupTime: Number(remote.webDavMeta.lastBackupTime) }));
+    }
+    if (Array.isArray(remote.trashItems)) setTrashItems(prev => combine(prev, remote.trashItems));
+    if (remote.systemSettings && typeof remote.systemSettings === 'object') {
+      setSystemSettings(prev => ({ ...prev, ...remote.systemSettings }));
+    }
+    if (isGlobalThemeMode(remote.themeMode)) setThemeMode(remote.themeMode);
+  };
+  const triggerManualSync = useCallback(async () => {
+    const adminToken = getAdminSessionToken();
+    if (!adminToken) {
+      setSyncState(prev => ({ ...prev, isSyncing: false, status: 'error', message: '需要管理员登录后才能进行云端跨设备同步' }));
       return;
     }
-    if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
-    syncTimeoutRef.current = setTimeout(() => {
+    setSyncState(prev => ({ ...prev, isSyncing: true, status: 'syncing', message: '正在读取并同步云端数据…' }));
+    try {
+      const authHeaders = { Authorization: `Bearer ${adminToken}` };
+      const getRes = await fetch('/api/sync/global_state', { method: 'GET', headers: authHeaders });
+      if (!getRes.ok) throw new Error(`云端读取失败 (HTTP ${getRes.status})`);
+      const remoteEnvelope = await getRes.json();
+      if (remoteEnvelope?.success !== true) throw new Error(remoteEnvelope?.error || '云端读取响应无效');
+      const remote = remoteEnvelope.data || {};
+      applyRemoteState(remote);
+      const mergedPayload = {
+        posts: mergeById(posts, remote.posts), books: mergeById(books, remote.books),
+        photos: mergeById(photos, remote.photos), photoFolders: mergeById(photoFolders, remote.photoFolders),
+        media: mergeById(media, remote.media), mails: mergeById(mails, remote.mails),
+        products: mergeById(products, remote.products), orders: mergeById(orders, remote.orders),
+        chatMessages: mergeById(chatMessages, remote.chatMessages), websites: mergeById(websites, remote.websites),
+        webDavBackups: mergeById(webDavBackups, remote.webDavBackups),
+        webDavMeta: { lastBackupTime: Math.max(Number(webDavConfig.lastBackupTime || 0), Number(remote.webDavMeta?.lastBackupTime || 0)) },
+        trashItems: mergeById(trashItems, remote.trashItems),
+        systemSettings: { ...systemSettings, ...(remote.systemSettings || {}) },
+        themeMode: isGlobalThemeMode(remote.themeMode) ? remote.themeMode : themeMode,
+        updatedAt: Date.now(),
+      };
+      const postRes = await fetch('/api/sync/global_state', {
+        method: 'POST',
+        headers: { ...authHeaders, 'Content-Type': 'application/json' },
+        body: JSON.stringify(mergedPayload),
+      });
+      const postResult = await postRes.json().catch(() => null);
+      if (!postRes.ok || postResult?.success !== true || postResult?.syncedToCloud !== true) {
+        throw new Error(postResult?.message || postResult?.error || `云端未确认持久化 (HTTP ${postRes.status})`);
+      }
       try {
-        const payload = {
-          posts,
-          books,
-          photos,
-          media,
-          products,
-          websites,
-          systemSettings,
-          themeMode,
-          updatedAt: Date.now(),
-        };
+        const bc = new BroadcastChannel('fox3_realtime_sync');
+        bc.postMessage({ type: 'SYNC_ALL', payload: mergedPayload });
+        bc.close();
+      } catch {}
+      setSyncState({ isSyncing: false, lastSyncedAt: Date.now(), status: 'synced', message: '云端持久化同步成功' });
+    } catch (error: any) {
+      setSyncState(prev => ({ ...prev, isSyncing: false, status: 'error', message: error?.message || '云端同步失败；本机数据未清除' }));
+    }
+  }, [posts, books, photos, photoFolders, media, mails, products, orders, chatMessages, websites, webDavBackups, trashItems, systemSettings, themeMode, webDavConfig.lastBackupTime]);
+  // On a newly opened device, hydrate the local starter state from the latest cloud snapshot.
+  useEffect(() => {
+    let cancelled = false;
+    const fetchInitialSync = async () => {
+      const adminToken = getAdminSessionToken();
+      if (!adminToken) return;
+      try {
+        const res = await fetch('/api/sync/global_state', { method: 'GET', headers: { Authorization: `Bearer ${adminToken}` } });
+        if (!res.ok) throw new Error(`云端读取失败 (HTTP ${res.status})`);
+        const envelope = await res.json();
+        if (cancelled) return;
+        if (envelope?.success !== true) throw new Error(envelope?.error || '云端响应无效');
+        if (envelope.data) {
+          applyRemoteState(envelope.data, true);
+          setSyncState({ isSyncing: false, lastSyncedAt: Number(envelope.data.updatedAt || Date.now()), status: 'synced', message: '已加载最新云端数据' });
+        }
+      } catch (error: any) {
+        if (!cancelled) setSyncState(prev => ({ ...prev, status: 'error', message: error?.message || '云端初始化读取失败；保留本机缓存' }));
+      }
+    };
+    void fetchInitialSync();
+    return () => { cancelled = true; };
+  }, []);
+  // Debounced opt-in cloud sync. Errors are visible; a failed request is never called synced.
+  const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const syncEffectsMountedRef = useRef(false);
+  useEffect(() => {
+    if (!syncEffectsMountedRef.current) { syncEffectsMountedRef.current = true; return; }
+    if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+    syncTimeoutRef.current = setTimeout(async () => {
+      try {
+        const payload = { posts, books, photos, photoFolders, media, products, websites, webDavBackups, webDavMeta: { lastBackupTime: Number(webDavConfig.lastBackupTime || 0) }, systemSettings, themeMode, updatedAt: Date.now() };
         const bc = new BroadcastChannel('fox3_realtime_sync');
         bc.postMessage({ type: 'SYNC_ALL', payload });
         bc.close();
-
-        // Cloud write is opt-in and only follows actual data changes; no idle interval is scheduled.
-        const adminToken = getAdminSessionToken();
-        if (adminToken && systemSettings.autoSync) fetch('/api/sync/global_state', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${adminToken}` },
-          body: JSON.stringify(payload),
-        }).catch(() => {});
-      } catch (e) {}
+        if (!systemSettings.autoSync) return;
+        const token = getAdminSessionToken();
+        if (!token) throw new Error('自动云同步需要有效的管理员会话');
+        const res = await fetch('/api/sync/global_state', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(payload) });
+        const result = await res.json().catch(() => null);
+        if (!res.ok || result?.success !== true || result?.syncedToCloud !== true) throw new Error(result?.message || result?.error || `云端未确认持久化 (HTTP ${res.status})`);
+        setSyncState({ isSyncing: false, lastSyncedAt: Date.now(), status: 'synced', message: '自动云端同步成功' });
+      } catch (error: any) {
+        setSyncState(prev => ({ ...prev, isSyncing: false, status: 'error', message: error?.message || '自动云同步失败' }));
+      }
     }, 1200);
-
-    return () => {
-      if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
-    };
-  }, [posts, books, photos, media, products, websites, systemSettings, themeMode]);
-
+    return () => { if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current); };
+  }, [posts, books, photos, photoFolders, media, products, websites, webDavBackups, systemSettings, themeMode, webDavConfig.lastBackupTime]);
   // Robust file upload with real XMLHttpRequest progress tracking & local fallback
   const uploadFile = async (file: File): Promise<{ url: string; size: number; name: string }> => {
     startTransfer('upload', file.name);
@@ -1089,71 +1066,123 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   };
 
-  // Perform Backup
+  // Build a portable JSON snapshot and upload it to the authenticated WebDAV proxy.
+  // Large binary media are deliberately size-limited: browsers and edge runtimes do not
+  // provide reliable DAV resumable uploads, so users should back up text/settings first.
   const performBackup = async (scope: 'full' | 'posts' | 'books' | 'media' | 'settings' = 'full') => {
-    const timestamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-    const fileName = `fox3_${scope}_backup_${timestamp}_${Date.now().toString().slice(-4)}.json`;
+    if (!getAdminSessionToken()) throw new Error('WebDAV 备份需要管理员登录');
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const fileName = `fox3_${scope}_backup_${timestamp}.json`;
+    const abortController = new AbortController();
+    transferAbortRef.current = abortController;
     startTransfer('backup', fileName);
-
-    let backupData: Record<string, unknown> = {};
+    const redactSecrets = (value: any): any => {
+      if (Array.isArray(value)) return value.map(redactSecrets);
+      if (!value || typeof value !== 'object') return value;
+      return Object.fromEntries(Object.entries(value).map(([key, child]) =>
+        /password|passwd|secret|(?:api|access|database|bucket).*key|token/i.test(key) ? [key, ''] : [key, redactSecrets(child)]
+      ));
+    };
+    const backupData: Record<string, any> = { format: 'fox3-backup', version: 1, backupDate: new Date().toISOString(), scope };
     if (scope === 'full' || scope === 'posts') backupData.posts = posts;
     if (scope === 'full' || scope === 'books') backupData.books = books;
-    if (scope === 'full' || scope === 'media') {
-      backupData.photos = photos;
-      backupData.media = media;
-    }
+    if (scope === 'full' || scope === 'media') { backupData.photos = photos; backupData.media = media; }
     if (scope === 'full' || scope === 'settings') {
-      backupData.systemSettings = systemSettings;
+      backupData.systemSettings = redactSecrets(systemSettings);
       backupData.themeMode = themeMode;
-      backupData.emailSettings = {
-        ...emailSettings,
-        apiKey: '',
-        smtpPass: '',
-        imapConfig: emailSettings.imapConfig ? { ...emailSettings.imapConfig, pass: '' } : emailSettings.imapConfig,
-      };
-      backupData.paymentSettings = paymentSettings;
-      backupData.webDavConfig = webDavConfig;
     }
-    backupData.backupDate = new Date().toISOString();
-    backupData.scope = scope;
-
-    const jsonString = JSON.stringify(backupData, null, 2);
-    const blob = new Blob([jsonString], { type: 'application/json' });
-    const size = blob.size;
-
-    for (let p = 10; p <= 100; p += 25) {
-      updateTransferPercent(p);
-      await new Promise(r => setTimeout(r, 60));
+    const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
+    try {
+      const uploaded = await uploadWebDavFile(webDavConfig, fileName, blob, updateTransferPercent, abortController.signal);
+      setWebDavBackups(prev => [uploaded, ...prev.filter(item => item.name !== uploaded.name)]);
+      updateWebDavConfig({ lastBackupTime: Date.now() });
+      finishTransfer();
+      transferAbortRef.current = null;
+    } catch (error: any) {
+      finishTransfer();
+      transferAbortRef.current = null;
+      if (error?.name !== 'AbortError') showToast(error?.message || 'WebDAV 备份失败', 'error', 6000);
+      throw error;
     }
-
-    const newItem: WebDavBackupItem = {
-      id: `bak-${Date.now()}`,
-      name: fileName,
-      size,
-      updatedAt: Date.now(),
-      type: scope,
-      path: `${webDavConfig.backupPath || '/fox3_backup/'}${fileName}`,
-    };
-
-    setWebDavBackups(prev => [newItem, ...prev]);
-    updateWebDavConfig({ lastBackupTime: Date.now() });
-    finishTransfer();
   };
-
-  // Perform Restore
+  const uploadWebDavRawFile = async (file: File): Promise<void> => {
+    if (!getAdminSessionToken()) throw new Error('上传到 WebDAV 需要管理员登录');
+    const abortController = new AbortController();
+    transferAbortRef.current = abortController;
+    startTransfer('backup', file.name);
+    try {
+      const uploaded = await uploadWebDavFile(webDavConfig, file.name, file, updateTransferPercent, abortController.signal);
+      setWebDavBackups(prev => [uploaded, ...prev.filter(item => item.name !== uploaded.name)]);
+      finishTransfer();
+      transferAbortRef.current = null;
+    } catch (error: any) {
+      finishTransfer();
+      transferAbortRef.current = null;
+      if (error?.name !== 'AbortError') showToast(error?.message || `上传 ${file.name} 到 WebDAV 失败`, 'error', 6000);
+      throw error;
+    }
+  };
+  const downloadWebDavRawFile = async (fileName: string): Promise<Blob> => {
+    if (!getAdminSessionToken()) throw new Error('下载 WebDAV 文件需要管理员登录');
+    const abortController = new AbortController();
+    transferAbortRef.current = abortController;
+    startTransfer('download', fileName);
+    try {
+      const blob = await downloadWebDavFile(webDavConfig, fileName, updateTransferPercent, abortController.signal);
+      finishTransfer();
+      transferAbortRef.current = null;
+      return blob;
+    } catch (error: any) {
+      finishTransfer();
+      transferAbortRef.current = null;
+      if (error?.name !== 'AbortError') showToast(error?.message || `下载 ${fileName} 失败`, 'error', 6000);
+      throw error;
+    }
+  };
   const performRestore = async (backupId: string): Promise<boolean> => {
-    const target = webDavBackups.find(b => b.id === backupId);
+    const target = webDavBackups.find(item => item.id === backupId || item.name === backupId);
     if (!target) return false;
-    startTransfer('restore', target.name);
-
-    for (let p = 20; p <= 100; p += 30) {
-      updateTransferPercent(p);
-      await new Promise(r => setTimeout(r, 80));
+    if (!/\.json$/i.test(target.name)) {
+      showToast('该远端文件不是 fox3 JSON 备份；当前只能恢复本站生成的 JSON 快照。', 'error', 6000);
+      return false;
     }
-    finishTransfer();
-    return true;
+    const abortController = new AbortController();
+    transferAbortRef.current = abortController;
+    startTransfer('restore', target.name);
+    try {
+      const blob = await downloadWebDavFile(webDavConfig, target.path || target.name, updateTransferPercent, abortController.signal);
+      const data = JSON.parse(await blob.text());
+      if (data?.format !== 'fox3-backup' || !Number.isInteger(data.version) || data.version > 1) throw new Error('备份格式或版本不受支持');
+      const scope = data.scope;
+      if ((scope === 'full' || scope === 'posts') && Array.isArray(data.posts)) setPosts(data.posts);
+      if ((scope === 'full' || scope === 'books') && Array.isArray(data.books)) setBooks(data.books);
+      if ((scope === 'full' || scope === 'media') && Array.isArray(data.photos)) setPhotos(data.photos);
+      if ((scope === 'full' || scope === 'media') && Array.isArray(data.media)) setMedia(data.media);
+      if ((scope === 'full' || scope === 'settings') && data.systemSettings) setSystemSettings(prev => ({ ...prev, ...data.systemSettings }));
+      if ((scope === 'full' || scope === 'settings') && isGlobalThemeMode(data.themeMode)) setThemeMode(data.themeMode);
+      setSyncState(prev => ({ ...prev, status: 'idle', message: '已从远端恢复数据；请执行跨设备同步以持久保存到同步库' }));
+      finishTransfer();
+      transferAbortRef.current = null;
+      return true;
+    } catch (error: any) {
+      finishTransfer();
+      transferAbortRef.current = null;
+      if (error?.name !== 'AbortError') showToast(error?.message || '备份恢复失败', 'error', 6000);
+      return false;
+    }
   };
-
+  const deleteWebDavBackup = async (id: string): Promise<boolean> => {
+    const target = webDavBackups.find(item => item.id === id || item.name === id);
+    if (!target) return false;
+    try {
+      await deleteWebDavFile(webDavConfig, target.path || target.name);
+      setWebDavBackups(prev => prev.filter(item => item.id !== target.id));
+      return true;
+    } catch (error: any) {
+      showToast(error?.message || '远端删除失败', 'error', 6000);
+      return false;
+    }
+  };
   return (
     <AppContext.Provider
       value={{
@@ -1200,6 +1229,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         startTransfer,
         updateTransferPercent,
         finishTransfer,
+        cancelTransfer,
+        webDavConnectionState,
+        testWebDavConnection,
+        refreshWebDavBackups,
+        deleteWebDavBackup,
+        uploadWebDavRawFile,
+        downloadWebDavRawFile,
         multiTransferProgress,
         startMultiTransfer,
         updateMultiTransferProgress,

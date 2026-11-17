@@ -122,6 +122,7 @@ export const DEFAULT_SETTINGS: SystemSettings = {
   hideNonBlogForGuests: false,
   emailRegistrationOnly: false,
   allowRegistration: true,
+  allowUserMediaManagement: false,
   totalCapacityBytes: 10 * 1024 * 1024 * 1024, // 10 GB
   usedCapacityBytes: 0, // Default starts at zero as requested
   storageConfig: {
@@ -525,35 +526,10 @@ export const DEFAULT_WEBDAV_CONFIG: WebDavConfig = {
   username: 'fox_backup@jianguoyun.com',
   password: '********',
   backupPath: '/fox3_backup/',
-  lastBackupTime: Date.now() - 86400000 * 2,
+  lastBackupTime: 0,
 };
 
-export const DEFAULT_WEBDAV_BACKUPS: WebDavBackupItem[] = [
-  {
-    id: 'bak-1',
-    name: 'fox3_full_backup_20250520.json',
-    size: 4890000,
-    updatedAt: Date.now() - 86400000 * 2,
-    type: 'full',
-    path: '/fox3_backup/fox3_full_backup_20250520.json',
-  },
-  {
-    id: 'bak-2',
-    name: 'fox3_posts_backup_20250521.json',
-    size: 125000,
-    updatedAt: Date.now() - 86400000 * 1,
-    type: 'posts',
-    path: '/fox3_backup/fox3_posts_backup_20250521.json',
-  },
-  {
-    id: 'bak-3',
-    name: 'fox3_books_backup_20250521.json',
-    size: 2650000,
-    updatedAt: Date.now() - 86400000 * 1,
-    type: 'books',
-    path: '/fox3_backup/fox3_books_backup_20250521.json',
-  }
-];
+export const DEFAULT_WEBDAV_BACKUPS: WebDavBackupItem[] = [];
 
 export const DEFAULT_WEBSITES: WebSiteItem[] = [
   {

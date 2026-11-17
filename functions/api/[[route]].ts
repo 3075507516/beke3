@@ -1,5 +1,6 @@
 import { createVerificationCode, dispatchEmail, escapeHtml, normalizeEmail, probeResendConnection, type MailProvider, type OutboundMailSettings } from '../mail';
 import { getExternalObjectStoreConfig, getExternalObject, putExternalObject, probeExternalObjectStore } from '../object-storage';
+import { handleWebDavAction } from '../webdav';
 
 // Cloudflare Pages Functions API Handler
 // Routes: /api/*
@@ -404,11 +405,21 @@ export const onRequest = async (context: any) => {
   const headers = new Headers({
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With, X-WebDAV-Config, X-WebDAV-Path',
   });
 
   if (request.method === 'OPTIONS') {
     return new Response(null, { headers });
+  }
+  // WebDAV proxy: keeps remote Basic Auth out of third-party browser requests and
+  // restricts every operation to a signed administrator session.
+  if (path.startsWith('/webdav/')) {
+    if (request.method !== 'POST') return new Response('Method not allowed', { status: 405, headers });
+    if (!await hasAdminSession(request, env)) {
+      return Response.json({ success: false, error: 'WebDAV 管理操作需要有效的管理员会话' }, { status: 401, headers });
+    }
+    const action = path.slice('/webdav/'.length).split('/')[0];
+    return handleWebDavAction(action, request, headers);
   }
 
   if ((path === '/mail/webhook' || path === '/webhook') && request.method === 'POST') {
@@ -1158,10 +1169,6 @@ export const onRequest = async (context: any) => {
         } catch (e) {}
       }
 
-      // Check edge memory fallback
-      if (!data && (globalThis as any).__fox3_memory_sync && (globalThis as any).__fox3_memory_sync[syncKey]) {
-        data = (globalThis as any).__fox3_memory_sync[syncKey];
-      }
 
       return new Response(JSON.stringify({
         success: true,
@@ -1179,11 +1186,6 @@ export const onRequest = async (context: any) => {
         const stringified = JSON.stringify(payload);
         let syncedToCloud = false;
 
-        // In-memory global fallback
-        if (!(globalThis as any).__fox3_memory_sync) {
-          (globalThis as any).__fox3_memory_sync = {};
-        }
-        (globalThis as any).__fox3_memory_sync[syncKey] = payload;
 
         if (env.DB) {
           try {
@@ -1202,20 +1204,20 @@ export const onRequest = async (context: any) => {
           } catch (e) {}
         }
 
-        return new Response(JSON.stringify({
-          success: true,
-          syncedToCloud,
-          timestamp: Date.now(),
-        }), {
+        if (!syncedToCloud) {
+          return new Response(JSON.stringify({
+            success: false,
+            syncedToCloud: false,
+            error: '未绑定可用的 D1 或 KV 持久化存储；为避免假成功，本次数据未确认保存到云端',
+            timestamp: Date.now(),
+          }), { status: 503, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+        }
+        return new Response(JSON.stringify({ success: true, syncedToCloud: true, timestamp: Date.now() }), {
           headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
         });
       } catch (syncErr: any) {
-        return new Response(JSON.stringify({
-          success: true,
-          syncedToCloud: false,
-          fallback: true,
-          message: syncErr?.message || 'Local edge sync fallback'
-        }), {
+        return new Response(JSON.stringify({ success: false, syncedToCloud: false, error: syncErr?.message || '云端持久化同步失败' }), {
+          status: 500,
           headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
         });
       }

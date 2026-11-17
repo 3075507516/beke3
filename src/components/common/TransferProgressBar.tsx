@@ -3,7 +3,7 @@ import { useApp } from '../../context/AppContext';
 import { UploadCloud, DownloadCloud, Database, RefreshCw, CheckCircle2, AlertCircle, Info, X } from 'lucide-react';
 
 export const TransferProgressBar: React.FC = () => {
-  const { transferProgress, multiTransferProgress, toasts, dismissToast } = useApp();
+  const { transferProgress, multiTransferProgress, toasts, dismissToast, cancelTransfer } = useApp();
 
   const isMulti = multiTransferProgress.active;
   const isSingle = transferProgress.active;
@@ -128,6 +128,9 @@ export const TransferProgressBar: React.FC = () => {
               </span>
               {transferProgress.speed && (
                 <p className="text-[10px] text-slate-400">{transferProgress.speed}</p>
+              )}
+              {(transferProgress.type === 'backup' || transferProgress.type === 'restore' || transferProgress.type === 'download') && (
+                <button type="button" onClick={cancelTransfer} className="mt-1 rounded-md px-2 py-0.5 text-[10px] font-semibold text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40">停止</button>
               )}
             </div>
           </div>

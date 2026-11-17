@@ -34,6 +34,7 @@ import {
   Clock,
 } from 'lucide-react';
 import { WebDavBackupItem, GlobalThemeMode } from '../../types';
+import { listWebDavFiles } from '../../utils/webdav';
 
 export const SettingsSection: React.FC = () => {
   const {
@@ -64,6 +65,9 @@ export const SettingsSection: React.FC = () => {
     emptyTrash,
     performBackup,
     performRestore,
+    testWebDavConnection,
+    webDavConnectionState,
+    deleteWebDavBackup,
     themeMode,
     setThemeMode,
   } = useApp();
@@ -111,6 +115,7 @@ export const SettingsSection: React.FC = () => {
   const [collapsedSections, setCollapsedSections] = useState<{ [key: string]: boolean }>(() => {
     const saved = loadLocalStorage<{ [key: string]: boolean }>('fox3_settings_collapsed_state', {
       theme: true,
+      themeCenter: true,
       privacy: true,
       storage: true,
       webdav: true,
@@ -138,51 +143,42 @@ export const SettingsSection: React.FC = () => {
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [backupScope, setBackupScope] = useState<'full' | 'posts' | 'books' | 'media' | 'settings'>('full');
 
-  // WebDAV status lamp must be strictly accurate: verified if serverUrl, username, and password are configured
-  const isWebDavVerified = Boolean(
-    webDavConfig.serverUrl &&
-    webDavConfig.username &&
-    webDavConfig.password &&
-    webDavConfig.password !== '********' &&
-    webDavConfig.password.length >= 6
-  );
+  // A filled form is not a connection: only successful authenticated PROPFIND marks green.
+  const isWebDavVerified = webDavConnectionState.status === 'connected';
 
-  const handleSaveWebDavConfig = () => {
+  const handleSaveWebDavConfig = async () => {
     updateWebDavConfig(formConfig);
     setIsSaved(true);
-    const isValid = Boolean(
-      formConfig.serverUrl &&
-      formConfig.username &&
-      formConfig.password &&
-      formConfig.password !== '********' &&
-      formConfig.password.length >= 6
-    );
-    if (isValid) {
-      setActionMessage('WebDAV 配置已保存并完成同步！远程服务已连通。');
+    setActionMessage('配置已保存到当前浏览器，正在验证 WebDAV 服务器…');
+    const connected = await testWebDavConnection(formConfig);
+    if (!connected) {
+      setActionMessage('配置已保存到本机，但远端连通验证失败；检查服务地址、账号、应用密码和 HTTPS 部署。');
     } else {
-      setActionMessage('配置已保存。当前处于未连接状态：请填写有效WebDAV授权应用密码。');
+      try {
+        const files = await listWebDavFiles(formConfig);
+        setWebDavBackups(files);
+        setActionMessage(`WebDAV 已验证并读到 ${files.length} 个远端文件。`);
+      } catch (error: any) {
+        setActionMessage(error?.message || 'WebDAV 已连接，但读取远端列表失败。');
+      }
     }
     setTimeout(() => setIsSaved(false), 3000);
   };
 
-  const handleTestConnection = () => {
+  const handleTestConnection = async () => {
     setTestingConnection(true);
-    setActionMessage(null);
-    setTimeout(() => {
-      setTestingConnection(false);
-      const isValid = Boolean(
-        formConfig.serverUrl &&
-        formConfig.username &&
-        formConfig.password &&
-        formConfig.password !== '********' &&
-        formConfig.password.length >= 6
-      );
-      if (isValid) {
-        setActionMessage('WebDAV 连通性测试通过！远程通道握手成功。');
-      } else {
-        setActionMessage('连通性测试未通过：未连通。请提供合法的WebDAV 账号与应用授权密码。');
-      }
-    }, 600);
+    setActionMessage('正在向 WebDAV 服务端发起真实认证请求…');
+    const connected = await testWebDavConnection(formConfig);
+    setTestingConnection(false);
+    if (!connected) {
+      setActionMessage('WebDAV 连通性验证失败；状态灯显示未连接。');
+      return;
+    }
+    try {
+      const files = await listWebDavFiles(formConfig);
+      setWebDavBackups(files);
+      setActionMessage(`连接验证成功，已从远端读取 ${files.length} 个文件。`);
+    } catch (error: any) { setActionMessage(error?.message || '连接成功，但远端目录读取失败。'); }
   };
 
   const handleQuickTranslate = async () => {
@@ -286,23 +282,24 @@ export const SettingsSection: React.FC = () => {
   };
 
   const handleCreateBackup = async () => {
-    await performBackup(backupScope);
-    setActionMessage(`已成功发起并归档快照至WebDAV！`);
+    try {
+      await performBackup(backupScope);
+      const files = await listWebDavFiles(webDavConfig);
+      setWebDavBackups(files);
+      setActionMessage('备份已由 WebDAV 服务器确认接收并重新读取远端目录。');
+    } catch (error: any) { setActionMessage(error?.message || 'WebDAV 备份失败，未标记为成功。'); }
   };
 
   const handleRestoreBackup = async (item: WebDavBackupItem) => {
     if (!window.confirm(`确定要从备份包【${item.name}】选择还原系统数据吗？`)) return;
     const success = await performRestore(item.id);
-    if (success) {
-      setActionMessage(`数据已成功从 WebDAV 备份【${item.name}】选择性恢复完毕！`);
-    }
+    setActionMessage(success ? `数据已从 WebDAV 文件【${item.name}】恢复。` : '恢复失败；请确认这是本站生成的 fox3 JSON 快照。');
   };
 
-  const handleDeleteBackup = (id: string) => {
-    if (window.confirm('确认在WebDAV 中删除该备份快照文件吗？')) {
-      setWebDavBackups(prev => prev.filter(b => b.id !== id));
-      setActionMessage('备份快照已移除。');
-    }
+  const handleDeleteBackup = async (id: string) => {
+    if (!window.confirm('确认从 WebDAV 远端永久删除该文件吗？')) return;
+    const success = await deleteWebDavBackup(id);
+    setActionMessage(success ? '远端文件已成功删除。' : '远端删除失败；列表未移除。');
   };
 
   const avatarInputRef = useRef<HTMLInputElement>(null);
@@ -513,6 +510,11 @@ export const SettingsSection: React.FC = () => {
 
             {/* 2. 深度定制与全站怀旧/风格主题中心 (16 款独立风格主题) */}
             <div>
+              <button type="button" aria-expanded={!collapsedSections.themeCenter} onClick={() => toggleSection('themeCenter')} className="w-full flex items-center justify-between mb-2 rounded-xl p-2 text-left hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                <span className="block text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5"><Palette className="w-4 h-4 text-sky-500" />2. 怀旧与设计风格主题中心 (16 款)</span>
+                {collapsedSections.themeCenter ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronUp className="w-4 h-4 text-slate-400" />}
+              </button>
+              {!collapsedSections.themeCenter && <>
               <div className="flex items-center justify-between mb-2">
                 <label className="block text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
                   <Palette className="w-4 h-4 text-sky-500" />
@@ -569,6 +571,7 @@ export const SettingsSection: React.FC = () => {
                   );
                 })}
               </div>
+              </>}
             </div>
 
             {/* 3. 自定义背景调色板 & 半透明毛玻璃透光开关 */}
@@ -798,6 +801,13 @@ export const SettingsSection: React.FC = () => {
 
               <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/70 dark:border-slate-700 flex items-start justify-between gap-4">
                 <div>
+                  <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100">普通用户管理自己的照片、视频和电子书</h4>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">开启后，已登录普通用户可上传内容，并编辑/删除标记为本人所有的内容；管理员始终可管理全部内容。当前所有权标记在前端维护，不构成后端安全边界。</p>
+                </div>
+                <input type="checkbox" checked={Boolean(systemSettings.allowUserMediaManagement)} onChange={e => updateSystemSettings({ allowUserMediaManagement: e.target.checked })} className="w-5 h-5 text-sky-500 rounded focus:ring-sky-500 shrink-0 cursor-pointer" />
+              </div>
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/70 dark:border-slate-700 flex items-start justify-between gap-4">
+                <div>
                   <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100">
                     仅限邮箱注册 (强制邮箱身份验证)
                   </h4>
@@ -987,7 +997,7 @@ export const SettingsSection: React.FC = () => {
               }`}
             >
               <span className={`w-2 h-2 rounded-full ${isWebDavVerified ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
-              {isWebDavVerified ? '已连通' : '未连接 (未配置或未验证)'}
+              {isWebDavVerified ? '已验证连通' : webDavConnectionState.status === 'checking' ? '正在验证' : webDavConnectionState.status === 'unknown' ? '未验证' : '验证失败'}
             </span>
             {collapsedSections.webdav ? (
               <ChevronDown className="w-5 h-5 text-slate-400" />
@@ -1096,7 +1106,7 @@ export const SettingsSection: React.FC = () => {
             <div className="p-4 rounded-2xl bg-sky-50/50 dark:bg-sky-950/30 border border-sky-100 dark:border-sky-900/50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
               <div>
                 <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100">选择性实时备份到 WebDAV</h4>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">选择指定模块打包并热备至远程安全网盘</p>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">生成本站 JSON 数据快照；媒体文件本体不会自动打包。单文件上限 25 MiB，图片/视频容易超时，建议优先备份文字与设置。</p>
               </div>
 
               <div className="flex items-center gap-2 flex-wrap">
@@ -1105,17 +1115,18 @@ export const SettingsSection: React.FC = () => {
                   onChange={e => setBackupScope(e.target.value as any)}
                   className="px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs rounded-xl text-slate-700 dark:text-slate-200"
                 >
-                  <option value="full">全站全量数据 (All)</option>
+                  <option value="full">全站 JSON 快照（媒体元数据）</option>
                   <option value="posts">仅文章博客库 (Posts)</option>
                   <option value="books">仅电子书架库 (Books)</option>
-                  <option value="media">仅多媒体影音 (Media)</option>
+                  <option value="media">照片与影音元数据 (Media)</option>
                   <option value="settings">仅全站设置 (Settings)</option>
                 </select>
 
                 <button
                   type="button"
                   onClick={handleCreateBackup}
-                  className="flex items-center gap-1.5 px-3.5 py-1.5 bg-sky-500 hover:bg-sky-600 text-white text-xs font-semibold rounded-xl shadow-md transition"
+                  disabled={!isWebDavVerified || testingConnection}
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 bg-sky-500 hover:bg-sky-600 text-white text-xs font-semibold rounded-xl shadow-md transition disabled:opacity-50"
                 >
                   <Database className="w-3.5 h-3.5" />
                   <span>{t('action.backupNow')}</span>
@@ -1165,13 +1176,13 @@ export const SettingsSection: React.FC = () => {
                       </div>
 
                       <div className="flex items-center gap-2 self-end sm:self-center">
-                        <button
+                        {/\.json$/i.test(item.name) && <button
                           onClick={() => handleRestoreBackup(item)}
                           className="flex items-center gap-1 px-3 py-1 bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 text-emerald-600 dark:text-emerald-400 text-xs font-medium rounded-xl transition border border-emerald-200/50"
                         >
                           <RotateCcw className="w-3.5 h-3.5" />
                           <span>{t('action.restoreBackup')}</span>
-                        </button>
+                        </button>}
                         <button
                           onClick={() => handleDeleteBackup(item.id)}
                           className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 transition"

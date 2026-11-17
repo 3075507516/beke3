@@ -63,10 +63,8 @@ export const MailSection: React.FC = () => {
   const [actionAlert, setActionAlert] = useState<string | null>(null);
   const [settingsSource, setSettingsSource] = useState<'frontend' | 'backend'>('frontend');
   const [backendMailConfigured, setBackendMailConfigured] = useState<boolean | null>(null);
-  const [backendMailApiKeyConfigured, setBackendMailApiKeyConfigured] = useState(false);
   const [backendMailStatusAvailable, setBackendMailStatusAvailable] = useState<boolean | null>(null);
   const [backendMailProvider, setBackendMailProvider] = useState<string>('');
-  const [backendConnectionResult, setBackendConnectionResult] = useState<any>(null);
   const [inboundServerStatus, setInboundServerStatus] = useState<any>(null);
   const [inboxLoadError, setInboxLoadError] = useState('');
   const [isRefreshingInbox, setIsRefreshingInbox] = useState(false);
@@ -93,7 +91,6 @@ export const MailSection: React.FC = () => {
       .then(data => {
         if (!cancelled) {
           setBackendMailConfigured(Boolean(data?.outbound?.configured));
-          setBackendMailApiKeyConfigured(Boolean(data?.outbound?.apiKeyConfigured));
           setBackendMailProvider(String(data?.outbound?.provider || ''));
           setInboundServerStatus(data?.inbound || null);
           setBackendMailStatusAvailable(true);
@@ -267,12 +264,9 @@ export const MailSection: React.FC = () => {
   const isFrontendTestFailed = frontendOutboundConfigured && frontendTestFailedFingerprint === frontendFingerprint;
   const isBackendConnected = backendMailConfigured === true && backendTestResult === true;
   const isBackendTestFailed = backendTestResult === false;
-  const isBackendApiSendReady = Boolean(backendConnectionResult?.success && backendConnectionResult?.sendingEnabled);
-  const isBackendApiProbeFailed = Boolean(backendConnectionResult && !backendConnectionResult.success);
-  const backendLightGreen = isBackendConnected || isBackendApiSendReady;
-  const backendLightRed = isBackendApiProbeFailed || isBackendTestFailed || backendMailStatusAvailable === false || backendMailConfigured === false;
-  const backendLightLabel = isBackendConnected ? '测试邮件已接受' : isBackendApiSendReady ? 'API/域名已验证' : backendConnectionResult?.success ? 'API已通/域名未就绪' : isBackendApiProbeFailed ? 'API检查失败' : isBackendTestFailed ? '测试邮件失败' : backendMailStatusAvailable === null ? '检测中' : backendMailStatusAvailable === false ? '状态不可读取' : backendMailConfigured ? '参数已配置/待测试' : '未配置';
-  const inboundReceivingActive = Boolean(inboundServerStatus?.verified);
+  const backendLightGreen = isBackendConnected;
+  const backendLightRed = isBackendTestFailed || backendMailStatusAvailable === false || backendMailConfigured === false;
+  const backendLightLabel = isBackendConnected ? '测试邮件已接受' : isBackendTestFailed ? '测试邮件失败' : backendMailStatusAvailable === null ? '检测中' : backendMailStatusAvailable === false ? '状态不可读取' : backendMailConfigured ? '参数已配置/待测试' : '未配置';
   const inboundServerReady = Boolean(inboundServerStatus?.configured);
 
   const handleTestMail = async (source: 'frontend' | 'backend') => {
@@ -304,33 +298,6 @@ export const MailSection: React.FC = () => {
       }
       else setBackendTestResult(false);
       showToast(error?.message || '邮件连通测试失败。', 'error');
-    } finally {
-      setTestingStatus(false);
-    }
-  };
-
-  const handleTestBackendConnection = async () => {
-    const token = getAdminSessionToken();
-    if (!token) {
-      showToast('Resend API 连接检查需要通过已部署的管理员账号重新登录。', 'error');
-      return;
-    }
-    setTestingStatus(true);
-    setBackendConnectionResult(null);
-    try {
-      const response = await fetch('/api/mail/test-connection', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ source: 'backend' }),
-      });
-      const result = await readMailApiJson(response, 'Resend API 连接检查接口');
-      if (!response.ok || !result?.success) throw new Error(result?.error || `连接检查失败 (HTTP ${response.status})`);
-      setBackendConnectionResult(result);
-      showToast(`${result.message}。此检查不会发送邮件；请另用“发送后台测试邮件”验证实际投递。`, result.sendingEnabled ? 'success' : 'error');
-    } catch (error: any) {
-      const message = error?.message || 'Resend API 连接检查失败';
-      setBackendConnectionResult({ success: false, message });
-      showToast(message, 'error');
     } finally {
       setTestingStatus(false);
     }
@@ -481,10 +448,10 @@ export const MailSection: React.FC = () => {
         <div>
           <h2 className="text-xl font-bold font-serif-sc text-slate-800 dark:text-slate-100 flex items-center gap-2">
             <Mail className="w-5 h-5 text-rose-500" />
-            <span>站内邮件中枢（Resend 发信与收件）</span>
+            <span>站内邮件中枢（Resend 发信与邮件事件）</span>
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            推荐 Resend API (HTTPS) 发信；收到的邮件经签名验证后保存到 D1 收件箱
+            管理员来信由邮件服务端转发至管理员个人邮箱；本站仅可选留存邮件事件，不是个人邮箱收件箱
           </p>
         </div>
 
@@ -499,9 +466,9 @@ export const MailSection: React.FC = () => {
               <span className={`w-2 h-2 rounded-full ${backendLightGreen ? 'bg-emerald-500' : backendLightRed ? 'bg-rose-500' : 'bg-amber-500'}`} />
               <span>后台: {backendLightLabel}</span>
             </span>
-            <span className={`inline-flex items-center gap-1.5 text-[10px] px-2 py-1 rounded-full font-medium border ${inboundReceivingActive ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300' : inboundServerReady ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300' : 'bg-rose-50 text-rose-600 border-rose-200 dark:bg-rose-950/40 dark:text-rose-400'}`}>
-              <span className={`w-2 h-2 rounded-full ${inboundReceivingActive ? 'bg-emerald-500' : inboundServerReady ? 'bg-amber-500' : 'bg-rose-500'}`} />
-              <span>收件: {inboundReceivingActive ? '已收到邮件' : inboundServerReady ? '服务端就绪/待首封' : inboundServerStatus ? '待配置' : '检测中'}</span>
+            <span className={`inline-flex items-center gap-1.5 text-[10px] px-2 py-1 rounded-full font-medium border ${inboundServerReady ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300' : 'bg-rose-50 text-rose-600 border-rose-200 dark:bg-rose-950/40 dark:text-rose-400'}`}>
+              <span className={`w-2 h-2 rounded-full ${inboundServerReady ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+              <span>收件: {backendMailStatusAvailable === null ? '检测中' : backendMailStatusAvailable === false ? '状态不可读取' : inboundServerReady ? '服务端已就绪' : '未就绪/待配置'}</span>
             </span>
           </div>
 
@@ -550,9 +517,9 @@ export const MailSection: React.FC = () => {
             </div>
             <div className="text-slate-600 dark:text-slate-300 leading-relaxed space-y-1">
               <p><b>1. 推荐 Resend API (HTTPS)：</b>在 Resend 创建 API Key，并验证发件域名。Cloudflare Pages → Settings → Variables and Secrets 设置 <code>MAIL_PROVIDER=resend</code>、<code>RESEND_API_KEY</code> 与 <code>MAIL_SENDER</code>（例如 <code>Fox3 &lt;no-reply@你的已验证域名&gt;</code>）；此方式无需 SMTP 主机、端口、用户名或密码。新建配置默认选择 Resend API，已有 SMTP 配置仍可手动切换。</p>
-              <p><b>2. 区分连接测试和邮件测试：</b>“检查 Resend API 连接”只调用 HTTPS 域名列表接口，不会发送邮件；它同时检查发件域名是否存在且已启用发送能力。若 API Key 是仅发送权限，读取域名可能被拒绝；请使用具备所需域名读取和收件读取权限的 Key。“发送后台测试邮件”会真实发送一封邮件到 MAIL_SENDER。前台 Key 仅保存在当前浏览器本地且未加密；验证码及访客邮件应使用后台 Secret。</p>
+              <p><b>2. 前台配置与正式邮件：</b>前台填写的发信配置仅保存在当前浏览器，仅用于当前浏览器的手动发信/测试，不会提供给服务端作为全站配置。正式注册验证码和后台业务通知必须在 Cloudflare Pages Functions 环境配置所需后端变量/Secrets，并重新部署后才会生效；“发送后台测试邮件”会实际发送至 MAIL_SENDER。</p>
               <p><b>3. 注册验证码：</b>验证码在服务端生成和验证。可在 Pages Variables/Secrets 设置 <code>VERIFY_CODE_LENGTH</code>、<code>VERIFY_EMAIL_SUBJECT</code>、<code>VERIFY_EMAIL_TEMPLATE</code>；模板变量为 {'{{code}}'}、{'{{username}}'}、{'{{email}}'}。验证码投递使用后台配置的 Resend API。</p>
-              <p><b>4. Resend 收件接入：</b>绑定 D1，配置 <code>RESEND_API_KEY</code>、<code>RESEND_WEBHOOK_SECRET</code>。在 Resend 的 Emails → Receiving 选择 Resend 收件域名，或为自有域名按其说明设置 MX；再创建 <code>email.received</code> Webhook，地址填写 <code>https://你的 Pages 域名/api/webhook</code>，并把该 Webhook 的 Signing Secret 保存为 <code>RESEND_WEBHOOK_SECRET</code>。通过验签且成功取回正文的来信会存入 D1，并显示在本站收件箱。也兼容旧路径 <code>/api/mail/webhook</code>；仅把邮件转发到外部邮箱不会进入本站。</p>
+              <p><b>4. 管理员收信与可选事件留存：</b>管理员收信由邮件服务端规则转发至管理员个人邮箱；本站邮箱页不是管理员个人邮箱的真实收件箱。若启用 <code>email.received</code> Webhook（<code>/api/webhook</code>，兼容旧路径 <code>/api/mail/webhook</code>），并配置 <code>RESEND_WEBHOOK_SECRET</code>、<code>RESEND_API_KEY</code> 和 D1，则可将经验证并成功取回的邮件事件/正文可选留存到 D1，供本站查看；这不等同于个人邮箱收件箱。收件状态以 <code>/api/mail/status</code> 返回的 <code>inbound</code> 配置状态为准；变量正确并部署后显示服务端就绪，不表示已收到邮件。</p>
             </div>
           </div>
 
@@ -594,15 +561,9 @@ export const MailSection: React.FC = () => {
                   <button type="button" disabled={testingStatus || !backendMailConfigured} onClick={() => handleTestMail('backend')} className="px-3 py-1.5 rounded-lg bg-indigo-600 disabled:opacity-40 text-white text-[11px] font-semibold">
                     {testingStatus ? '测试中…' : '发送后台测试邮件'}
                   </button>
-                  {backendMailProvider === 'resend' && (
-                    <button type="button" disabled={testingStatus || !backendMailApiKeyConfigured} onClick={handleTestBackendConnection} className="px-3 py-1.5 rounded-lg bg-emerald-700 disabled:opacity-40 text-white text-[11px] font-semibold">
-                      {testingStatus ? '检查中…' : '检查 Resend API 连接'}
-                    </button>
-                  )}
-                  <span className="self-center text-[10px] text-slate-500">测试邮件会真实发回发件地址；Resend API 连接检查仅读取域名，不会发信。</span>
+                  <span className="self-center text-[10px] text-slate-500">测试邮件会真实发回发件地址；前台配置仅用于当前浏览器测试，正式验证码及后台通知需配置并部署后端环境变量。</span>
                 </div>
                 <div className="text-[10px] text-slate-500">后台环境变量：{backendMailStatusAvailable === null ? '检测中…' : backendMailStatusAvailable === false ? '状态接口不可读取，无法判断后台是否配置' : isBackendTestFailed ? '实际测试邮件失败' : isBackendConnected ? '测试邮件已被服务商接受' : backendMailConfigured ? `已配置 (${backendMailProvider})，尚未发送测试邮件` : '未配置发信环境变量'}</div>
-                {backendConnectionResult && <div className={`text-[10px] ${backendConnectionResult.success && backendConnectionResult.sendingEnabled ? 'text-emerald-700 dark:text-emerald-300' : backendConnectionResult.success ? 'text-amber-700 dark:text-amber-300' : 'text-rose-600 dark:text-rose-400'}`}>Resend 连接检查：{backendConnectionResult.message}</div>}
               </div>
 
               <div>
@@ -741,17 +702,17 @@ export const MailSection: React.FC = () => {
                 <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
                   Resend 收件通道 (Inbound)
                 </h4>
-                <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${inboundReceivingActive ? 'bg-emerald-50 text-emerald-700' : inboundServerReady ? 'bg-amber-50 text-amber-700' : 'bg-rose-50 text-rose-600'}`}>
-                  {inboundReceivingActive ? '● 已收到真实邮件' : inboundServerReady ? '● 服务端就绪/待首封验证' : inboundServerStatus ? '○ 服务端配置不完整' : '○ 状态检测中'}
+                <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${inboundServerReady ? 'bg-emerald-50 text-emerald-700' : backendMailStatusAvailable === null || backendMailStatusAvailable === false ? 'bg-amber-50 text-amber-700' : 'bg-rose-50 text-rose-600'}`}>
+                  {backendMailStatusAvailable === null ? '○ 状态检测中' : backendMailStatusAvailable === false ? '○ 状态不可读取' : inboundServerReady ? '● 服务端已就绪' : '○ 服务端配置不完整'}
                 </span>
               </div>
 
               <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 space-y-3 text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">
                 <p><b>收件接入步骤：</b>在 Resend Dashboard → Emails → Receiving 启用 Resend 收件域名，或为自己的收件域名添加 Resend 要求的 MX 记录；然后创建 <code>email.received</code> Webhook。</p>
                 <p><b>Webhook URL：</b><code className="break-all">https://你的 Pages 域名/api/webhook</code>。将该 Webhook 的 Signing Secret 设为 Cloudflare Pages Secret <code>RESEND_WEBHOOK_SECRET</code>。Webhook 事件经签名验证后，后端使用 <code>RESEND_API_KEY</code> 拉取正文，并写入绑定名为 <code>DB</code> 的 D1 数据库；旧路径 <code>/api/mail/webhook</code> 仍可用。</p>
-                <p><b>状态含义：</b>{inboundReceivingActive && inboundServerStatus?.lastReceivedAt ? `已在 ${new Date(Number(inboundServerStatus.lastReceivedAt)).toLocaleString()} 收到并保存过邮件。` : inboundServerReady ? '后端 D1、API Key 和签名 Secret 已配置，但尚未收到有效 webhook；请确认 Resend 域名/MX 和 webhook URL。' : '需要同时配置 D1、RESEND_API_KEY 与 RESEND_WEBHOOK_SECRET；此状态只判断服务器变量，不代表 Resend Dashboard 已完成配置。'}</p>
+                <p><b>状态含义：</b>{backendMailStatusAvailable === false || backendMailStatusAvailable === null ? '无法读取真实 /api/mail/status 状态，暂不能判断收件通道配置。' : inboundServerReady ? '真实 /api/mail/status 返回 inbound.configured=true：所需后端变量已配置并部署，服务端收件事件接入已就绪；这不代表已经收到邮件，也不检查 Resend Dashboard 的域名/MX/Webhook 是否实际连通。' : '真实 /api/mail/status 返回 inbound 未配置；请配置所需后端变量并部署。'}</p>
                 {inboxLoadError && <p className="text-rose-600 dark:text-rose-400">收件箱读取提示：{inboxLoadError}</p>}
-                <p className="text-slate-500">收件正文会保存到 D1 并载入本站收件箱（最多最近 500 封且清理 180 天前邮件）；当前会保存附件元数据，但不会下载或展示附件文件。</p>
+                <p className="text-slate-500">本站不是管理员个人邮箱的收件箱。启用 webhook 时，邮件事件/正文可选留存于 D1 并显示在此页面（最多最近 500 封且清理 180 天前邮件）；这是可选事件留存，不替代邮件服务端转发到管理员个人邮箱。当前会保存附件元数据，但不会下载或展示附件文件。</p>
               </div>
 
               <div className="p-3 rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50/70 dark:bg-amber-950/30 text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">

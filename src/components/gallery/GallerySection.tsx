@@ -49,6 +49,8 @@ export const GallerySection: React.FC = () => {
   const [targetFolderMove, setTargetFolderMove] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const currentViewMode: ViewMode = viewModes['gallery'] || 'original';
+  const canManagePhoto = (photo: Photo) => currentUser?.role === 'admin' || (Boolean(systemSettings.allowUserMediaManagement) && Boolean(currentUser) && ((Boolean(photo.ownerId) && photo.ownerId === currentUser?.id) || (!photo.ownerId && Boolean(photo.ownerUsername) && photo.ownerUsername === currentUser?.username)));
+  const canUploadPhotos = currentUser?.role === 'admin' || (Boolean(currentUser) && Boolean(systemSettings.allowUserMediaManagement));
 
   const currentPhotoIndex = selectedPhoto ? photos.findIndex(p => p.id === selectedPhoto.id) : -1;
 
@@ -114,6 +116,8 @@ export const GallerySection: React.FC = () => {
         id: `photo-${Date.now()}-${i}`,
         title: file.name.replace(/\.[^/.]+$/, ''),
         url: uploaded.url,
+        ownerId: currentUser?.id,
+        ownerUsername: currentUser?.username,
         category: currentFolder ? currentFolder.name : '相册精选',
         folderId: activeFolderId !== 'all' ? activeFolderId : undefined,
         folderName: currentFolder?.name,
@@ -142,7 +146,7 @@ export const GallerySection: React.FC = () => {
   const handleDeletePhoto = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (window.confirm('确认删除此照片吗？')) {
-      setPhotos(prev => prev.filter(p => p.id !== id));
+      setPhotos(prev => prev.filter(p => p.id !== id || !canManagePhoto(p)));
       if (selectedPhoto?.id === id) setSelectedPhoto(null);
     }
   };
@@ -150,7 +154,7 @@ export const GallerySection: React.FC = () => {
   const handleBatchDelete = () => {
     if (selectedIds.length === 0) return;
     if (window.confirm(`确认删除选中的 ${selectedIds.length} 张照片吗？`)) {
-      setPhotos(prev => prev.filter(p => !selectedIds.includes(p.id)));
+      setPhotos(prev => prev.filter(p => !selectedIds.includes(p.id) || !canManagePhoto(p)));
       setSelectedIds([]);
     }
   };
@@ -272,7 +276,7 @@ export const GallerySection: React.FC = () => {
             </button>
           </div>
 
-          {currentUser?.role === 'admin' && (
+          {canUploadPhotos && (
             <div>
               <button
                 onClick={() => fileInputRef.current?.click()}
@@ -390,7 +394,7 @@ export const GallerySection: React.FC = () => {
 
           {selectedIds.length > 0 && (
             <>
-              {currentUser?.role === 'admin' && (
+              {selectedIds.some(id => { const photo = photos.find(p => p.id === id); return photo ? canManagePhoto(photo) : false; }) && (
                 <button
                   onClick={handleBatchDelete}
                   className="flex items-center gap-1 text-rose-500 hover:text-rose-600 font-medium"
@@ -410,7 +414,7 @@ export const GallerySection: React.FC = () => {
           )}
         </div>
 
-        {selectedIds.length > 0 && currentUser?.role === 'admin' && (
+        {selectedIds.some(id => { const photo = photos.find(p => p.id === id); return photo ? canManagePhoto(photo) : false; }) && currentUser?.role === 'admin' && (
           <div className="flex items-center gap-2">
             <span className="text-slate-500 text-[11px]">移至文件夹:</span>
             <select
@@ -478,7 +482,7 @@ export const GallerySection: React.FC = () => {
                   >
                     <Download className="w-4 h-4" />
                   </button>
-                  {currentUser?.role === 'admin' && (
+                  {canManagePhoto(photo) && (
                     <button
                       onClick={e => handleDeletePhoto(photo.id, e)}
                       className="p-1.5 text-slate-400 hover:text-rose-500"
@@ -534,7 +538,7 @@ export const GallerySection: React.FC = () => {
                 >
                   <Download className="w-4 h-4" />
                 </button>
-                {currentUser?.role === 'admin' && (
+                {canManagePhoto(photo) && (
                   <button
                     onClick={e => handleDeletePhoto(photo.id, e)}
                     className="p-1.5 bg-black/60 hover:bg-rose-600 text-white rounded-lg transition"
