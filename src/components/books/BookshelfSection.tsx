@@ -25,6 +25,14 @@ import {
   FileCode,
 } from 'lucide-react';
 
+const formatFileSize = (bytes: number) => {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(2)} KiB (${bytes.toLocaleString()} B)`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MiB (${bytes.toLocaleString()} B)`;
+};
+const bookOriginalFilename = (book: Book) => /\.[^./\\]+$/.test(book.title) ? book.title : `${book.title}.${String(book.format || 'txt').toLowerCase()}`;
+
 export const BookshelfSection: React.FC = () => {
   const {
     books,
@@ -233,7 +241,7 @@ export const BookshelfSection: React.FC = () => {
     for (let i = 0; i < exportBooks.length; i++) {
       const book = exportBooks[i];
       const ext = (book.format || 'txt').toLowerCase();
-      const filename = `${book.title}.${ext}`;
+      const filename = bookOriginalFilename(book);
       updateMultiTransferProgress(i + 1, book.title, Math.round(((i + 0.5) / exportBooks.length) * 90));
 
       try {
@@ -276,7 +284,8 @@ export const BookshelfSection: React.FC = () => {
 
   const handleDownload = async (book: Book, e: React.MouseEvent) => {
     e.stopPropagation();
-    startTransfer('download', `${book.title}.${book.format.toLowerCase()}`);
+    const originalFilename = bookOriginalFilename(book);
+    startTransfer('download', originalFilename);
     let p = 25;
     const interval = setInterval(() => {
       p += 35;
@@ -307,7 +316,7 @@ export const BookshelfSection: React.FC = () => {
 
       const link = document.createElement('a');
       link.href = downloadUrl;
-      link.download = `${book.title}.${book.format.toLowerCase()}`;
+      link.download = originalFilename;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -318,7 +327,7 @@ export const BookshelfSection: React.FC = () => {
       const fallbackUrl = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = fallbackUrl;
-      link.download = `${book.title}.${book.format.toLowerCase()}`;
+      link.download = originalFilename;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -617,6 +626,7 @@ export const BookshelfSection: React.FC = () => {
                       </h4>
                     </div>
                     <p className="text-xs text-slate-400 truncate mt-0.5">{book.author}</p>
+                    <p className="text-[10px] text-slate-400 truncate mt-0.5" title={bookOriginalFilename(book)}>{bookOriginalFilename(book)} · {formatFileSize(book.fileSize)}</p>
                   </div>
                 </div>
 
@@ -694,7 +704,7 @@ export const BookshelfSection: React.FC = () => {
                 <p className="text-[11px] text-slate-400 truncate mt-0.5">{book.author}</p>
 
                 <div className="mt-2 flex items-center justify-between text-[10px] text-slate-400">
-                  <span>{(book.fileSize / 1024 / 1024).toFixed(1)}MB</span>
+                  <span title={`${book.title} · ${formatFileSize(book.fileSize)}`}>{formatFileSize(book.fileSize)}</span>
                   <span className="text-sky-500 font-medium">开始阅读</span>
                 </div>
               </div>

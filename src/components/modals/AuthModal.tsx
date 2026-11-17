@@ -608,7 +608,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 bg-black/60 backdrop-blur-sm animate-in fade-in">
-      <div className="relative flex flex-col w-full max-w-md max-h-[calc(100dvh-1rem)] bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 p-6 md:p-8 overflow-hidden">
+      <div className="auth-modal-panel relative flex flex-col w-full max-w-md max-h-[calc(100dvh-1rem)] bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800 p-6 md:p-8 overflow-hidden">
         {/* Close Button */}
         <button
           onClick={onClose}

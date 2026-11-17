@@ -143,6 +143,7 @@ export const MediaSection: React.FC = () => {
     let posterCover = isVideo
       ? 'https://images.unsplash.com/photo-1470240731273-7821a6eeb6bd?auto=format&fit=crop&w=800&q=80'
       : 'https://images.unsplash.com/photo-1470225620780-dba8ba36b745?auto=format&fit=crop&w=400&q=80';
+    let posterFile: File | null = null;
 
     let detectedDuration = isVideo ? '00:00' : '03:30';
 
@@ -150,10 +151,20 @@ export const MediaSection: React.FC = () => {
       try {
         const videoElement = document.createElement('video');
         videoElement.preload = 'metadata';
-        videoElement.src = URL.createObjectURL(file);
+        const videoObjectUrl = URL.createObjectURL(file);
+        videoElement.src = videoObjectUrl;
         videoElement.muted = true;
 
-        await new Promise((resolve) => {
+        await new Promise<void>((resolve) => {
+          let settled = false;
+          let captureTimer: ReturnType<typeof setTimeout>;
+          const finishCapture = () => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(captureTimer);
+            URL.revokeObjectURL(videoObjectUrl);
+            resolve();
+          };
           videoElement.onloadeddata = () => {
             const minutes = Math.floor(videoElement.duration / 60);
             const seconds = Math.floor(videoElement.duration % 60);
@@ -162,30 +173,36 @@ export const MediaSection: React.FC = () => {
             }
 
             // Seek slightly forward to capture frame
-            videoElement.currentTime = Math.min(1.0, videoElement.duration / 2);
+            videoElement.currentTime = Number.isFinite(videoElement.duration) && videoElement.duration > 0
+              ? Math.min(1.0, videoElement.duration / 2)
+              : 0;
           };
 
           videoElement.onseeked = () => {
             try {
               const canvas = document.createElement('canvas');
-              canvas.width = videoElement.videoWidth || 640;
-              canvas.height = videoElement.videoHeight || 360;
+              const sourceWidth = videoElement.videoWidth || 640;
+              const sourceHeight = videoElement.videoHeight || 360;
+              const scale = Math.min(1, 640 / sourceWidth);
+              canvas.width = Math.max(1, Math.round(sourceWidth * scale));
+              canvas.height = Math.max(1, Math.round(sourceHeight * scale));
               const ctx = canvas.getContext('2d');
               if (ctx) {
                 ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
-                const snapshotUrl = canvas.toDataURL('image/jpeg', 0.85);
-                if (snapshotUrl && snapshotUrl.length > 100) {
-                  posterCover = snapshotUrl;
-                }
+                canvas.toBlob(blob => {
+                  if (blob && blob.size > 0) posterFile = new File([blob], `${file.name.replace(/\.[^.]+$/, '')}-poster.jpg`, { type: 'image/jpeg' });
+                  finishCapture();
+                }, 'image/jpeg', 0.76);
+                return;
               }
             } catch (canvasErr) {
               console.warn('Canvas video capture failed', canvasErr);
             }
-            resolve(true);
+            finishCapture();
           };
 
-          videoElement.onerror = () => resolve(true);
-          setTimeout(() => resolve(true), 2500); // 2.5s safe timeout
+          videoElement.onerror = finishCapture;
+          captureTimer = setTimeout(finishCapture, 8000);
         });
       } catch (err) {
         console.warn('Video thumbnail capture error:', err);
@@ -193,6 +210,16 @@ export const MediaSection: React.FC = () => {
     }
 
     const uploaded = await uploadFile(file);
+    if (posterFile) {
+      try {
+        const uploadedPoster = await uploadFile(posterFile);
+        if (!/^(?:idb_file_|data:|blob:)/i.test(uploadedPoster.url)) {
+          posterCover = uploadedPoster.url;
+        }
+      } catch (error) {
+        console.warn('Cloud video poster upload failed; using shared fallback cover', error);
+      }
+    }
 
     const newItem: MediaItem = {
       id: `media-${Date.now()}`,

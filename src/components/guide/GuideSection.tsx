@@ -13,8 +13,12 @@ import {
   Layers,
   Key,
 } from 'lucide-react';
+import { useApp } from '../../context/AppContext';
+import { translateInline } from '../../utils/i18n';
 
 export const GuideSection: React.FC = () => {
+  const { locale } = useApp();
+  const tx = (source: string) => translateInline(locale, source);
   const [activePlatform, setActivePlatform] = useState<'cf' | 'zip' | 'tencent' | 'aliyun'>('cf');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
@@ -30,10 +34,10 @@ export const GuideSection: React.FC = () => {
       <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-2">
         <h2 className="text-xl md:text-2xl font-bold font-serif-sc text-slate-900 dark:text-slate-100 flex items-center gap-2">
           <HelpCircle className="w-6 h-6 text-rose-500" />
-          <span>fox3 博客全平台极速部署指引与 D1 / R2 / WebDAV 使用说明</span>
+          <span>{tx('fox3 博客全平台极速部署指引与 D1 / R2 / WebDAV 使用说明')}</span>
         </h2>
         <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-          实际存储位置：浏览器 localStorage 保存页面数据缓存/设备偏好、前台邮箱配置及登录会话令牌；IndexedDB 只保存云上传失败时的本机文件回退。Cloudflare D1 保存公开站点内容、注册账户和按账户隔离的用户媒体目录（仅元数据）；R2 或已配置的 COS/OSS/S3 保存文件对象；KV 仅是有期限的兼容回退，内存回退不能持久化。已登录用户在管理员开启文件管理后上传的照片、视频和电子书目录会跨设备同步并在站点展示，文件本体必须成功写入云对象存储；EPUB/TXT 正文按需从原文件加载，不写入 D1 快照；若回退至 IndexedDB 则只在当前浏览器可用。前台邮箱凭据保留在当前浏览器，不上传同步且未加密。
+          {tx('部署存储概览：D1 保存博客、账户和媒体目录；R2/COS/OSS/S3 保存文件本体。成功上传到对象存储的图片和视频可跨设备查看；仅保存到 IndexedDB 的回退文件只在本机可用。电子书正文按需读取原文件，不写入 D1。')}
         </p>
       </div>
 
@@ -48,7 +52,7 @@ export const GuideSection: React.FC = () => {
           }`}
         >
           <Cloud className="w-4 h-4" />
-          <span>Cloudflare Pages Git 一键拉取部署 (首选优先)</span>
+          <span>{tx('Cloudflare Pages Git 一键拉取部署 (首选优先)')}</span>
         </button>
 
         <button
@@ -60,7 +64,7 @@ export const GuideSection: React.FC = () => {
           }`}
         >
           <Upload className="w-4 h-4" />
-          <span>Pages 一键上传文件部署 (获取上传包说明)</span>
+          <span>{tx('Pages 一键上传文件部署 (获取上传包说明)')}</span>
         </button>
 
         <button
@@ -72,7 +76,7 @@ export const GuideSection: React.FC = () => {
           }`}
         >
           <Server className="w-4 h-4" />
-          <span>腾讯云 EdgeOne / 轻量服务器静态部署（COS 未接入）</span>
+          <span>{tx('腾讯云 EdgeOne / 轻量服务器静态部署（COS 未接入）')}</span>
         </button>
 
         <button
@@ -84,7 +88,7 @@ export const GuideSection: React.FC = () => {
           }`}
         >
           <Server className="w-4 h-4" />
-          <span>阿里云 ESA / ECS 静态部署（OSS 未接入）</span>
+          <span>{tx('阿里云 ESA / ECS 静态部署（OSS 未接入）')}</span>
         </button>
 
         <button
@@ -96,7 +100,7 @@ export const GuideSection: React.FC = () => {
           }`}
         >
           <Server className="w-4 h-4" />
-          <span>Vercel / Docker / VPS / 1Panel 极速部署</span>
+          <span>{tx('Vercel / Docker / VPS / 1Panel 极速部署')}</span>
         </button>
       </div>
 
@@ -106,10 +110,10 @@ export const GuideSection: React.FC = () => {
           <div className="space-y-2">
             <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
               <Cloud className="w-5 h-5 text-rose-500" />
-              <span>Cloudflare Pages 连接 Git 仓库自动构建部署与 D1 / R2 绑定</span>
+              <span>{tx('Cloudflare Pages 连接 Git 仓库自动构建部署与 D1 / R2 绑定')}</span>
             </h3>
             <p className="text-xs text-slate-500">
-              只需将代码提交至 GitHub / GitLab，Cloudflare Pages 将在您推送代码时全自动触发构建并全球分发。
+              {tx('只需将代码提交至 GitHub / GitLab，Cloudflare Pages 将在您推送代码时全自动触发构建并全球分发。')}
             </p>
           </div>
 
@@ -119,7 +123,7 @@ export const GuideSection: React.FC = () => {
               <span className="w-5 h-5 rounded-full bg-rose-500 text-white flex items-center justify-center text-[10px]">
                 1
               </span>
-              <span>创建 Cloudflare Pages 应用</span>
+              <span>{tx('创建 Cloudflare Pages 应用')}</span>
             </h4>
             <ol className="text-xs text-slate-600 dark:text-slate-300 space-y-1.5 list-decimal list-inside leading-relaxed pl-1">
               <li>登录进入 Cloudflare Dashboard 控制台，点击左侧导航栏中的 <b>Workers & Pages</b>。</li>
@@ -134,7 +138,7 @@ export const GuideSection: React.FC = () => {
               <span className="w-5 h-5 rounded-full bg-rose-500 text-white flex items-center justify-center text-[10px]">
                 2
               </span>
-              <span>构建与输出参数配置 (Build Settings)</span>
+              <span>{tx('构建与输出参数配置 (Build Settings)')}</span>
             </h4>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs font-mono">
               <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700">
@@ -158,10 +162,10 @@ export const GuideSection: React.FC = () => {
               <span className="w-5 h-5 rounded-full bg-rose-500 text-white flex items-center justify-center text-[10px]">
                 3
               </span>
-              <span>Cloudflare 后台绑定 D1 数据库、R2 存储桶与 KV 变量</span>
+              <span>{tx('Cloudflare 后台绑定 D1 数据库、R2 存储桶与 KV 变量')}</span>
             </h4>
             <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-              部署完成后，进入项目页面点击 <b>Settings</b> -&gt; <b>Functions</b>，向下滚动到 <b>Bindings (绑定)</b>：
+              {tx('部署完成后，进入项目页面点击 Settings -> Functions，向下滚动到 Bindings (绑定)：')}
             </p>
 
             <div className="space-y-2 text-xs">
@@ -330,6 +334,7 @@ export const GuideSection: React.FC = () => {
               <p>设置 <code>OBJECT_STORAGE_PROVIDER=cos</code>、<code>COS_SECRET_ID</code>、<code>COS_SECRET_KEY</code>、<code>COS_REGION</code>（例如 <code>ap-guangzhou</code>）与 <code>COS_BUCKET</code>。</p>
               <p><code>COS_BUCKET</code> 必须填写带 APPID 的完整桶名（例如 <code>mybucket-1250000000</code>）。未单独适配的平台可选择 <code>OBJECT_STORAGE_PROVIDER=s3</code>，并提供 HTTPS <code>S3_ENDPOINT</code>、地域、桶名和 SigV4 凭据；通用接口要求兼容 path-style 请求。文件顺序为 R2 → 已选对象桶 → D1（≤1 MiB）/KV（≤18 MiB）/易失内存（≤4 MiB）；对象存储状态灯会执行只读连通探测。</p>
               <p>EdgeOne/OSS 静态部署仅提供前端，不会自动执行 Pages Functions；D1 中的账户和博客共享数据不会迁移到 COS。</p>
+              <p className="text-xs text-slate-600 dark:text-slate-300">{tx('普通文件上传接口允许单文件最大 90 MiB；浏览器上传等待上限约 10 分钟，不支持断点续传。大文件跨设备可用必须成功保存到 R2/COS/OSS/S3；若仅回退到 IndexedDB，只在原设备可访问。')}</p>
             </div>
           </div>
 
@@ -388,6 +393,7 @@ export const GuideSection: React.FC = () => {
               <p>设置 <code>OBJECT_STORAGE_PROVIDER=oss</code>、<code>OSS_ACCESS_KEY_ID</code>、<code>OSS_ACCESS_KEY_SECRET</code>、<code>OSS_REGION</code>（例如 <code>cn-hangzhou</code>）与 <code>OSS_BUCKET</code>。</p>
               <p>文件顺序为 R2 → OSS → D1（≤1 MiB）/KV（≤18 MiB）/易失内存（≤4 MiB）。连通灯会发起只读 Bucket 请求；D1 账户、验证码和同步数据不会迁移到 OSS。</p>
               <p>OSS 静态托管只提供前端；请勿在浏览器客户端或公开静态资源中嵌入任何云存储密钥。</p>
+              <p className="text-xs text-slate-600 dark:text-slate-300">{tx('普通文件上传接口允许单文件最大 90 MiB；浏览器上传等待上限约 10 分钟，不支持断点续传。大文件跨设备可用必须成功保存到 R2/COS/OSS/S3；若仅回退到 IndexedDB，只在原设备可访问。')}</p>
             </div>
           </div>
         </div>
