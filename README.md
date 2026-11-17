@@ -11,10 +11,9 @@
   * 支持用户名/密码注册与邮箱验证码注册；推荐邮箱注册，忘记密码时可用注册邮箱验证码重置。
   * 账户资料与 PBKDF2 密码哈希写入 Cloudflare D1（`DB`）；数据库缺失或写入失败会明确报错，不会创建只在本机存在的假账号。
   * 管理员用户名默认 `fox`；管理员自行设定至少 6 个字符的 `ADMIN_PASSWORD`，可使用数字、字母、符号或组合；另须独立配置至少 32 个字符的 `ADMIN_SESSION_SECRET`。没有固定默认密码，Cloudflare 变量只能在 Dashboard 修改。
-* **严格角色权限隔离与身份徽标**：
-  * 普通注册用户仅能发布博文与删除自己发布的博文，禁止编辑他人内容及书架/相册/影音。
-  * 博文详情与卡片高亮标注作者角色徽标，例如 `[用户名] (注册用户)` 与 `fox (超级管理员)`。
-  * 【备份区】、【邮箱中枢】、【系统设置】及【网站图床】严格对非管理员隐藏，普通用户无权访问。
+* **角色界面与管理员 API 会话**：
+  * 已实现的 Cloudflare Functions 管理 API 会校验由 `ADMIN_SESSION_SECRET` 签名的管理员会话；相关服务端操作不能仅凭前端隐藏界面获得授权。
+  * 前端包含用户角色显示及部分按角色显示的界面，但这不等于所有博客、书架、相册、影音等内容都具有后端逐条权限控制。请勿把当前应用当作具备完整多用户内容权限隔离的可信后端。
 * **16 款系统级怀旧与现代设计主题中心**：
   * 内置微软 Windows 98 怀旧、麦金塔 Classic Platinum、Matrix 极客终端、复古报纸羊皮纸、8-Bit 掌机像素、赛博朋克霓虹、蒸汽朋克黄铜、北欧极简原木、复古皮质笔记本、工程架构蓝图、现代流体玻璃、极光玻璃、新野兽派、柔雾粉彩、午夜奢华与编辑部留白等 16 款主题。
   * 彻底移除夜间深色模式强制覆盖。
@@ -23,18 +22,18 @@
 * **站内邮件发信与注册验证码**：
   * 默认优先使用 Resend Email API（HTTPS）发信，也兼容 SMTP、Brevo API、SendGrid API；实际投递仍取决于服务商账户、发件域名 DNS 和收件方策略。
   * Resend `email.received` webhook 经签名验证后会取回来信正文并写入 D1；需要在 Resend 配置 Receiving 域名/MX 与 webhook，并绑定 D1。
-  * 后台 API 连接检查不会发送邮件；单独的“发送测试邮件”才会真实投递到发件地址。前台邮件密钥保存在本机浏览器且未加密。
+  * 前台邮件设置（含密钥）保存在当前浏览器本机且未加密，只适合本机/手动邮件测试与显式选择前台配置的手动发信；它不会配置生产服务端。验证码及由后端触发的业务发信依赖 Pages Functions 的邮件环境变量/Secrets。后台 API 连接检查不发信，后台“发送测试邮件”才会真实投递。
 * **流量与上传性能极限优化**：
   * 全局图片采用懒加载 (`loading="lazy"`) 与异步解码 (`decoding="async"`)；
   * 标签页处于后台隐藏状态时（Page Visibility API）立即暂停网络长轮询与同步，彻底杜绝无操作流量浪费。
   * 文件上传采用真正的 `XMLHttpRequest.upload.onprogress` 实时字节速率计算与 25 秒超时保护，彻底杜绝伪进度条卡住问题。
 * **独立外部翻译 API 配置**：
   * 快速在线互译助手自带独立的“保存外部翻译 API 配置”按键，配置即时生效并持久化。
-* **备份区 (WebDAV Disaster Recovery)**：
-  * 支持标准 WebDAV 协议（服务器地址、端口默认 443、用户名、应用密码），一键全站结构化快照备份与精准回滚。
+* **备份区 (WebDAV)**：
+  * 浏览器端直接访问 WebDAV，适合小型结构化数据/文本备份；当前没有大型媒体的可靠分块续传保障，跨域、服务器限制和单次传输时限都会影响可用性。大型图片/视频可能超时、卡住或失败，不应视为可靠的大文件灾备通道。
 * **深层国际化多语言支持**：
   * 支持 **中文简体 (zh-CN)、中文繁体 (zh-TW)、英语 (en-US)、韩语 (ko-KR)、阿拉伯语 (ar-SA)、印地语 (hi-IN)**。
-  * 覆盖全站导航、设置按键、详细说明与部署指南。
+  * 可在顶部导航的语言切换按钮循环切换简体中文、繁体中文、英语、韩语、阿拉伯语与印地语；翻译覆盖范围依各页面字典实现而异，并非保证每一处用户内容或所有文案均已翻译。
 
 ---
 
@@ -49,26 +48,26 @@
    * **Build command**: `npm run build`
    * **Build output directory**: `dist`
 4. 部署成功后，进入 **Settings** -> **Functions** -> **Bindings** 绑定资源：
-     * **D1 Database 绑定**：变量名称填写 `DB`，存储注册账户、注册/重置验证码和限流记录、共享同步 JSON，以及 Resend 收到的站内邮件正文；账户、重置和收件箱功能必须绑定。
+     * **D1 Database 绑定**：名称填写 `DB`；用于用户账户/密码重置、验证码及限流记录、管理员跨设备共享同步和 Resend webhook 收件。注册账户与密码重置需 D1；验证码可在代码支持范围内回退 KV，但没有 D1 的情况下并不提供完整账户/同步功能。
    * **R2 Bucket 绑定**：变量名称填写 `R2_BUCKET`，用于应用文件上传；无 R2 时可回退 D1 文件表，超大/不适用场景不保证。
-   * **KV Namespace 绑定**：变量名称填写 `KV`，仅作为兼容回退/临时数据层；正常验证码和共享同步优先使用 D1。KV 有日写入额度，绑定不代表写入额度充足。
+   * **KV Namespace 绑定**：名称填写 `KV`，作为兼容回退/临时数据层；验证码和共享同步在 D1 不可用时可回退到 KV。KV 有日写入额度，绑定不代表写入额度充足。
    * **环境变量设置 (Environment Variables)**：
      * `ADMIN_USERNAME`：自定义管理员账号名（默认 `fox`）。
      * `ADMIN_PASSWORD`：管理员自行选择的生产登录密码，至少 6 个字符，可用数字、字母、符号或组合；未设置时管理员登录被拒绝。仅在 Cloudflare Pages 的 Variables and Secrets 中设置或修改。
      * `ADMIN_SESSION_SECRET`：必须独立设置至少 32 个字符的高熵随机 Secret，用于签发/验证最长 7 天的 API 会话；它不是登录密码，不能用 `ADMIN_PASSWORD` 替代，缺少或过短会 fail closed。
-     * 邮件与收件变量：按下方“邮件配置”设置 Resend API Key、发件地址和 webhook 签名 Secret。
+     * 邮件与收件变量：按下方“邮件配置”设置所用服务端 provider、凭据和发件地址；Resend 收件另需 D1、Resend Receiving 域及 webhook 签名 Secret。
 
 ---
 
 ### 管理员登录与云端 API 权限
 
-Cloudflare 部署时，管理员自行设置至少 6 个字符的 `ADMIN_PASSWORD`（可为数字、字母或其他字符），并单独设置至少 32 个字符的随机 `ADMIN_SESSION_SECRET`。二者用途不同，登录密码不能替代会话签名密钥。成功登录会签发有效期 7 天的签名令牌，保存在当前浏览器的 `localStorage`，关闭并重新打开浏览器仍可恢复会话；只有显式退出或服务端明确返回未授权时才清除。网络中断、HTML 错误页或临时 5xx 不会被误判成密码错误并强制退出。服务端会在应用启动、恢复网络或重新切回前台时验证会话，不进行分钟级后台轮询。邮件发送、用户管理与 D1 共享同步 API 仍由服务端校验签名及有效期。缺少任一变量时管理员登录会 fail closed；不会免密直登。Cloudflare 部署变量只能在 Dashboard 修改，应用前台设置不能更改平台 Secret。纯静态部署没有 Cloudflare Functions，无法启用这些服务端权限与 API。
+Cloudflare Pages Functions 从部署环境读取至少 6 字符的 `ADMIN_PASSWORD` 和独立的至少 32 字符 `ADMIN_SESSION_SECRET`；登录签发最长 7 天的签名会话，相关 API 验证签名及有效期。前端保存令牌，并会在应用启动、网络恢复或切回前台时检查会话。缺少有效密码或会话密钥时不能完成管理员登录。生产值应在 Cloudflare Pages Variables and Secrets 配置，前端设置不能更改平台 Secret。此鉴权只保护代码中明确校验会话的管理 API，不代表博客、书架、相册、影音等所有数据都具备后端逐用户权限控制。纯静态部署没有 Pages Functions，无法提供这些 API。
 
 ---
 
-### 2. Cloudflare Pages 一键直接上传部署 (Direct Upload)
+### 2. Cloudflare Pages 直接上传部署 (Direct Upload)
 
-适合免 Git 仓库一键直接交付**静态前端**。该 ZIP 不包含 `functions/`，不会自动部署 Functions 或创建 D1/R2/KV 绑定；它不具备注册、验证码邮件、后台邮件、共享同步与远程文件 API：
+适合免 Git 仓库交付**静态前端**。`npm run build` 会生成 `dist/` 与 `dist-upload.zip`，其中 ZIP 仅含静态产物。Direct Upload 不部署仓库 `functions/`，也不会创建 D1/R2/KV 绑定；注册/重置、服务端验证码与邮件、管理员云同步和远程文件 API 均不可用：
 1. 本地执行构建与打包命令：
    ```bash
    npm run build
@@ -83,7 +82,7 @@ Cloudflare 部署时，管理员自行设置至少 6 个字符的 `ADMIN_PASSWOR
 
 1. 在 Vercel 控制台点击 **Add New Project**，导入 Git 仓库。
 2. Framework Preset 选择 **Vite**，Build Command 填 `npm run build`，Output Directory 填 `dist`。
-3. 仓库内已内置 `vercel.json` 自动处理 SPA 静态路由分发。
+3. `vercel.json` 设置 `npm run build` 与 `dist` 输出，并将非静态路径回退到 `index.html`。其中 `/api/status` 规则只是路由/响应头配置，并未实现本项目 Cloudflare Pages Functions；此部署不提供本项目账户、验证码邮件、云同步或文件 API。
 
 ---
 
@@ -131,14 +130,14 @@ http://<你的服务器IP>:8080
 
 | 变量名 / 绑定键 | 平台 / 类型 | 实际用途 | 建议 |
 | :--- | :--- | :--- | :--- |
-| `DB` | Cloudflare Pages D1 Binding | 注册用户、注册/重置验证码与限流、共享同步 JSON、Resend 收件箱、R2 不可用时的文件回退表 | 账户、密码重置、收件箱与共享同步必绑 |
+| `DB` | Cloudflare Pages D1 Binding | 注册用户、注册/重置验证码与限流、共享同步 JSON、Resend 收件箱、R2 不可用时的文件回退表 | 注册/重置、收件箱及 D1 主存储同步需要 |
 | `R2_BUCKET` | Cloudflare Pages R2 Binding | 文件上传对象与下载读取 | 推荐 |
-| `KV` | Cloudflare Pages KV Binding | 兼容回退及临时数据；不是主博客数据库，免费配额可能限制写入 | 可选 |
+| `KV` | Cloudflare Pages KV Binding | D1 不可用时验证码/共享同步的兼容回退及临时数据；不是主博客数据库，免费配额可能限制写入 | 可选 |
 | `ADMIN_USERNAME` | Pages Environment Variable | 管理员账号名，默认 `fox` | 推荐设置 |
 | `ADMIN_PASSWORD` | Pages Secret | 管理员自行设定的登录密码；至少 6 个字符，字符类型不限。未设置则管理员登录被拒绝 | 必须设置 |
 | `ADMIN_SESSION_SECRET` | Pages Secret | 独立 HMAC 会话签名密钥；至少 32 个字符；不以管理员密码回退 | 必须单独设置 |
 | `MAIL_PROVIDER` | Pages Environment Variable | `resend`（推荐）、`smtp`、`brevo` 或 `sendgrid` | 推荐明确设置为 `resend` |
-| `RESEND_API_KEY` | Pages Secret | Resend HTTPS API 凭据；用于发信、域名连接检查和取回收件正文 | Resend 主通道必填；权限需覆盖域名读取与 Receiving |
+| `RESEND_API_KEY` | Pages Secret | Resend HTTPS API 凭据；用于后端发信和取回收件正文 | Resend 主通道必填；权限需覆盖域名读取与 Receiving |
 | `MAIL_SENDER` | Pages Environment Variable | 后台发件人，例如 `Fox3 <no-reply@verified-domain>`；Resend 要求使用已验证且启用发送的域名 | 必填 |
 | `RESEND_WEBHOOK_SECRET` | Pages Secret | Resend `email.received` webhook 的 Signing Secret（`whsec_...`） | 启用站内收件必填 |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_SECURITY` / `SMTP_USER` / `SMTP_PASS` | Pages Variables/Secrets | 可选 SMTP 备用通道；Resend SMTP 示例：`smtp.resend.com` / `465` / `ssl` / `resend` / Resend API Key | 仅选择 SMTP 时使用；密码用 Secret |
@@ -149,13 +148,19 @@ http://<你的服务器IP>:8080
 | `OSS_ACCESS_KEY_ID` / `OSS_ACCESS_KEY_SECRET` / `OSS_REGION` / `OSS_BUCKET` | Pages Variables/Secrets | 阿里 OSS AccessKey ID/Secret、地域（如 `cn-hangzhou`）、Bucket 名称 | 选择 OSS 后配置；AccessKey 设为 Secrets |
 | `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` / `S3_REGION` / `S3_BUCKET` / `S3_ENDPOINT` | Pages Variables/Secrets | 通用 AWS SigV4 S3-compatible endpoint、地域、Bucket 与密钥 | 为未单独适配的平台提供对象存储后备；需支持 path-style 请求 |
 
-### Resend 发信、连接测试与收件配置
+### Resend 发信与收件配置
 
-在 Resend 中创建 API Key 并验证发件域名。Cloudflare Pages 的 Functions Variables/Secrets 至少设置 `MAIL_PROVIDER=resend`、`RESEND_API_KEY` 和 `MAIL_SENDER`。推荐 API Key 具备此功能所需的域名读取与收件读取权限；仅发送权限的 Key 仍可能能发邮件，但不能通过域名连接检查或读取 inbound 邮件。
+在 Resend 中创建 API Key 并验证发件域名。Cloudflare Pages 的 Functions Variables/Secrets 至少设置 `MAIL_PROVIDER=resend`、`RESEND_API_KEY` 和 `MAIL_SENDER`。这些服务端变量用于验证码和后台触发的业务邮件；前端 provider/key 只保存在本机，不能代替后端配置。建议 API Key 至少具有发信和读取 inbound 内容所需权限；连接指示状态以已部署的 `/api/mail/status` 返回的服务端配置为准，不代表 Resend Dashboard 中的域名、MX、Receiving 或 webhook 已完成实际验证。
 
-邮箱中枢的“检查 Resend API 连接”会以 HTTPS 调用 `GET https://api.resend.com/domains`，不会发送邮件；绿色连接结果只表示 API Key 可读取域名，面板还会检查 `MAIL_SENDER` 域名是否存在并启用发送。要验证实际发信，请另按“发送后台测试邮件”，它会真实投递至发件地址。Resend API 发送端点为 `POST https://api.resend.com/emails`。
+邮箱中枢已移除独立的“检查 Resend API 连接”按钮，避免将凭据格式检查误当作真实连通。页面后台状态灯读取 `/api/mail/status` 的服务端变量配置；“发送后台测试邮件”会实际向 `MAIL_SENDER` 投递测试邮件。Resend API 正式发送端点为 `POST https://api.resend.com/emails`。
 
-收件配置步骤：登录 `resend.com`，进入左侧菜单 **API Keys**，点击 **Create API Key**，选好权限和域名后创建，并立即复制 `RESEND_API_KEY`。接着进入 **Webhooks** 创建新 Webhook，Endpoint / URL 填你自己的 Pages Functions 地址，例如 `https://你的项目名.pages.dev/api/webhook`，监听事件选择 `email.received`。创建成功后复制 Resend 返回的 signing secret，保存为 `RESEND_WEBHOOK_SECRET`。然后在 **Domains** 添加域名；要收邮件，需在域名详情开启 **Receiving**，并按 Resend 提示在域名 DNS 中配置 MX 记录。Webhook URL 不是 Resend 提供的，而是你自己的 Pages Functions 接口；`RESEND_API_KEY` 和 `RESEND_WEBHOOK_SECRET` 创建时通常只完整显示一次，遗失后需重新生成。不要把密钥写进前端代码或公开仓库，应保存到 Cloudflare Pages 环境变量/Secrets。当前接口同时兼容 `/api/webhook` 与旧路径 `/api/mail/webhook`。收到事件后，Functions 会验证 Svix 签名和时间戳，再通过 Resend Receiving API 获取邮件正文并保存进 D1；管理员邮件中枢读取 `/api/mail/inbox` 展示来信。配置变量本身不代表 Resend Dashboard 已启用收件，状态灯会等到实际收到邮件后才显示“已收到邮件”。D1 自动清理 180 天前的邮件并最多保留最近 500 封；当前只保留附件元数据，不下载附件文件。
+收件配置步骤：登录 `resend.com`，进入左侧菜单 **API Keys**，点击 **Create API Key**，选好权限和域名后创建，并立即复制 `RESEND_API_KEY`。接着进入 **Webhooks** 创建新 Webhook，Endpoint / URL 填你自己的 Pages Functions 地址，例如 `https://你的项目名.pages.dev/api/webhook`，监听事件选择 `email.received`。创建成功后复制 Resend 返回的 signing secret，保存为 `RESEND_WEBHOOK_SECRET`。然后在 **Domains** 添加域名；要收邮件，需在域名详情开启 **Receiving**，并按 Resend 提示在域名 DNS 中配置 MX 记录。Webhook URL 不是 Resend 提供的，而是你自己的 Pages Functions 接口；`RESEND_API_KEY` 和 `RESEND_WEBHOOK_SECRET` 创建时通常只完整显示一次，遗失后需重新生成。不要把密钥写进前端代码或公开仓库，应保存到 Cloudflare Pages 环境变量/Secrets。当前接口同时兼容 `/api/webhook` 与旧路径 `/api/mail/webhook`。收到事件后，Functions 会验证 Svix 签名和时间戳，再通过 Resend Receiving API 获取邮件正文并保存进 D1；管理员邮件中枢读取 `/api/mail/inbox` 展示来信。收件指示灯读取 `/api/mail/status` 中 inbound 所需变量是否配置；它仅表示部署端配置就绪，不验证 Resend Dashboard 的 Receiving、域名 MX 或 webhook 是否真实生效，也不代表已收到邮件。D1 自动清理 180 天前的邮件并最多保留最近 500 封；当前只保留附件元数据，不下载附件文件。
+
+### WebDAV 备份与远端文件管理
+
+在“备份区”配置 HTTPS WebDAV 服务地址、目录、账号和应用专用密码后，应用通过本站 Cloudflare Pages Functions 的 `/api/webdav/*` 代理执行 DAV 操作：服务端认证探测、`PROPFIND` 远端列表、`PUT` 上传、`GET` 下载和 `DELETE` 删除。连接状态灯只在服务端真实认证请求成功后转绿；远端文件列表直接从 WebDAV 读取，因此同一目录也可在 WebDAV 服务商界面查看。服务端代理要求有效管理员会话，静态 Direct Upload/Vercel 部署不提供该 Functions API。
+
+当前本站生成的是带版本号的 fox3 JSON 数据快照；它能恢复应用记录/设置，但并不把照片、视频、书籍附件等二进制本体打包进 JSON。远端已有任意扩展名文件会按原文件名/格式列出，管理员也可手动上传不超过 25 MiB 的本地原格式文件，并从本站下载或删除；本站的“恢复”仅适用于本站格式的 JSON 快照，其他文件需下载后在对应功能中重新导入。目前代理单文件上限 25 MiB、无断点续传，浏览器到 Pages Functions/远端的网络时限也可能导致传输失败；先选择文章、文字与设置文件，图片/视频或大电子书容易卡住或超时，不应将其当作可靠的大型媒体灾备方案。WebDAV 凭据只保存在当前浏览器本机，不写入共享同步载荷；文件列表元数据可随应用状态保存/同步，但换设备需再次配置凭据并重新读取 WebDAV 目录。
 
 ### 注册账户与密码重置
 
@@ -168,8 +173,8 @@ http://<你的服务器IP>:8080
 - **Cloudflare D1 (`DB`)**：`fox3_users` 保存注册账户和 PBKDF2 密码哈希；`fox3_email_verifications`、`fox3_password_resets`、`fox3_email_ip_rates` 用于注册/找回验证码及限流；`fox3_inbound_emails` 保存经过 Resend webhook 验签并拉取的来信正文和附件元数据；`fox3_sync` 保存管理员手动同步的共享 JSON（包括当前全局主题模式）；`fox3_files` 是无 R2 时的文件回退表。邮件凭据/WebDAV 凭据不在共享同步载荷中。
 - **Cloudflare R2 (`R2_BUCKET`)**：上传文件对象的首选存储，下载同样优先从 R2 读取；单文件上传上限为 90 MiB，并拒绝常见可执行/活动内容扩展名。R2 不可用时可按 `OBJECT_STORAGE_PROVIDER` 选择服务端 Tencent COS、Alibaba OSS 或通用 AWS SigV4 S3-compatible 对象存储后备。COS/OSS/S3 密钥只配置在 Pages Functions Secrets，绝不写入浏览器；COS Bucket 要填写带 APPID 的完整桶名（`bucketname-APPID`），COS region 形如 `ap-guangzhou`；OSS region 形如 `cn-hangzhou`。通用 S3 需提供 HTTPS endpoint、地域、桶名及密钥，并使用适配器支持的 path-style 请求。外部对象存储仍由当前 Cloudflare Pages Functions 代为签名读写，不会自动迁移 D1 用户/博客数据，也不代表前端静态部署已带有后端 API。对象存储失败时，文件不超过 1 MiB 才可回退 D1 文件表；KV 回退上限为 18 MiB；最后的 Worker 内存回退仅适用于 4 MiB 以内文件。内存回退会在实例重启/切换后丢失，无法视为持久存储；D1/KV 回退也不是等价的大文件对象存储。超过可用后备容量时 API 返回 JSON 503，不会报告虚假成功。
 - **Cloudflare KV (`KV`)**：仅作兼容回退/短期记录；正常验证码和共享同步优先 D1，只有 D1 不可用时才回退。成功发送邮件的回执由 API 返回并保存在前端应用状态，不再额外写 KV。KV 免费配额仍可能在回退数据写入频繁时耗尽。
-- **邮箱配置归属**：前台邮箱配置只保存在配置它的浏览器；后台环境变量适用于服务端/注册邮件。二者可分别检查或发送测试邮件，手动站内信可明确选择使用哪一方。Resend webhook 收件正文保存于 D1，应用不会通过 IMAP 轮询，也不会把 Email Routing 转发误认为本站收件。
-- **重要部署限制**：纯静态部署（例如 Pages Direct Upload、Vercel 静态目录、OSS 静态托管）不会自动带上 Cloudflare Pages Functions、D1/R2/KV 绑定或上述服务端 COS/OSS 适配代码；账户、验证码、服务端邮件和云同步 API 需要 Pages Functions 运行环境与相应绑定。当前 COS/OSS 是文件对象层后备，不是数据库或完整后端部署适配器。未配置后端时仅能使用本地功能或得到明确的服务错误。自动云端同步默认关闭；开启后仅在应用数据变化时写入，不会按固定间隔轮询，管理员也可手动触发同步。
+- **邮箱配置归属与收信范围**：前台邮件配置只保存在设置它的浏览器（本机存储且未加密）；前台配置只能用于管理员显式选择前台来源的手动邮件/本机测试，不会令验证码或后端自动触发的业务邮件生效。验证码与后端业务发信使用 Pages Functions 环境变量/Secrets。手动邮件也可选择后台环境变量。前台测试会真实发送测试邮件至配置的发件地址；后台连接检查只探测服务状态，不发信。Resend `email.received` webhook 验签并通过 Resend API 拉取正文后才写入 D1 收件箱；它不是通用个人邮箱 IMAP 收件，也不会把发往管理员个人邮箱的邮件或 Email Routing/普通转发自动导入本站。来信必须进入已配置 Resend Receiving 的域名并触发有效 webhook；转发到管理员个人邮箱仅是外部邮箱投递，不等于本站收件。
+- **跨设备同步、静态部署与权限边界**：跨设备共享同步需要 Cloudflare Pages Functions API 与可用的 D1（主要存储）或代码支持的 KV 回退，并需要管理员登录；在设置中显式启用“自动同步”后，数据变更才会触发同步，亦可手动同步。浏览器 `BroadcastChannel` 仅用于同浏览器跨标签页，不是跨设备云同步。纯静态部署（Pages Direct Upload、Vercel 静态目录、OSS 等）只有前端文件，不具备 Pages Functions、D1/R2/KV 绑定或本项目后端 COS/OSS 适配，不能启用上述服务端 API；只能使用浏览器本地功能，或看到 API 不可用。后端只在实现了会话校验的 API 上执行管理员鉴权，不应据此宣称用户文件管理具有完整、可信的后端逐用户权限强制。
 
 ---
 
@@ -194,4 +199,4 @@ npm run preview
 ## 📝 管理员账号
 
 * **用户名**：默认为 `fox`，也可通过 `ADMIN_USERNAME` 配置。
-* **密码**：没有固定默认密码。生产管理员自行设置至少 6 个字符的 `ADMIN_PASSWORD`（可为数字或任意字符），并独立配置至少 32 个字符的 `ADMIN_SESSION_SECRET`；应用页面不能更改 Cloudflare Secret。
+* **密码**：没有固定的生产默认密码。Cloudflare Pages Functions 使用部署端至少 6 字符的 `ADMIN_PASSWORD` 与独立至少 32 字符的 `ADMIN_SESSION_SECRET`；应用页面不能更改 Cloudflare Secret。本地前端偏好并不等同于生产服务端凭据。

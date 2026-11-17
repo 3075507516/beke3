@@ -51,6 +51,8 @@ export const BookshelfSection: React.FC = () => {
   const currentViewMode: ViewMode = viewModes['books'] || 'original';
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const canManageBook = (book: Book) => currentUser?.role === 'admin' || (Boolean(systemSettings.allowUserMediaManagement) && Boolean(currentUser) && ((Boolean(book.ownerId) && book.ownerId === currentUser?.id) || (!book.ownerId && Boolean(book.ownerUsername) && book.ownerUsername === currentUser?.username)));
+  const canUploadBooks = currentUser?.role === 'admin' || (Boolean(currentUser) && Boolean(systemSettings.allowUserMediaManagement));
 
   const handleBookFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -126,6 +128,8 @@ export const BookshelfSection: React.FC = () => {
           id: `book-${Date.now()}-${i}`,
           title: file.name, // Display the exact uploaded filename as requested
           author: currentUser?.username || 'fox',
+          ownerId: currentUser?.id,
+          ownerUsername: currentUser?.username,
           format,
           cover: coverOptions[format] || coverOptions.EPUB,
           description: `原文件名：${file.name} (${(file.size / 1024).toFixed(1)} KB)`,
@@ -177,7 +181,7 @@ export const BookshelfSection: React.FC = () => {
   const handleBatchDelete = () => {
     if (selectedIds.length === 0) return;
     if (window.confirm(`确认批量删除选中的 ${selectedIds.length} 本书籍吗？`)) {
-      setBooks(prev => prev.filter(b => !selectedIds.includes(b.id)));
+      setBooks(prev => prev.filter(b => !selectedIds.includes(b.id) || !canManageBook(b)));
       setSelectedIds([]);
     }
   };
@@ -227,7 +231,7 @@ export const BookshelfSection: React.FC = () => {
   const handleDeleteBook = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (window.confirm('确认下架并删除该书籍吗？')) {
-      setBooks(prev => prev.filter(b => b.id !== id));
+      setBooks(prev => prev.filter(b => b.id !== id || !canManageBook(b)));
       if (readingBook?.id === id) setReadingBook(null);
     }
   };
@@ -474,7 +478,7 @@ export const BookshelfSection: React.FC = () => {
             </button>
           </div>
 
-          {currentUser?.role === 'admin' && (
+          {canUploadBooks && (
             <button
               onClick={() => setIsUploading(true)}
               className="flex items-center gap-1.5 px-4 py-2 bg-sky-500 hover:bg-sky-600 text-white text-xs font-semibold rounded-xl shadow-md transition"
@@ -584,6 +588,15 @@ export const BookshelfSection: React.FC = () => {
                   >
                     <Download className="w-4 h-4" />
                   </button>
+                  {canManageBook(book) && (
+                    <button
+                      onClick={e => handleDeleteBook(book.id, e)}
+                      className="p-2 text-slate-400 hover:text-rose-500"
+                      title="删除书籍"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
                   <span className="text-xs text-sky-500 font-medium hidden sm:inline">在线阅读</span>
                 </div>
               </div>
@@ -622,7 +635,7 @@ export const BookshelfSection: React.FC = () => {
                     <Download className="w-3.5 h-3.5" />
                   </button>
 
-                  {currentUser?.role === 'admin' && (
+                  {canManageBook(book) && (
                     <button
                       onClick={e => handleDeleteBook(book.id, e)}
                       className="p-1 bg-black/60 hover:bg-rose-600 text-white rounded transition"

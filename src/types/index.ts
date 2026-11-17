@@ -29,6 +29,8 @@ export interface Post {
 
 export interface Book {
   id: string;
+  ownerId?: string;
+  ownerUsername?: string;
   title: string;
   author: string;
   format: 'EPUB' | 'PDF' | 'TXT' | 'MOBI' | 'AZW3' | string;
@@ -51,6 +53,8 @@ export interface PhotoFolder {
 
 export interface Photo {
   id: string;
+  ownerId?: string;
+  ownerUsername?: string;
   title: string;
   url: string;
   thumbnail?: string;
@@ -67,6 +71,8 @@ export interface Photo {
 
 export interface MediaItem {
   id: string;
+  ownerId?: string;
+  ownerUsername?: string;
   type: 'audio' | 'video';
   title: string;
   artist: string;
@@ -244,6 +250,7 @@ export interface SystemSettings {
   hideNonBlogForGuests: boolean;
   emailRegistrationOnly: boolean;
   allowRegistration: boolean;
+  allowUserMediaManagement?: boolean;
   totalCapacityBytes: number;
   usedCapacityBytes: number;
   storageConfig: StorageConfig;

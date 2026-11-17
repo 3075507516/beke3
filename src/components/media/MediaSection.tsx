@@ -84,6 +84,8 @@ export const MediaSection: React.FC = () => {
   const currentViewMode: ViewMode = viewModes['media'] || 'original';
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const canManageMedia = (item: MediaItem) => currentUser?.role === 'admin' || (Boolean(systemSettings.allowUserMediaManagement) && Boolean(currentUser) && ((Boolean(item.ownerId) && item.ownerId === currentUser?.id) || (!item.ownerId && Boolean(item.ownerUsername) && item.ownerUsername === currentUser?.username)));
+  const canUploadMedia = currentUser?.role === 'admin' || (Boolean(currentUser) && Boolean(systemSettings.allowUserMediaManagement));
 
   const togglePlay = (item: MediaItem) => {
     if (currentPlaying?.id === item.id) {
@@ -112,7 +114,7 @@ export const MediaSection: React.FC = () => {
   const handleBatchDelete = () => {
     if (selectedIds.length === 0) return;
     if (window.confirm(`确认批量删除选中的 ${selectedIds.length} 个音视频吗？`)) {
-      setMedia(prev => prev.filter(m => !selectedIds.includes(m.id)));
+      setMedia(prev => prev.filter(m => !selectedIds.includes(m.id) || !canManageMedia(m)));
       setSelectedIds([]);
     }
   };
@@ -197,6 +199,8 @@ export const MediaSection: React.FC = () => {
       type: isVideo ? 'video' : 'audio',
       title: file.name.replace(/\.[^/.]+$/, ''),
       artist: currentUser?.username || 'fox',
+      ownerId: currentUser?.id,
+      ownerUsername: currentUser?.username,
       src: uploaded.url,
       cover: posterCover,
       duration: detectedDuration,
@@ -213,7 +217,7 @@ export const MediaSection: React.FC = () => {
   const handleDeleteMedia = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (window.confirm('确认删除该音视频吗？')) {
-      setMedia(prev => prev.filter(m => m.id !== id));
+      setMedia(prev => prev.filter(m => m.id !== id || !canManageMedia(m)));
       if (currentPlaying?.id === id) {
         setCurrentPlaying(null);
         setIsPlaying(false);
@@ -291,7 +295,7 @@ export const MediaSection: React.FC = () => {
             </button>
           </div>
 
-          {currentUser?.role === 'admin' && (
+          {canUploadMedia && (
             <button
               onClick={() => setIsUploading(true)}
               className="flex items-center gap-1.5 px-4 py-2 bg-sky-500 hover:bg-sky-600 text-white text-xs font-semibold rounded-xl shadow-md transition"
@@ -501,7 +505,7 @@ export const MediaSection: React.FC = () => {
                 </div>
               </div>
 
-              {currentUser?.role === 'admin' && (
+              {canManageMedia(item) && (
                 <button
                   onClick={e => handleDeleteMedia(item.id, e)}
                   className="p-2 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950 transition"
@@ -586,6 +590,8 @@ export const MediaSection: React.FC = () => {
                     type: onlineType,
                     title: onlineTitle.trim() || '未命名网络音视频',
                     artist: onlineArtist.trim() || currentUser?.username || 'fox',
+                    ownerId: currentUser?.id,
+                    ownerUsername: currentUser?.username,
                     src: onlineUrl.trim(),
                     cover:
                       onlineCover.trim() ||

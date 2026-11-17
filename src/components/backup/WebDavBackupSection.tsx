@@ -1,353 +1,220 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import {
-  Cloud,
-  Database,
-  RotateCcw,
-  HardDrive,
-  CheckCircle,
-  FileArchive,
-  Trash2,
-  RefreshCw,
-  ShieldCheck,
-  FileText,
-  BookOpen,
-  Image,
-  Sliders,
-  AlertTriangle,
-  FolderSync,
-  Save,
+  AlertTriangle, BookOpen, CheckCircle, Cloud, Database, Download, FileArchive,
+  FileText, HardDrive, Image as ImageIcon, Loader2, RefreshCw, RotateCcw,
+  Save, ShieldCheck, Trash2, Upload, Video,
 } from 'lucide-react';
 import { WebDavBackupItem } from '../../types';
+import { listWebDavFiles } from '../../utils/webdav';
+
+function FileKindIcon({ name }: { name: string }) {
+  const ext = name.split('.').pop()?.toLowerCase();
+  if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].includes(ext || '')) return <ImageIcon className="w-5 h-5 text-fuchsia-500" />;
+  if (['mp4', 'mov', 'webm', 'mkv', 'avi'].includes(ext || '')) return <Video className="w-5 h-5 text-purple-500" />;
+  if (['epub', 'pdf', 'mobi', 'azw3', 'txt'].includes(ext || '')) return <BookOpen className="w-5 h-5 text-amber-500" />;
+  if (ext === 'zip') return <FileArchive className="w-5 h-5 text-sky-500" />;
+  return <FileText className="w-5 h-5 text-slate-500" />;
+}
 
 export const WebDavBackupSection: React.FC = () => {
   const {
-    webDavConfig,
-    updateWebDavConfig,
-    webDavBackups,
-    setWebDavBackups,
-    performBackup,
-    performRestore,
-    currentUser,
-    posts,
-    books,
-    photos,
-    media,
-    systemSettings,
+    webDavConfig, updateWebDavConfig, webDavBackups, setWebDavBackups,
+    performBackup, performRestore, deleteWebDavBackup, currentUser,
+    systemSettings, testWebDavConnection, webDavConnectionState, transferProgress, uploadWebDavRawFile, downloadWebDavRawFile,
   } = useApp();
-
   const [formConfig, setFormConfig] = useState(webDavConfig);
-  // Keep formConfig synchronized with webDavConfig
-  React.useEffect(() => {
-    setFormConfig(webDavConfig);
-  }, [webDavConfig]);
-
-  const [isSaved, setIsSaved] = useState(false);
-  const [testingConnection, setTestingConnection] = useState<boolean>(false);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const [backupScope, setBackupScope] = useState<'full' | 'posts' | 'books' | 'media' | 'settings'>('full');
+  const rawFileInput = React.useRef<HTMLInputElement>(null);
+  const isAdmin = currentUser?.role === 'admin';
 
-  // Strict accurate connection state derived directly from webDavConfig
-  const isConnected = Boolean(
-    webDavConfig.serverUrl &&
-    webDavConfig.username &&
-    webDavConfig.password &&
-    webDavConfig.password !== '********' &&
-    webDavConfig.password.length >= 6
-  );
-
-  // Handle Save WebDAV Configuration Button
-  const handleSaveConfig = () => {
-    updateWebDavConfig(formConfig);
-    setIsSaved(true);
-    const isValid = Boolean(
-      formConfig.serverUrl &&
-      formConfig.username &&
-      formConfig.password &&
-      formConfig.password !== '********' &&
-      formConfig.password.length >= 6
-    );
-    if (isValid) {
-      setActionMessage('WebDAV 接入配置已持久化保存并与设置区实时同步！连接验证通过。');
-    } else {
-      setActionMessage('配置已保存。当前处于未连接状态：请完整填写有效 WebDAV 授权密码。');
+  useEffect(() => setFormConfig(webDavConfig), [webDavConfig]);
+  const refreshRemoteFiles = useCallback(async (config = formConfig) => {
+    const connected = await testWebDavConnection(config);
+    if (!connected) throw new Error('WebDAV 连通性验证失败，请检查服务地址、账号、应用密码及服务端部署');
+    const items = await listWebDavFiles(config);
+    setWebDavBackups(items);
+    return items;
+  }, [formConfig, setWebDavBackups, testWebDavConnection]);
+  useEffect(() => {
+    if (webDavConfig.serverUrl && webDavConfig.username && webDavConfig.password && webDavConfig.password !== '********') {
+      void refreshRemoteFiles(webDavConfig).catch(error => setActionError(error?.message || '无法读取 WebDAV 远端文件'));
     }
-    setTimeout(() => setIsSaved(false), 3000);
-  };
+    // Load the actual remote directory once on entering the page; never infer connectivity from filled fields.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  // Test WebDAV connection genuinely
-  const handleTestConnection = () => {
-    setTestingConnection(true);
+  const handleSaveConfig = async () => {
+    updateWebDavConfig(formConfig);
     setActionMessage(null);
-    setTimeout(() => {
-      setTestingConnection(false);
-      if (formConfig.serverUrl && formConfig.username && formConfig.password) {
-        setActionMessage('WebDAV 连通性测试通过！远程目录握手认证成功。');
-      } else {
-        setActionMessage('连通性测试未通过：请检查 WebDAV 账号、专用密码是否填写完整。');
-      }
-    }, 600);
-  };
-
-  const handleCreateBackup = async () => {
-    await performBackup(backupScope);
-    const scopeNames = {
-      full: '全站全量数据',
-      posts: '博客文章库',
-      books: '电子书架库',
-      media: '多媒体与相册库',
-      settings: '系统配置中心',
-    };
-    setActionMessage(`${scopeNames[backupScope]} 已打包并成功加密备份至 WebDAV！`);
-  };
-
-  const handleRestoreBackup = async (item: WebDavBackupItem) => {
-    if (
-      !window.confirm(
-        `确定要从备份包【${item.name}】选择还原系统数据吗？`
-      )
-    ) {
+    setActionError(null);
+    if (!(await testWebDavConnection(formConfig))) {
+      setActionError('配置已保存到本机，但远端 WebDAV 验证失败；状态灯不会显示已连接。');
       return;
     }
+    try {
+      const files = await listWebDavFiles(formConfig);
+      setWebDavBackups(files);
+      setActionMessage(`WebDAV 已验证并读取远端目录，共 ${files.length} 个文件。`);
+    } catch (error: any) {
+      setActionError(error?.message || '已连通，但无法读取远端目录');
+    }
+  };
+  const handleRefresh = async () => {
+    setBusy(true);
+    setActionError(null);
+    try {
+      const files = await refreshRemoteFiles();
+      setActionMessage(`远端目录已刷新，共 ${files.length} 个文件。`);
+    } catch (error: any) { setActionError(error?.message || '刷新 WebDAV 目录失败'); }
+    finally { setBusy(false); }
+  };
+  const handleBackup = async () => {
+    if (!isAdmin || busy) return;
+    setBusy(true);
+    setActionError(null);
+    setActionMessage(null);
+    try {
+      await performBackup(backupScope);
+      const files = await listWebDavFiles(webDavConfig);
+      setWebDavBackups(files);
+      setActionMessage('备份已由 WebDAV 服务器确认接收。');
+    } catch (error: any) {
+      setActionError(error?.name === 'AbortError' ? '备份已停止；请刷新目录确认远端文件状态。' : error?.message || 'WebDAV 备份失败');
+    } finally { setBusy(false); }
+  };
+  const handleRawFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []);
+    event.target.value = '';
+    if (!files.length) return;
+    setBusy(true);
+    setActionError(null);
+    setActionMessage(null);
+    let uploaded = 0;
+    try {
+      for (const file of files) {
+        await uploadWebDavRawFile(file);
+        uploaded += 1;
+      }
+      const remote = await listWebDavFiles(webDavConfig);
+      setWebDavBackups(remote);
+      setActionMessage(`已将 ${uploaded} 个原格式文件上传至 WebDAV；远端目录已重新读取。`);
+    } catch (error: any) {
+      setActionError(error?.name === 'AbortError' ? `传输已停止；${uploaded} 个文件已完成，请刷新目录核对。` : error?.message || `上传中断；${uploaded} 个文件已完成，请刷新目录核对。`);
+    } finally { setBusy(false); }
+  };
+  const handleRestore = async (item: WebDavBackupItem) => {
+    if (!window.confirm(`将从远端下载并恢复“${item.name}”中的数据，继续吗？`)) return;
+    setBusy(true);
+    setActionError(null);
     const success = await performRestore(item.id);
-    if (success) {
-      setActionMessage(`数据已成功从 WebDAV 备份【${item.name}】选择性恢复完毕！`);
-    }
+    if (success) setActionMessage(`已从 ${item.name} 恢复快照数据。`);
+    else setActionError('恢复失败；请查看错误提示并确认文件属于 fox3 备份格式。');
+    setBusy(false);
   };
-
-  const handleDeleteBackup = (id: string) => {
-    if (window.confirm('确认在 WebDAV 中删除该备份快照文件吗？')) {
-      setWebDavBackups(prev => prev.filter(b => b.id !== id));
-      setActionMessage('备份快照已从 WebDAV 移除。');
-    }
+  const handleDelete = async (item: WebDavBackupItem) => {
+    if (!window.confirm(`确定从 WebDAV 远端永久删除“${item.name}”吗？`)) return;
+    setBusy(true);
+    setActionError(null);
+    const success = await deleteWebDavBackup(item.id);
+    if (success) setActionMessage(`已从 WebDAV 远端删除 ${item.name}。`);
+    else setActionError('远端删除失败；文件列表已保留。');
+    setBusy(false);
   };
+  const handleDownload = async (item: WebDavBackupItem) => {
+    setBusy(true);
+    setActionError(null);
+    try {
+      const blob = await downloadWebDavRawFile(item.path || item.name);
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = item.name;
+      anchor.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      setActionMessage(`已下载远端原文件：${item.name}`);
+    } catch (error: any) { setActionError(error?.name === 'AbortError' ? '原文件下载已停止。' : error?.message || '远端文件下载失败'); }
+    finally { setBusy(false); }
+  };
+  const configMatchesSaved = ['serverUrl', 'backupPath', 'username', 'password', 'port'].every(key =>
+    String((formConfig as any)[key] ?? '') === String((webDavConfig as any)[key] ?? '')
+  );
+  const connectionLabel = webDavConnectionState.status === 'connected'
+    ? configMatchesSaved ? `已验证连通 · ${new Date(webDavConnectionState.checkedAt).toLocaleTimeString()}` : '配置已修改，需保存并重新验证'
+    : webDavConnectionState.status === 'checking' ? '正在验证…'
+      : webDavConnectionState.status === 'error' ? '未连通：验证失败' : '未验证';
+  const connected = webDavConnectionState.status === 'connected' && configMatchesSaved;
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className={`p-5 rounded-3xl border shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 ${
-        systemSettings.transparentCards
-          ? 'bg-white/70 dark:bg-slate-900/70 backdrop-blur-md border-white/20'
-          : 'bg-white dark:bg-slate-900 border-slate-200/80 dark:border-slate-800'
-      }`}>
-        <div>
-          <h2 className="text-xl font-bold font-serif-sc text-slate-800 dark:text-slate-100 flex items-center gap-2">
-            <Cloud className="w-5 h-5 text-sky-500" />
-            <span>备份区 (WebDAV 容灾备份与恢复中心)</span>
-          </h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            外接通用 WebDAV 网盘，可视化管理远程备份文件，支持选择性备份与精准灾难恢复，预防服务器运营风险
-          </p>
+      <section className={`p-5 rounded-3xl border shadow-sm ${systemSettings.transparentCards ? 'bg-white/70 dark:bg-slate-900/70 backdrop-blur-md border-white/20' : 'bg-white dark:bg-slate-900 border-slate-200/80 dark:border-slate-800'}`}>
+        <div className="flex flex-col sm:flex-row justify-between gap-4">
+          <div>
+            <h2 className="text-xl font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2"><Cloud className="w-5 h-5 text-sky-500" />WebDAV 远端备份与文件管理</h2>
+            <p className="text-xs text-slate-500 mt-1">连接状态由真实服务端认证请求决定；仅管理员可执行远端操作。</p>
+          </div>
+          <span className={`inline-flex items-center gap-2 h-fit rounded-full px-3 py-1.5 text-xs font-semibold ${connected ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300' : webDavConnectionState.status === 'checking' ? 'bg-amber-50 text-amber-700' : 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300'}`}>
+            <span className={`w-2 h-2 rounded-full ${connected ? 'bg-emerald-500' : webDavConnectionState.status === 'checking' ? 'bg-amber-500 animate-pulse' : 'bg-rose-500'}`} />{connectionLabel}
+          </span>
         </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-5">
+          <label className="text-xs text-slate-500">WebDAV 地址
+            <input value={formConfig.serverUrl} onChange={e => setFormConfig({ ...formConfig, serverUrl: e.target.value })} placeholder="https://dav.example.com/dav/" className="mt-1 w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 font-mono text-xs text-slate-800 dark:text-slate-100" />
+          </label>
+          <label className="text-xs text-slate-500">备份目录
+            <input value={formConfig.backupPath} onChange={e => setFormConfig({ ...formConfig, backupPath: e.target.value })} placeholder="/fox3_backup/" className="mt-1 w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 font-mono text-xs text-slate-800 dark:text-slate-100" />
+          </label>
+          <label className="text-xs text-slate-500">账号
+            <input value={formConfig.username} onChange={e => setFormConfig({ ...formConfig, username: e.target.value })} className="mt-1 w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-xs text-slate-800 dark:text-slate-100" />
+          </label>
+          <label className="text-xs text-slate-500">应用专用密码
+            <input type="password" value={formConfig.password} onChange={e => setFormConfig({ ...formConfig, password: e.target.value })} autoComplete="new-password" className="mt-1 w-full px-3 py-2 rounded-xl border bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-xs text-slate-800 dark:text-slate-100" />
+          </label>
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-3 mt-4">
+          <p className="text-[11px] text-slate-500 flex items-center gap-2"><ShieldCheck className="w-4 h-4 text-emerald-500" />凭据仅保存在本浏览器，并通过管理员认证的 HTTPS API 使用；不要在共享设备保存密码。</p>
+          <div className="flex gap-2">
+            <button onClick={() => void handleSaveConfig()} disabled={!isAdmin || busy} className="inline-flex items-center gap-2 rounded-xl bg-sky-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"><Save className="w-4 h-4" />保存并验证</button>
+            <button onClick={() => void handleRefresh()} disabled={!isAdmin || busy} className="inline-flex items-center gap-2 rounded-xl bg-slate-100 dark:bg-slate-800 px-3 py-2 text-xs font-semibold text-slate-700 dark:text-slate-200 disabled:opacity-50"><RefreshCw className={`w-4 h-4 ${busy ? 'animate-spin' : ''}`} />刷新远端</button>
+          </div>
+        </div>
+      </section>
 
-        {currentUser?.role === 'admin' && (
-          <div className="flex items-center gap-2 flex-wrap">
-            <select
-              value={backupScope}
-              onChange={e => setBackupScope(e.target.value as any)}
-              className="px-3 py-2 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-xs rounded-xl text-slate-700 dark:text-slate-200"
-            >
-              <option value="full">备份全站全量数据 (All)</option>
-              <option value="posts">仅备份博客文章库 (Posts)</option>
-              <option value="books">仅备份电子书架库 (Books)</option>
-              <option value="media">仅备份音视频与相册 (Media)</option>
-              <option value="settings">仅备份全站设置 (Settings)</option>
-            </select>
+      {(actionMessage || actionError) && <div role={actionError ? 'alert' : 'status'} className={`rounded-2xl border p-3 text-xs ${actionError ? 'border-rose-200 bg-rose-50 text-rose-700 dark:bg-rose-950/30 dark:text-rose-300' : 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300'}`}>{actionError || actionMessage}</div>}
 
-            <button
-              onClick={handleCreateBackup}
-              className="flex items-center gap-1.5 px-4 py-2 bg-sky-500 hover:bg-sky-600 text-white text-xs font-semibold rounded-xl shadow-md transition"
-            >
-              <Database className="w-4 h-4" />
-              <span>立即发起备份</span>
-            </button>
+      <section className={`rounded-3xl border shadow-sm overflow-hidden ${systemSettings.transparentCards ? 'bg-white/70 dark:bg-slate-900/70 backdrop-blur-md border-white/20' : 'bg-white dark:bg-slate-900 border-slate-200/80 dark:border-slate-800'}`}>
+        <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row justify-between gap-3">
+          <div><h3 className="font-bold text-sm text-slate-800 dark:text-slate-100 flex items-center gap-2"><HardDrive className="w-4 h-4 text-sky-500" />远端文件（{webDavBackups.length}）</h3><p className="text-[11px] text-slate-500 mt-1">列表来自 WebDAV PROPFIND，不是浏览器里的模拟记录。</p></div>
+          {isAdmin && <div className="flex gap-2 items-center">
+            <input ref={rawFileInput} type="file" multiple className="hidden" onChange={event => void handleRawFileUpload(event)} />
+            <button onClick={() => rawFileInput.current?.click()} disabled={busy || !connected} className="inline-flex items-center gap-2 rounded-xl border border-sky-200 px-3 py-2 text-xs font-semibold text-sky-700 disabled:opacity-50"><Upload className="w-4 h-4" />上传原文件</button>
+            <select value={backupScope} onChange={e => setBackupScope(e.target.value as typeof backupScope)} className="rounded-xl border bg-white dark:bg-slate-800 px-2 py-2 text-xs"><option value="posts">文字：文章</option><option value="settings">文字：设置</option><option value="books">书籍资料</option><option value="media">照片与影音元数据</option><option value="full">全站 JSON 快照</option></select>
+            <button onClick={() => void handleBackup()} disabled={busy || !connected} className="inline-flex items-center gap-2 rounded-xl bg-sky-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"><Database className="w-4 h-4" />{busy && transferProgress.type === 'backup' ? '备份中…' : '开始备份'}</button>
+          </div>}
+        </div>
+        <div className="p-3 bg-amber-50/80 dark:bg-amber-950/20 border-b border-amber-100 dark:border-amber-900/50 text-[11px] text-amber-800 dark:text-amber-200 flex gap-2"><AlertTriangle className="w-4 h-4 shrink-0" /><span>建议先备份文字、文章与设置。浏览器到边缘函数的 WebDAV 代理目前单文件上限 25 MiB，不支持断点续传；图片、视频等大文件容易超时或卡住；可通过“上传原文件”手动上传 不超过 25 MiB 文件，但不会自动从站内资源抓取打包。当前生成的是 fox3 JSON 数据快照，媒体文件本体若只存于本机/外部 URL，不会自动打包进快照。</span></div>
+        {webDavBackups.length === 0 ? <div className="py-12 text-center text-xs text-slate-400">远端目录为空或尚未成功刷新。填写配置后点击“保存并验证”或“刷新远端”。</div> : (
+          <div className="divide-y divide-slate-100 dark:divide-slate-800">
+            {webDavBackups.map(item => {
+              const ext = item.name.split('.').pop()?.toUpperCase() || 'FILE';
+              const isNativeBackup = /\.json$/i.test(item.name);
+              return <div key={item.id || item.name} className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                <div className="flex items-center gap-3 min-w-0"><div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center shrink-0"><FileKindIcon name={item.name} /></div><div className="min-w-0"><div className="flex items-center gap-2"><p className="truncate font-mono text-xs font-semibold text-slate-800 dark:text-slate-100">{item.name}</p><span className="shrink-0 rounded bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 text-[9px] font-bold text-slate-600 dark:text-slate-300">.{ext}</span></div><p className="mt-1 text-[11px] text-slate-500">原文件格式 · {(item.size / 1024).toFixed(1)} KiB · {item.updatedAt ? new Date(item.updatedAt).toLocaleString() : '远端未提供时间'}</p><p className="text-[10px] text-slate-400 font-mono truncate">{item.path}</p></div></div>
+                <div className="flex gap-2 self-end md:self-center">
+                  <button onClick={() => void handleDownload(item)} disabled={busy || !connected} title="下载原文件" className="rounded-lg p-2 text-sky-600 hover:bg-sky-50 dark:hover:bg-sky-950/30 disabled:opacity-40"><Download className="w-4 h-4" /></button>
+                  {isNativeBackup && <button onClick={() => void handleRestore(item)} disabled={busy || !isAdmin || !connected} className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 px-3 py-2 text-xs text-emerald-700 hover:bg-emerald-50 disabled:opacity-40"><RotateCcw className="w-3.5 h-3.5" />恢复</button>}
+                  {isAdmin && <button onClick={() => void handleDelete(item)} disabled={busy || !connected} title="从远端删除" className="rounded-lg p-2 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 disabled:opacity-40"><Trash2 className="w-4 h-4" /></button>}
+                </div>
+              </div>;
+            })}
           </div>
         )}
-      </div>
-
-      {/* Action Notification Alert */}
-      {actionMessage && (
-        <div className="p-3.5 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-900/50 rounded-2xl text-xs text-emerald-700 dark:text-emerald-300 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <CheckCircle className="w-4 h-4 shrink-0 text-emerald-500" />
-            <span>{actionMessage}</span>
-          </div>
-          <button onClick={() => setActionMessage(null)} className="text-xs font-bold text-emerald-600 dark:text-emerald-400">关闭</button>
-        </div>
-      )}
-
-      {/* WebDAV Connection Settings Card */}
-      <div className={`p-6 rounded-3xl border shadow-sm space-y-4 ${
-        systemSettings.transparentCards
-          ? 'bg-white/70 dark:bg-slate-900/70 backdrop-blur-md border-white/20'
-          : 'bg-white dark:bg-slate-900 border-slate-200/80 dark:border-slate-800'
-      }`}>
-        <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-          <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-            <HardDrive className="w-4 h-4 text-sky-500" />
-            <span>WebDAV 接入与同步配置</span>
-          </h3>
-
-          <div className="flex items-center gap-2">
-            <span
-              className={`inline-flex items-center gap-1.5 text-xs px-3 py-1 rounded-full font-medium ${
-                isConnected
-                  ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200/60'
-                  : 'bg-rose-50 text-rose-600 dark:bg-rose-950/40 dark:text-rose-400'
-              }`}
-            >
-              <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
-              {isConnected ? 'WebDAV 通道已连通' : '未连接'}
-            </span>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-          <div>
-            <label className="block text-xs font-medium text-slate-500 mb-1">WebDAV 服务地址 (Host)</label>
-            <input
-              type="text"
-              value={formConfig.serverUrl}
-              placeholder="https://dav.jianguoyun.com/dav/"
-              onChange={e => setFormConfig({ ...formConfig, serverUrl: e.target.value })}
-              className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 font-mono"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-medium text-slate-500 mb-1">服务端口 (Port，默认 443)</label>
-            <input
-              type="text"
-              value={formConfig.port ?? 443}
-              placeholder="443"
-              onChange={e => setFormConfig({ ...formConfig, port: e.target.value })}
-              className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 font-mono"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-medium text-slate-500 mb-1">WebDAV 账号 (User)</label>
-            <input
-              type="text"
-              value={formConfig.username}
-              placeholder="user@example.com"
-              onChange={e => setFormConfig({ ...formConfig, username: e.target.value })}
-              className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-medium text-slate-500 mb-1">WebDAV 应用授权密码 (Password)</label>
-            <input
-              type="password"
-              value={formConfig.password}
-              placeholder="输入第三方应用授权密码"
-              onChange={e => setFormConfig({ ...formConfig, password: e.target.value })}
-              className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100"
-            />
-          </div>
-        </div>
-
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-2">
-          <p className="text-[11px] text-slate-400 flex items-center gap-1.5">
-            <ShieldCheck className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-            支持在 WebDAV 网盘后台“账户信息 - 安全设置 - 第三方应用管理”中生成专属应用密码，安全隔离主账号。
-          </p>
-
-          <div className="flex items-center gap-2 self-end sm:self-auto">
-            <button
-              type="button"
-              onClick={handleSaveConfig}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-sky-500 hover:bg-sky-600 text-white text-xs font-semibold rounded-xl shadow-sm transition"
-            >
-              <Save className="w-3.5 h-3.5" />
-              <span>{isSaved ? '配置已保存！' : '保存 WebDAV 配置'}</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={handleTestConnection}
-              disabled={testingConnection}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-medium rounded-xl transition"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${testingConnection ? 'animate-spin' : ''}`} />
-              <span>{testingConnection ? '连接测试中...' : '重新检测连接'}</span>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Visualized NutStore Remote Backup File Manager */}
-      <div className={`rounded-3xl border shadow-sm overflow-hidden ${
-        systemSettings.transparentCards
-          ? 'bg-white/70 dark:bg-slate-900/70 backdrop-blur-md border-white/20'
-          : 'bg-white dark:bg-slate-900 border-slate-200/80 dark:border-slate-800'
-      }`}>
-        <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs text-slate-400">
-          <span className="flex items-center gap-2 font-medium text-slate-700 dark:text-slate-200">
-            <FolderSync className="w-4 h-4 text-sky-500" />
-            WebDAV 远程已存储归档 ({webDavBackups.length} 份快照)
-          </span>
-          <span>选择恢复 / 容灾回滚</span>
-        </div>
-
-        <div className="divide-y divide-slate-100 dark:divide-slate-800">
-          {webDavBackups.length === 0 ? (
-            <div className="py-12 text-center text-xs text-slate-400">
-              暂无已上传的 WebDAV 备份快照，点击上方“立即发起备份”即可创建。
-            </div>
-          ) : (
-            webDavBackups.map(item => (
-              <div
-                key={item.id}
-                className="p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-2xl bg-sky-50 dark:bg-sky-950/50 flex items-center justify-center shrink-0">
-                    <FileArchive className="w-5 h-5 text-sky-500" />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h4 className="text-xs font-bold text-slate-800 dark:text-slate-100 font-mono">
-                        {item.name}
-                      </h4>
-                      <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold uppercase bg-sky-100 dark:bg-sky-900/50 text-sky-700 dark:text-sky-300">
-                        {item.type || 'full'}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-3 text-[11px] text-slate-400 mt-1">
-                      <span>路径: {item.path}</span>
-                      <span>大小: {(item.size / 1024).toFixed(1)} KB</span>
-                      <span>时间: {new Date(item.updatedAt).toLocaleString()}</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2 self-end sm:self-center">
-                  <button
-                    onClick={() => handleRestoreBackup(item)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 text-emerald-600 dark:text-emerald-400 text-xs font-medium rounded-xl transition border border-emerald-200/50"
-                    title="选择性恢复此快照"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5" />
-                    <span>选择恢复</span>
-                  </button>
-
-                  {currentUser?.role === 'admin' && (
-                    <button
-                      onClick={() => handleDeleteBackup(item.id)}
-                      className="p-2 text-slate-400 hover:text-rose-600 rounded-xl hover:bg-rose-50 dark:hover:bg-rose-950/40 transition"
-                      title="删除快照"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
+      </section>
+      {webDavConnectionState.status === 'checking' && <div className="text-xs text-slate-500 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" />{webDavConnectionState.message}</div>}
+      {webDavConnectionState.status === 'connected' && <div className="text-xs text-emerald-600 flex items-center gap-2"><CheckCircle className="w-4 h-4" />最后验证：{new Date(webDavConnectionState.checkedAt).toLocaleString()}</div>}
     </div>
   );
 };
