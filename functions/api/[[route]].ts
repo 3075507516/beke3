@@ -1123,6 +1123,96 @@ export const onRequest = async (context: any) => {
     });
   }
 
+  // Canonical, public site content is stored separately from private/admin sync data
+  // and from WebDAV backup files. Public GET is read-only; writes require admin auth.
+  if (path === '/site-content') {
+    if (!env.DB) {
+      return Response.json({ success: false, error: '跨设备站点内容需要在 Cloudflare Pages Functions 绑定 D1（变量名 DB）' }, { status: 503, headers });
+    }
+    try {
+      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS fox3_site_content (
+        id TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        revision INTEGER NOT NULL DEFAULT 1,
+        updatedAt INTEGER NOT NULL
+      )`).run();
+      const publicFields = ['posts', 'books', 'photos', 'photoFolders', 'media', 'products', 'websites', 'systemSettings', 'themeMode'];
+      const publicSettings = ['siteName', 'themeColor', 'customPaletteBg', 'fullBackgroundUrl', 'avatarUrl', 'heroIntroImage', 'heroBadge', 'heroTitle', 'heroSubtitle', 'transparentCards', 'bottomButtonsEnabled', 'hideNonBlogForGuests', 'globalTheme', 'deviceView', 'timezone'];
+      const cleanRecords = (value: unknown, kind: string): any[] => {
+        if (!Array.isArray(value)) return [];
+        const adminUsername = String(env.ADMIN_USERNAME || 'fox').trim().toLowerCase();
+        return value.slice(0, 5000).filter((item: any) => {
+          if (!item || typeof item !== 'object' || typeof item.id !== 'string' || item.id.length > 200 || item.deleted) return false;
+          const isPublicOwner = item.ownerId ? item.ownerId === 'user_fox_admin' : !item.ownerUsername || String(item.ownerUsername).toLowerCase() === adminUsername;
+          return isPublicOwner;
+        }).map((item: any) => {
+          const allowed: Record<string, string[]> = {
+            posts: ['id','title','summary','content','category','tags','cover','author','views','likes','createdAt','updatedAt'],
+            books: ['id','title','author','format','cover','description','fileSize','fileUrl','content','createdAt','updatedAt'],
+            photos: ['id','title','url','thumbnail','category','folderId','folderName','width','height','description','createdAt','updatedAt'],
+            photoFolders: ['id','name','createdAt'],
+            media: ['id','type','title','artist','src','cover','duration','fileSize','uploadedAt','createdAt','updatedAt'],
+            products: ['id','name','description','price','images','category','stock','tags','showcaseId','createdAt','updatedAt'],
+            websites: ['id','title','url','poster','description','createdAt','updatedAt'],
+          };
+          const clean: Record<string, unknown> = {};
+          for (const key of allowed[kind] || []) if (item[key] !== undefined) clean[key] = item[key];
+          return clean;
+        });
+      };
+      const sanitize = (input: any) => {
+        const source = input && typeof input === 'object' ? input : {};
+        const result: Record<string, any> = {};
+        for (const key of publicFields) {
+          if (['posts','books','photos','photoFolders','media','products','websites'].includes(key)) result[key] = cleanRecords(source[key], key);
+        }
+        const settings = source.systemSettings && typeof source.systemSettings === 'object' ? source.systemSettings : {};
+        result.systemSettings = Object.fromEntries(publicSettings.filter(key => settings[key] !== undefined).map(key => [key, settings[key]]));
+        if (['modern','win98','mac-classic','terminal','parchment','gameboy','cyberpunk','steampunk','nordic','leather','blueprint','retro','aurora-glass','neo-brutal','soft-pastel','midnight-luxe','editorial'].includes(source.themeMode)) result.themeMode = source.themeMode;
+        return result;
+      };
+      const current = await env.DB.prepare('SELECT value, revision, updatedAt FROM fox3_site_content WHERE id = ?').bind('published').first();
+      if (request.method === 'GET') {
+        if (current?.value) return Response.json({ success: true, initialized: true, revision: Number(current.revision || 1), updatedAt: Number(current.updatedAt || 0), data: sanitize(JSON.parse(current.value)) }, { headers: { ...Object.fromEntries(headers.entries()), 'Cache-Control': 'no-store' } });
+        // One-time safe bootstrap from the legacy mixed snapshot; only public-whitelisted fields leave the server.
+        let legacy: any = null;
+        try {
+          const old = await env.DB.prepare('SELECT value FROM fox3_sync WHERE key = ?').bind('global_state').first();
+          if (old?.value) legacy = JSON.parse(old.value);
+        } catch {}
+        if (!legacy && env.KV) {
+          try { const old = await env.KV.get('fox3_sync_global_state'); if (old) legacy = JSON.parse(old); } catch {}
+        }
+        return Response.json({ success: true, initialized: false, legacyAvailable: Boolean(legacy), revision: 0, updatedAt: 0, data: sanitize(legacy || {}) }, { headers: { ...Object.fromEntries(headers.entries()), 'Cache-Control': 'no-store' } });
+      }
+      if (request.method === 'POST') {
+        if (!await hasAdminSession(request, env)) return Response.json({ success: false, error: '发布站点内容需要管理员登录' }, { status: 401, headers });
+        const length = Number(request.headers.get('content-length') || 0);
+        if (length > 4 * 1024 * 1024) return Response.json({ success: false, error: '站点内容同步请求超过 4 MiB 限制' }, { status: 413, headers });
+        const body = await request.json();
+        const expectedRevision = Number(body?.expectedRevision);
+        if (!Number.isInteger(expectedRevision) || expectedRevision < 0) return Response.json({ success: false, error: '缺少有效的站点内容版本号，请先刷新' }, { status: 400, headers });
+        const content = sanitize(body?.data);
+        const serialized = JSON.stringify(content);
+        if (new TextEncoder().encode(serialized).byteLength > 4 * 1024 * 1024) return Response.json({ success: false, error: '站点内容超过 4 MiB；大文件请存入对象存储，仅同步文件链接和元数据' }, { status: 413, headers });
+        const result = await env.DB.prepare(`INSERT INTO fox3_site_content (id, value, revision, updatedAt)
+          SELECT 'published', ?, 1, ? WHERE ? = 0
+          ON CONFLICT(id) DO UPDATE SET value = excluded.value, revision = fox3_site_content.revision + 1, updatedAt = excluded.updatedAt
+          WHERE fox3_site_content.revision = ?`).bind(serialized, Date.now(), expectedRevision, expectedRevision).run();
+        if (!Number(result?.meta?.changes || 0)) {
+          const latest = await env.DB.prepare('SELECT revision, updatedAt FROM fox3_site_content WHERE id = ?').bind('published').first();
+          return Response.json({ success: false, conflict: true, revision: Number(latest?.revision || 0), error: '站点内容已在其他设备更新。请刷新后再编辑，避免覆盖新内容。' }, { status: 409, headers });
+        }
+        const saved = await env.DB.prepare('SELECT revision, updatedAt FROM fox3_site_content WHERE id = ?').bind('published').first();
+        return Response.json({ success: true, syncedToCloud: true, revision: Number(saved?.revision || 1), updatedAt: Number(saved?.updatedAt || Date.now()) }, { headers });
+      }
+      return Response.json({ success: false, error: 'Method not allowed' }, { status: 405, headers });
+    } catch (error: any) {
+      console.error('[Site Content] Database operation failed:', String(error?.message || error).slice(0, 180));
+      return Response.json({ success: false, error: '站点内容数据库操作失败；请检查 Pages 的 DB 绑定及数据库可用性' }, { status: 503, headers });
+    }
+  }
+
   // Cross-device sync store & retrieve (/api/sync/:key)
   // Devices push on explicit sync or opted-in data changes; this route is not polled in idle intervals.
   // Prefer D1 to avoid exhausting the daily KV write allowance; retain KV as fallback.
@@ -1170,6 +1260,12 @@ export const onRequest = async (context: any) => {
       }
 
 
+      if (data && typeof data === 'object') {
+        for (const key of ['posts', 'books', 'photos', 'photoFolders', 'media', 'products', 'websites', 'themeMode', 'webDavBackups', 'webDavMeta', 'webDavConfig']) delete data[key];
+        if (data.systemSettings && typeof data.systemSettings === 'object') {
+          for (const key of ['siteName','themeColor','customPaletteBg','fullBackgroundUrl','avatarUrl','heroIntroImage','heroBadge','heroTitle','heroSubtitle','transparentCards','bottomButtonsEnabled','hideNonBlogForGuests','globalTheme','deviceView','timezone']) delete data.systemSettings[key];
+        }
+      }
       return new Response(JSON.stringify({
         success: true,
         data,
@@ -1183,6 +1279,11 @@ export const onRequest = async (context: any) => {
     if (request.method === 'POST') {
       try {
         const payload = await request.json();
+        // Keep the legacy authenticated/private channel separate from canonical public site content and WebDAV.
+        for (const key of ['posts', 'books', 'photos', 'photoFolders', 'media', 'products', 'websites', 'themeMode', 'webDavBackups', 'webDavMeta', 'webDavConfig']) delete payload[key];
+        if (payload.systemSettings && typeof payload.systemSettings === 'object') {
+          for (const key of ['siteName','themeColor','customPaletteBg','fullBackgroundUrl','avatarUrl','heroIntroImage','heroBadge','heroTitle','heroSubtitle','transparentCards','bottomButtonsEnabled','hideNonBlogForGuests','globalTheme','deviceView','timezone']) delete payload.systemSettings[key];
+        }
         const stringified = JSON.stringify(payload);
         let syncedToCloud = false;
 

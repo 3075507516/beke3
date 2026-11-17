@@ -323,14 +323,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     loadLocalStorage<Photo[]>(STORAGE_KEYS.PHOTOS, DEFAULT_PHOTOS)
   );
 
-  const [photoFolders, setPhotoFolders] = useState<Array<{ id: string; name: string; createdAt: number }>>(() =>
-    loadLocalStorage<Array<{ id: string; name: string; createdAt: number }>>('fox3_photo_folders', [
+  const [photoFolders, setPhotoFolders] = useState<Array<{ id: string; name: string; createdAt: number }>>(() => loadLocalStorage('fox3_photo_folders', [
       { id: 'folder-landscape', name: '自然风光', createdAt: Date.now() - 86400000 * 10 },
       { id: 'folder-cyberpunk', name: '赛博都市', createdAt: Date.now() - 86400000 * 9 },
       { id: 'folder-daily', name: '日常记录', createdAt: Date.now() - 86400000 * 8 },
-    ])
-  );
-  useEffect(() => saveLocalStorage('fox3_photo_folders', photoFolders), [photoFolders]);
+    ]));
 
   const [media, setMedia] = useState<MediaItem[]>(() =>
     loadLocalStorage<MediaItem[]>(STORAGE_KEYS.MEDIA, DEFAULT_MEDIA)
@@ -370,7 +367,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [websites, setWebsites] = useState<WebSiteItem[]>(() =>
     loadLocalStorage<WebSiteItem[]>(STORAGE_KEYS.WEBSITES, DEFAULT_WEBSITES)
   );
-  useEffect(() => saveLocalStorage(STORAGE_KEYS.WEBSITES, websites), [websites]);
 
   const [webDavBackups, setWebDavBackups] = useState<WebDavBackupItem[]>(() =>
     loadLocalStorage<WebDavBackupItem[]>(STORAGE_KEYS.WEBDAV_BACKUPS, DEFAULT_WEBDAV_BACKUPS)
@@ -620,7 +616,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     isSyncing: false,
     lastSyncedAt: 0,
     status: 'idle',
-    message: '仅保存在当前设备；登录管理员并配置云端存储后可进行跨设备同步',
+    message: '站点内容由 D1 提供；任何访客均可刷新，编辑仅管理员可发布',
   });
 
   const [transferProgress, setTransferProgress] = useState<TransferProgress>({
@@ -720,12 +716,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // remain redacted from exported backups.
   useEffect(() => saveLocalStorage(STORAGE_KEYS.CURRENT_USER, currentUser), [currentUser]);
   useEffect(() => saveLocalStorage(STORAGE_KEYS.USERS, users), [users]);
+  // Public content localStorage is a disposable browser cache only. D1 hydrates the
+  // canonical snapshot on startup and overwrites stale cache; admin writes go to D1.
   useEffect(() => saveLocalStorage(STORAGE_KEYS.POSTS, posts), [posts]);
   useEffect(() => saveLocalStorage(STORAGE_KEYS.BOOKS, books), [books]);
   useEffect(() => saveLocalStorage(STORAGE_KEYS.PHOTOS, photos), [photos]);
+  useEffect(() => saveLocalStorage('fox3_photo_folders', photoFolders), [photoFolders]);
   useEffect(() => saveLocalStorage(STORAGE_KEYS.MEDIA, media), [media]);
-  useEffect(() => saveLocalStorage(STORAGE_KEYS.MAILS, mails), [mails]);
   useEffect(() => saveLocalStorage(STORAGE_KEYS.PRODUCTS, products), [products]);
+  useEffect(() => saveLocalStorage(STORAGE_KEYS.WEBSITES, websites), [websites]);
+  useEffect(() => saveLocalStorage(STORAGE_KEYS.MAILS, mails), [mails]);
   useEffect(() => saveLocalStorage(STORAGE_KEYS.ORDERS, orders), [orders]);
   useEffect(() => saveLocalStorage(STORAGE_KEYS.CHAT_MESSAGES, chatMessages), [chatMessages]);
   useEffect(() => saveLocalStorage(STORAGE_KEYS.SYSTEM_SETTINGS, systemSettings), [systemSettings]);
@@ -830,137 +830,121 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, []);
 
-  // Cross-device synchronization is an explicit authenticated round-trip. Never report
-  // cloud success unless the persistent backend confirms that it stored the payload.
-  const mergeById = <T extends { id: string; updatedAt?: number }>(localList: T[], remoteList: unknown): T[] => {
-    if (!Array.isArray(remoteList)) return localList;
-    const merged = new Map<string, T>();
-    for (const item of localList) if (item && typeof item.id === 'string') merged.set(item.id, item);
-    for (const value of remoteList) {
-      const item = value as T;
-      if (!item || typeof item.id !== 'string') continue;
-      const local = merged.get(item.id);
-      if (!local || Number(item.updatedAt || 0) >= Number(local.updatedAt || 0)) merged.set(item.id, item);
-    }
-    return [...merged.values()];
-  };
-  const applyRemoteState = (remote: any, replaceLocal = false) => {
-    const combine = <T extends { id: string }>(local: T[], remoteItems: T[]) => replaceLocal ? remoteItems : mergeById(local, remoteItems);
-    if (Array.isArray(remote.posts)) setPosts(prev => combine(prev, remote.posts));
-    if (Array.isArray(remote.books)) setBooks(prev => combine(prev, remote.books));
-    if (Array.isArray(remote.photos)) setPhotos(prev => combine(prev, remote.photos));
-    if (Array.isArray(remote.photoFolders)) setPhotoFolders(prev => combine(prev, remote.photoFolders));
-    if (Array.isArray(remote.media)) setMedia(prev => combine(prev, remote.media));
-    if (Array.isArray(remote.mails)) setMails(prev => combine(prev, remote.mails));
-    if (Array.isArray(remote.products)) setProducts(prev => combine(prev, remote.products));
-    if (Array.isArray(remote.orders)) setOrders(prev => combine(prev, remote.orders));
-    if (Array.isArray(remote.chatMessages)) setChatMessages(prev => combine(prev, remote.chatMessages));
-    if (Array.isArray(remote.websites)) setWebsites(prev => combine(prev, remote.websites));
-    if (Array.isArray(remote.webDavBackups)) setWebDavBackups(prev => combine(prev, remote.webDavBackups));
-    if (Number.isFinite(Number(remote.webDavMeta?.lastBackupTime)) && Number(remote.webDavMeta?.lastBackupTime) >= 0) {
-      setWebDavConfig(prev => ({ ...prev, lastBackupTime: Number(remote.webDavMeta.lastBackupTime) }));
-    }
-    if (Array.isArray(remote.trashItems)) setTrashItems(prev => combine(prev, remote.trashItems));
-    if (remote.systemSettings && typeof remote.systemSettings === 'object') {
-      setSystemSettings(prev => ({ ...prev, ...remote.systemSettings }));
-    }
-    if (isGlobalThemeMode(remote.themeMode)) setThemeMode(remote.themeMode);
-  };
-  const triggerManualSync = useCallback(async () => {
-    const adminToken = getAdminSessionToken();
-    if (!adminToken) {
-      setSyncState(prev => ({ ...prev, isSyncing: false, status: 'error', message: '需要管理员登录后才能进行云端跨设备同步' }));
-      return;
-    }
-    setSyncState(prev => ({ ...prev, isSyncing: true, status: 'syncing', message: '正在读取并同步云端数据…' }));
-    try {
-      const authHeaders = { Authorization: `Bearer ${adminToken}` };
-      const getRes = await fetch('/api/sync/global_state', { method: 'GET', headers: authHeaders });
-      if (!getRes.ok) throw new Error(`云端读取失败 (HTTP ${getRes.status})`);
-      const remoteEnvelope = await getRes.json();
-      if (remoteEnvelope?.success !== true) throw new Error(remoteEnvelope?.error || '云端读取响应无效');
-      const remote = remoteEnvelope.data || {};
-      applyRemoteState(remote);
-      const mergedPayload = {
-        posts: mergeById(posts, remote.posts), books: mergeById(books, remote.books),
-        photos: mergeById(photos, remote.photos), photoFolders: mergeById(photoFolders, remote.photoFolders),
-        media: mergeById(media, remote.media), mails: mergeById(mails, remote.mails),
-        products: mergeById(products, remote.products), orders: mergeById(orders, remote.orders),
-        chatMessages: mergeById(chatMessages, remote.chatMessages), websites: mergeById(websites, remote.websites),
-        webDavBackups: mergeById(webDavBackups, remote.webDavBackups),
-        webDavMeta: { lastBackupTime: Math.max(Number(webDavConfig.lastBackupTime || 0), Number(remote.webDavMeta?.lastBackupTime || 0)) },
-        trashItems: mergeById(trashItems, remote.trashItems),
-        systemSettings: { ...systemSettings, ...(remote.systemSettings || {}) },
-        themeMode: isGlobalThemeMode(remote.themeMode) ? remote.themeMode : themeMode,
-        updatedAt: Date.now(),
-      };
-      const postRes = await fetch('/api/sync/global_state', {
-        method: 'POST',
-        headers: { ...authHeaders, 'Content-Type': 'application/json' },
-        body: JSON.stringify(mergedPayload),
-      });
-      const postResult = await postRes.json().catch(() => null);
-      if (!postRes.ok || postResult?.success !== true || postResult?.syncedToCloud !== true) {
-        throw new Error(postResult?.message || postResult?.error || `云端未确认持久化 (HTTP ${postRes.status})`);
-      }
-      try {
-        const bc = new BroadcastChannel('fox3_realtime_sync');
-        bc.postMessage({ type: 'SYNC_ALL', payload: mergedPayload });
-        bc.close();
-      } catch {}
-      setSyncState({ isSyncing: false, lastSyncedAt: Date.now(), status: 'synced', message: '云端持久化同步成功' });
-    } catch (error: any) {
-      setSyncState(prev => ({ ...prev, isSyncing: false, status: 'error', message: error?.message || '云端同步失败；本机数据未清除' }));
-    }
-  }, [posts, books, photos, photoFolders, media, mails, products, orders, chatMessages, websites, webDavBackups, trashItems, systemSettings, themeMode, webDavConfig.lastBackupTime]);
-  // On a newly opened device, hydrate the local starter state from the latest cloud snapshot.
-  useEffect(() => {
-    let cancelled = false;
-    const fetchInitialSync = async () => {
-      const adminToken = getAdminSessionToken();
-      if (!adminToken) return;
-      try {
-        const res = await fetch('/api/sync/global_state', { method: 'GET', headers: { Authorization: `Bearer ${adminToken}` } });
-        if (!res.ok) throw new Error(`云端读取失败 (HTTP ${res.status})`);
-        const envelope = await res.json();
-        if (cancelled) return;
-        if (envelope?.success !== true) throw new Error(envelope?.error || '云端响应无效');
-        if (envelope.data) {
-          applyRemoteState(envelope.data, true);
-          setSyncState({ isSyncing: false, lastSyncedAt: Number(envelope.data.updatedAt || Date.now()), status: 'synced', message: '已加载最新云端数据' });
-        }
-      } catch (error: any) {
-        if (!cancelled) setSyncState(prev => ({ ...prev, status: 'error', message: error?.message || '云端初始化读取失败；保留本机缓存' }));
-      }
+  // Canonical site content always hydrates from D1. Browser data is only an in-memory
+  // fallback/cache; WebDAV backup metadata, private mail/orders/chat and admin settings
+  // never enter this public content channel.
+  const siteContentRevisionRef = useRef(0);
+  const siteContentReadyRef = useRef(false);
+  const siteContentLoadRef = useRef(false);
+  const siteContentConflictRef = useRef(false);
+  const siteContentLastSavedRef = useRef('');
+  const [siteContentNeedsSeed, setSiteContentNeedsSeed] = useState(false);
+  const applyPublicSiteContent = useCallback((data: any, initialized: boolean, legacyAvailable = false) => {
+    const preserveLocalOwned = <T extends { id: string; ownerId?: string }>(published: T[], cached: T[]) => {
+      const publishedIds = new Set(published.map(item => item.id));
+      return [...published, ...cached.filter(item => item.ownerId && item.ownerId !== 'user_fox_admin' && !publishedIds.has(item.id))];
     };
-    void fetchInitialSync();
-    return () => { cancelled = true; };
+    if (initialized || legacyAvailable) {
+      if (Array.isArray(data?.posts)) setPosts(data.posts);
+      if (Array.isArray(data?.books)) setBooks(prev => preserveLocalOwned(data.books, prev));
+      if (Array.isArray(data?.photos)) setPhotos(prev => preserveLocalOwned(data.photos, prev));
+      if (Array.isArray(data?.photoFolders)) setPhotoFolders(data.photoFolders);
+      if (Array.isArray(data?.media)) setMedia(prev => preserveLocalOwned(data.media, prev));
+      if (Array.isArray(data?.products)) setProducts(data.products);
+      if (Array.isArray(data?.websites)) setWebsites(data.websites);
+    } else if (!getAdminSessionToken()) {
+      // A fresh public deployment must not show device-specific starter samples as if published.
+      setPosts([]); setBooks(prev => prev.filter(item => item.ownerId && item.ownerId !== 'user_fox_admin'));
+      setPhotos(prev => prev.filter(item => item.ownerId && item.ownerId !== 'user_fox_admin'));
+      setMedia(prev => prev.filter(item => item.ownerId && item.ownerId !== 'user_fox_admin'));
+      setPhotoFolders([]); setProducts([]); setWebsites([]);
+    }
+    if (data?.systemSettings && typeof data.systemSettings === 'object') {
+      setSystemSettings(prev => ({ ...prev, ...data.systemSettings }));
+    }
+    if (isGlobalThemeMode(data?.themeMode)) setThemeModeState(data.themeMode);
   }, []);
-  // Debounced opt-in cloud sync. Errors are visible; a failed request is never called synced.
-  const syncTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const syncEffectsMountedRef = useRef(false);
+
+  const fetchLatestSiteContent = useCallback(async (showStatus: boolean) => {
+    if (siteContentLoadRef.current) return;
+    siteContentLoadRef.current = true;
+    if (showStatus) setSyncState(prev => ({ ...prev, isSyncing: true, status: 'syncing', message: '正在从站点数据库读取最新内容…' }));
+    try {
+      const response = await fetch('/api/site-content', { method: 'GET', headers: { Accept: 'application/json' }, cache: 'no-store' });
+      const envelope = await response.json().catch(() => null);
+      if (!response.ok || envelope?.success !== true) throw new Error(envelope?.error || `站点数据库读取失败 (HTTP ${response.status})`);
+      const nextRevision = Number(envelope.revision || 0);
+      const wasReady = siteContentReadyRef.current;
+      const revisionChanged = nextRevision !== siteContentRevisionRef.current;
+      if (siteContentConflictRef.current && revisionChanged && !showStatus) return;
+      siteContentRevisionRef.current = nextRevision;
+      if (!wasReady || revisionChanged) applyPublicSiteContent(envelope.data || {}, Boolean(envelope.initialized), Boolean(envelope.legacyAvailable));
+      if (showStatus) siteContentConflictRef.current = false;
+      siteContentReadyRef.current = true;
+      setSiteContentNeedsSeed(!envelope.initialized && Boolean(getAdminSessionToken()));
+      setSyncState({ isSyncing: false, lastSyncedAt: Number(envelope.updatedAt || Date.now()), status: 'synced', message: envelope.initialized ? '已读取站点数据库中的最新内容' : envelope.legacyAvailable ? '已安全读取旧云端公开内容，正在迁入站点数据库' : 'D1 已连接，站点内容尚未初始化' });
+    } catch (error: any) {
+      if (showStatus || !siteContentReadyRef.current) setSyncState(prev => ({ ...prev, isSyncing: false, status: 'error', message: error?.message || '无法读取站点内容数据库；保留当前内存内容' }));
+    } finally {
+      siteContentLoadRef.current = false;
+    }
+  }, [applyPublicSiteContent]);
+
+  const triggerManualSync = useCallback(async () => {
+    // This is a public read/refresh operation. It does not touch private data or WebDAV backups.
+    await fetchLatestSiteContent(true);
+  }, [fetchLatestSiteContent]);
+
   useEffect(() => {
-    if (!syncEffectsMountedRef.current) { syncEffectsMountedRef.current = true; return; }
-    if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
-    syncTimeoutRef.current = setTimeout(async () => {
+    void fetchLatestSiteContent(false);
+    const onVisibility = () => { if (document.visibilityState === 'visible') void fetchLatestSiteContent(false); };
+    const onOnline = () => { void fetchLatestSiteContent(false); };
+    const poll = window.setInterval(() => { if (document.visibilityState === 'visible') void fetchLatestSiteContent(false); }, 60_000);
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('online', onOnline);
+    return () => {
+      window.clearInterval(poll);
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('online', onOnline);
+    };
+  }, [fetchLatestSiteContent]);
+
+  const siteContentTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const siteContentFirstEffectRef = useRef(true);
+  useEffect(() => {
+    if (siteContentFirstEffectRef.current) { siteContentFirstEffectRef.current = false; return; }
+    if (!siteContentReadyRef.current || !getAdminSessionToken()) return;
+    if (siteContentTimeoutRef.current) clearTimeout(siteContentTimeoutRef.current);
+    siteContentTimeoutRef.current = setTimeout(async () => {
+      const publicSettingKeys = ['siteName', 'themeColor', 'customPaletteBg', 'fullBackgroundUrl', 'avatarUrl', 'heroIntroImage', 'heroBadge', 'heroTitle', 'heroSubtitle', 'transparentCards', 'bottomButtonsEnabled', 'hideNonBlogForGuests', 'globalTheme', 'deviceView', 'timezone'];
+      const publicSettings = Object.fromEntries(publicSettingKeys.filter(key => (systemSettings as any)[key] !== undefined).map(key => [key, (systemSettings as any)[key]]));
+      const data: Record<string, any> = { posts, books, photos, photoFolders, media, products, websites, systemSettings: publicSettings };
+      if (isGlobalThemeMode(themeMode)) data.themeMode = themeMode;
+      const serializedData = JSON.stringify(data);
+      if (serializedData === siteContentLastSavedRef.current) return;
+      setSyncState(prev => ({ ...prev, isSyncing: true, status: 'syncing', message: '正在将管理员发布的站点内容保存至 D1…' }));
       try {
-        const payload = { posts, books, photos, photoFolders, media, products, websites, webDavBackups, webDavMeta: { lastBackupTime: Number(webDavConfig.lastBackupTime || 0) }, systemSettings, themeMode, updatedAt: Date.now() };
-        const bc = new BroadcastChannel('fox3_realtime_sync');
-        bc.postMessage({ type: 'SYNC_ALL', payload });
-        bc.close();
-        if (!systemSettings.autoSync) return;
-        const token = getAdminSessionToken();
-        if (!token) throw new Error('自动云同步需要有效的管理员会话');
-        const res = await fetch('/api/sync/global_state', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(payload) });
-        const result = await res.json().catch(() => null);
-        if (!res.ok || result?.success !== true || result?.syncedToCloud !== true) throw new Error(result?.message || result?.error || `云端未确认持久化 (HTTP ${res.status})`);
-        setSyncState({ isSyncing: false, lastSyncedAt: Date.now(), status: 'synced', message: '自动云端同步成功' });
+        const response = await fetch('/api/site-content', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getAdminSessionToken()}` },
+          body: JSON.stringify({ expectedRevision: siteContentRevisionRef.current, data }),
+        });
+        const result = await response.json().catch(() => null);
+        if (!response.ok || result?.success !== true || result?.syncedToCloud !== true) {
+          if (response.status === 409) siteContentConflictRef.current = true;
+          throw new Error(result?.error || `站点内容持久化失败 (HTTP ${response.status})`);
+        }
+        siteContentRevisionRef.current = Number(result.revision || siteContentRevisionRef.current);
+        siteContentLastSavedRef.current = serializedData;
+        setSiteContentNeedsSeed(false);
+        setSyncState({ isSyncing: false, lastSyncedAt: Number(result.updatedAt || Date.now()), status: 'synced', message: siteContentNeedsSeed ? '站点内容已迁移并持久保存到 D1' : '站点内容已持久保存到 D1' });
       } catch (error: any) {
-        setSyncState(prev => ({ ...prev, isSyncing: false, status: 'error', message: error?.message || '自动云同步失败' }));
+        setSyncState(prev => ({ ...prev, isSyncing: false, status: 'error', message: error?.message || '站点内容保存失败；请刷新后解决版本冲突' }));
       }
-    }, 1200);
-    return () => { if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current); };
-  }, [posts, books, photos, photoFolders, media, products, websites, webDavBackups, systemSettings, themeMode, webDavConfig.lastBackupTime]);
+    }, 900);
+    return () => { if (siteContentTimeoutRef.current) clearTimeout(siteContentTimeoutRef.current); };
+  }, [posts, books, photos, photoFolders, media, products, websites, systemSettings, themeMode, currentUser, siteContentNeedsSeed]);
+
   // Robust file upload with real XMLHttpRequest progress tracking & local fallback
   const uploadFile = async (file: File): Promise<{ url: string; size: number; name: string }> => {
     startTransfer('upload', file.name);

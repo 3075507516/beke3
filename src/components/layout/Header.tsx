@@ -64,11 +64,11 @@ export const Header: React.FC<HeaderProps> = ({
   const isGuestRestricted = !currentUser && systemSettings.hideNonBlogForGuests;
 
   // Minimalist section is completely removed.
-  // Mail, Settings, and NutStore WebDAV (backup) are strictly Admin-only.
+  // Mail, Settings, and WebDAV backup are strictly Admin-only; public site sections are visitor-readable.
   const navItems = [
     { id: 'blog', label: t('nav.blog'), icon: BookOpen },
     { id: 'bookmarks', label: t('nav.bookmarks'), icon: Bookmark },
-    { id: 'sites', label: t('nav.sites') || '网站图床', icon: Globe, adminOnly: true },
+    { id: 'sites', label: t('nav.sites') || '网站图床', icon: Globe },
     { id: 'books', label: t('nav.books'), icon: BookOpen, restricted: true },
     { id: 'gallery', label: t('nav.gallery'), icon: Image, restricted: true },
     { id: 'media', label: t('nav.media'), icon: Film, restricted: true },
@@ -155,7 +155,7 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Right Controls */}
           <div className="flex items-center gap-1.5 sm:gap-2">
-            {/* Real-time Sync Indicator & Manual Sync Button */}
+            {/* Public site-content refresh: available to visitors; publishing remains admin-only. */}
             <button
               onClick={() => triggerManualSync()}
               disabled={syncState.isSyncing}
@@ -166,14 +166,14 @@ export const Header: React.FC<HeaderProps> = ({
                 className={`w-2 h-2 rounded-full ${
                   syncState.isSyncing
                     ? 'bg-amber-400 animate-ping'
-                    : channelConnected
+                    : syncState.status === 'synced'
                       ? 'bg-emerald-500 animate-pulse'
-                      : 'bg-rose-500'
-                }`}
-              />
-              <RotateCw className={`w-3 h-3 ${syncState.isSyncing ? 'animate-spin text-amber-500' : channelConnected ? 'text-emerald-500' : 'text-rose-400'}`} />
+                      : syncState.status === 'error' ? 'bg-rose-500' : 'bg-slate-400'
+                  }`}
+                />
+              <RotateCw className={`w-3 h-3 ${syncState.isSyncing ? 'animate-spin text-amber-500' : syncState.status === 'synced' ? 'text-emerald-500' : syncState.status === 'error' ? 'text-rose-400' : 'text-slate-500'}`} />
               <span className="hidden xl:inline text-[10px]">
-                {syncState.isSyncing ? t('common.syncing') : channelConnected ? t('common.realtimeSync') : t('common.offline')}
+                {syncState.isSyncing ? t('common.syncing') : t('common.refresh')}
               </span>
             </button>
 

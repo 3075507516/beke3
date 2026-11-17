@@ -256,7 +256,7 @@ export const GuideSection: React.FC = () => {
               <span>Pages 一键直接上传文件部署与获取上传包方式</span>
             </h3>
             <p className="text-xs text-slate-500">
-              此 ZIP 只包含静态前端资源，适用于预览/纯静态功能。它不包含 Pages Functions 及 D1/R2/KV 绑定；账户、验证码邮件、后台邮件、共享同步和远程文件服务需要另行部署 Functions 并绑定资源。
+              此 ZIP 只包含静态前端资源，适用于预览/纯静态功能。它不包含 Pages Functions 及 D1/R2/KV 绑定；账户、验证码邮件、后台邮件、跨设备站点内容（D1 binding 必须名为 DB）和远程文件服务需要另行部署 Functions 并绑定资源。
             </p>
           </div>
 
@@ -306,7 +306,7 @@ export const GuideSection: React.FC = () => {
               <span>腾讯云部署说明（COS 服务端对象存储后备）</span>
             </h3>
             <p className="text-xs text-slate-500">
-              可将前端静态页面部署到 EdgeOne 或轻量服务器；纯静态托管不会自动提供 Cloudflare Pages Functions、D1/R2/KV，也不会运行本文介绍的 COS 适配器。本站账户、邮件验证码、后台邮件和共享同步 API 仍需部署 Pages Functions 与相应绑定。
+              可将前端静态页面部署到 EdgeOne 或轻量服务器；纯静态托管不会自动提供 Cloudflare Pages Functions、D1/R2/KV，也不会运行本文介绍的 COS 适配器。本站账户、邮件验证码、后台邮件与站点内容数据库 API 仍需部署 Pages Functions；跨设备内容必须配置 D1 binding `DB`。
             </p>
           </div>
 
