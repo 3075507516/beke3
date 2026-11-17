@@ -219,11 +219,7 @@ export type GlobalThemeMode =
   | 'modern'
   | 'win98'
   | 'mac-classic'
-  | 'terminal'
-  | 'parchment'
-  | 'gameboy'
   | 'cyberpunk'
-  | 'steampunk'
   | 'nordic'
   | 'leather'
   | 'blueprint'
@@ -231,7 +227,11 @@ export type GlobalThemeMode =
   | 'aurora-glass'
   | 'neo-brutal'
   | 'soft-pastel'
-  | 'midnight-luxe'
+  | 'pearl-mist'
+  | 'sage-atelier'
+  | 'terracotta'
+  | 'coastal-blue'
+  | 'velvet-plum'
   | 'editorial';
 export type DeviceViewMode = 'responsive' | 'mobile';
 

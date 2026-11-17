@@ -237,7 +237,7 @@ export const SettingsSection: React.FC = () => {
     setCustomAdminName(adminUsername);
   }, [adminUsername]);
 
-  // Comprehensive Nostalgic & Distinct Aesthetic Themes (16 Full Themes)
+  // Modern design themes; removed legacy IDs are normalized below.
   const aestheticThemes: {
     id: GlobalThemeMode;
     name: string;
@@ -247,22 +247,30 @@ export const SettingsSection: React.FC = () => {
     desc: string;
   }[] = [
     { id: 'modern', name: '现代流体玻璃', icon: '✨', color: '#0ea5e9', bg: '#f8fafc', desc: '极简现代流体设计、优雅微投影与半透明层次' },
-    { id: 'win98', name: '微软 Windows 98 怀旧', icon: '🪟', color: '#000080', bg: '#008080', desc: '经典青绿视窗桌面、3D 凸面控制按钮与复古边框' },
-    { id: 'mac-classic', name: '麦金塔 Classic Platinum', icon: '🍏', color: '#333333', bg: '#7b8893', desc: '早期 Mac 经典质感金属灰底色与条纹浮雕视窗' },
-    { id: 'terminal', name: tx('Matrix 极客终端'), icon: '💻', color: '#22c55e', bg: '#050d08', desc: tx('黑客绿字控制台、荧光字符与高对比黑底') },
-    { id: 'parchment', name: tx('复古报纸羊皮纸'), icon: '📜', color: '#8c7853', bg: '#f4ecd8', desc: tx('古典衬线排版、米黄做旧纸质触感与墨水印迹') },
-    { id: 'gameboy', name: tx('8-Bit 掌机像素'), icon: '🎮', color: '#306230', bg: '#8bac0f', desc: tx('复古 GameBoy 四色点阵绿屏与怀旧像素边框') },
-    { id: 'cyberpunk', name: '赛博朋克霓虹', icon: '⚡', color: '#f72585', bg: '#0d0221', desc: '夜之城暗紫底色、高饱和荧光粉青双色光晕' },
-    { id: 'steampunk', name: tx('蒸汽朋克黄铜'), icon: '⚙️', color: '#d4af37', bg: '#2b1d0c', desc: tx('复古机械黄铜齿轮金棕、古典雕纹边饰') },
-    { id: 'nordic', name: '北欧极简原木', icon: '❄️', color: '#5e81ac', bg: '#eceff4', desc: '冷淡雪原灰蓝、舒缓柔和的纯净自然极简' },
-    { id: 'leather', name: '复古皮质笔记本', icon: '📔', color: '#cdaa7d', bg: '#3d2314', desc: '深褐皮革压纹质感、手工书缝纫边与暖调内页' },
-    { id: 'blueprint', name: '工程架构蓝图', icon: '📐', color: '#328cc1', bg: '#0b3c5d', desc: '经典建筑施工深蓝背景、白色线框坐标网格' },
+    { id: 'win98', name: '微软 Windows 98 怀旧', icon: '🪟', color: '#000080', bg: '#008080', desc: '经典青绿视窗桌面与复古边框' },
+    { id: 'mac-classic', name: '麦金塔 Classic Platinum', icon: '🍏', color: '#333333', bg: '#7b8893', desc: '经典金属灰与细腻条纹浮雕质感' },
+    { id: 'cyberpunk', name: '赛博朋克霓虹', icon: '⚡', color: '#f72585', bg: '#0d0221', desc: '暗紫底色与荧光粉青色光影' },
+    { id: 'nordic', name: '北欧极简原木', icon: '❄️', color: '#5e81ac', bg: '#eceff4', desc: '冷淡灰蓝与舒缓自然的极简气质' },
+    { id: 'leather', name: '复古皮质笔记本', icon: '📔', color: '#cdaa7d', bg: '#3d2314', desc: '深褐皮革与温暖书页色调' },
+    { id: 'blueprint', name: '工程架构蓝图', icon: '📐', color: '#328cc1', bg: '#0b3c5d', desc: '深蓝底色、线框网格与清晰层次' },
     { id: 'aurora-glass', name: '极光玻璃', icon: '🌌', color: '#14b8a6', bg: '#102a43', desc: '深海蓝渐层、青绿极光与通透玻璃层' },
     { id: 'neo-brutal', name: '新野兽派', icon: '🟨', color: '#facc15', bg: '#fff7d6', desc: '高对比原色、粗黑描边与硬朗投影' },
-    { id: 'soft-pastel', name: '柔雾粉彩', icon: '🌷', color: '#c084fc', bg: '#fbf5ff', desc: '低饱和薰衣草、奶油白和柔和圆角' },
-    { id: 'midnight-luxe', name: tx('午夜奢华'), icon: '🌙', color: '#d6b36a', bg: '#111318', desc: tx('午夜墨色、香槟金点缀与精致衬线字') },
+    { id: 'soft-pastel', name: '柔雾粉彩', icon: '🌷', color: '#c084fc', bg: '#fbf5ff', desc: '低饱和薰衣草、奶油白与柔和圆角' },
     { id: 'editorial', name: '编辑部留白', icon: '📰', color: '#c2410c', bg: '#f7f5f0', desc: '纸本文字排版、克制橘红与清晰分隔线' },
+    { id: 'pearl-mist', name: '珍珠雾白', icon: '🤍', color: '#9b8f85', bg: '#f5f2ee', desc: '珍珠白、柔雾灰与细腻暖调光泽' },
+    { id: 'sage-atelier', name: '鼠尾草工坊', icon: '🌿', color: '#71836b', bg: '#eff1e9', desc: '鼠尾草绿与亚麻白，安静自然且雅致' },
+    { id: 'terracotta', name: '陶土暖意', icon: '🪴', color: '#b9694b', bg: '#f4ebe4', desc: '手作陶土、奶油米色与温润大地色' },
+    { id: 'coastal-blue', name: '海岸蓝调', icon: '🌊', color: '#4f7890', bg: '#edf3f4', desc: '海盐白、雾蓝与清爽通透的海岸气息' },
+    { id: 'velvet-plum', name: '丝绒梅紫', icon: '🍇', color: '#805b78', bg: '#f2edf1', desc: '柔和梅紫、浅灰粉与低调丝绒质感' },
   ];
+
+  useEffect(() => {
+    const removedThemes = ['terminal', 'parchment', 'gameboy', 'steampunk', 'midnight-luxe'];
+    if (removedThemes.includes(themeMode as string)) {
+      setThemeMode('modern');
+      updateSystemSettings({ themeColor: '#0ea5e9', customPaletteBg: '#f8fafc' });
+    }
+  }, [themeMode, setThemeMode, updateSystemSettings]);
 
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -429,14 +437,14 @@ export const SettingsSection: React.FC = () => {
             {/* 2. 深度定制与全站怀旧/风格主题中心 (16 款独立风格主题) */}
             <div>
               <button type="button" aria-expanded={!collapsedSections.themeCenter} onClick={() => toggleSection('themeCenter')} className="w-full flex items-center justify-between mb-2 rounded-xl p-2 text-left hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                <span className="block text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5"><Palette className="w-4 h-4 text-sky-500" />2. 怀旧与设计风格主题中心 (16 款)</span>
+                <span className="block text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5"><Palette className="w-4 h-4 text-sky-500" />2. 时尚与设计风格主题中心 (16 款)</span>
                 {collapsedSections.themeCenter ? <ChevronDown className="w-4 h-4 text-slate-400" /> : <ChevronUp className="w-4 h-4 text-slate-400" />}
               </button>
               {!collapsedSections.themeCenter && <>
               <div className="flex items-center justify-between mb-2">
                 <label className="block text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
                   <Palette className="w-4 h-4 text-sky-500" />
-                  <span>2. 怀旧与设计风格主题中心 (已内置 16 款独立风格主题)</span>
+                  <span>2. 时尚与设计风格主题中心 (已内置 16 款独立风格主题)</span>
                 </label>
                 <span className="text-[11px] text-slate-400">深度重塑界面边框、质感、阴影与系统气质</span>
               </div>

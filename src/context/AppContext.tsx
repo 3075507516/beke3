@@ -197,9 +197,9 @@ interface AppContextType {
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 const GLOBAL_THEME_MODES: GlobalThemeMode[] = [
-  'modern', 'win98', 'mac-classic', 'terminal', 'parchment', 'gameboy',
-  'cyberpunk', 'steampunk', 'nordic', 'leather', 'blueprint', 'retro',
-  'aurora-glass', 'neo-brutal', 'soft-pastel', 'midnight-luxe', 'editorial',
+  'modern', 'win98', 'mac-classic', 'cyberpunk', 'nordic', 'leather',
+  'blueprint', 'retro', 'aurora-glass', 'neo-brutal', 'soft-pastel',
+  'editorial', 'pearl-mist', 'sage-atelier', 'terracotta', 'coastal-blue', 'velvet-plum',
 ];
 const isGlobalThemeMode = (value: unknown): value is GlobalThemeMode =>
   typeof value === 'string' && GLOBAL_THEME_MODES.includes(value as GlobalThemeMode);

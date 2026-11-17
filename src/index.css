@@ -93,73 +93,6 @@ body {
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.8), 0 1px 2px rgba(0,0,0,0.2) !important;
 }
 
-/* 3. Matrix Hacker Terminal */
-.theme-terminal {
-  font-family: 'Courier New', Courier, monospace !important;
-  background-color: #050d08 !important;
-  color: #22c55e !important;
-}
-.theme-terminal [class*="rounded-"] {
-  border-radius: 0px !important;
-  border-color: #166534 !important;
-}
-.theme-terminal header {
-  background-color: #0a180e !important;
-  border-bottom: 2px solid #22c55e !important;
-  box-shadow: 0 0 10px rgba(34, 197, 94, 0.2) !important;
-  color: #22c55e !important;
-}
-.theme-terminal button:not([class*="bg-transparent"]) {
-  background-color: #0d2818 !important;
-  border: 1px solid #22c55e !important;
-  color: #4ade80 !important;
-  border-radius: 0px !important;
-  text-shadow: 0 0 5px rgba(74, 222, 128, 0.5) !important;
-}
-
-/* 4. Vintage Newsprint / Parchment */
-.theme-parchment {
-  font-family: 'Georgia', 'Songti SC', 'SimSun', serif !important;
-  background-color: #f4ecd8 !important;
-  color: #2c251e !important;
-}
-.theme-parchment [class*="rounded-"] {
-  border-radius: 3px !important;
-  border-color: #d1c2a5 !important;
-}
-.theme-parchment header {
-  background-color: #ebe0c6 !important;
-  border-bottom: 2px solid #8c7853 !important;
-  color: #1a1612 !important;
-}
-.theme-parchment button:not([class*="bg-transparent"]) {
-  background-color: #dfd0b5 !important;
-  border: 1px solid #8c7853 !important;
-  color: #2c251e !important;
-}
-
-/* 5. 8-Bit GameBoy Retro */
-.theme-gameboy {
-  font-family: 'Press Start 2P', monospace, sans-serif !important;
-  background-color: #8bac0f !important;
-  color: #0f380f !important;
-}
-.theme-gameboy [class*="rounded-"] {
-  border-radius: 4px !important;
-  border-color: #306230 !important;
-}
-.theme-gameboy header {
-  background-color: #9bbc0f !important;
-  border-bottom: 3px solid #0f380f !important;
-  color: #0f380f !important;
-}
-.theme-gameboy button:not([class*="bg-transparent"]) {
-  background-color: #306230 !important;
-  border: 2px solid #0f380f !important;
-  color: #9bbc0f !important;
-  border-radius: 2px !important;
-}
-
 /* 6. Cyberpunk Neon */
 .theme-cyberpunk {
   font-family: 'Orbitron', -apple-system, sans-serif !important;
@@ -180,27 +113,6 @@ body {
   background: linear-gradient(135deg, #7209b7, #f72585) !important;
   border: 1px solid #4cc9f0 !important;
   color: #ffffff !important;
-}
-
-/* 7. Steampunk Brass & Gear */
-.theme-steampunk {
-  font-family: 'Palatino Linotype', 'Book Antiqua', serif !important;
-  background-color: #2b1d0c !important;
-  color: #d4af37 !important;
-}
-.theme-steampunk [class*="rounded-"] {
-  border-radius: 6px !important;
-  border-color: #8c6d31 !important;
-}
-.theme-steampunk header {
-  background: linear-gradient(to bottom, #4a3319 0%, #2b1d0c 100%) !important;
-  border-bottom: 2px solid #d4af37 !important;
-  color: #f3e5ab !important;
-}
-.theme-steampunk button:not([class*="bg-transparent"]) {
-  background: linear-gradient(to bottom, #8c6d31 0%, #594217 100%) !important;
-  border: 1px solid #d4af37 !important;
-  color: #fff8dc !important;
 }
 
 /* 8. Nordic Minimalist */
@@ -324,60 +236,28 @@ body.retro-theme .btn-retro-secondary:hover {
 .theme-soft-pastel header { background: rgba(255, 250, 255, .9) !important; border-bottom: 1px solid #eadcf4 !important; color: #493d59 !important; }
 .theme-soft-pastel button:not([class*="bg-transparent"]) { border-radius: 999px !important; }
 
-/* 15. Midnight Luxe */
-.theme-midnight-luxe { background: radial-gradient(ellipse at top, #27252a, #111318 65%) !important; color: #eee9df !important; font-family: 'Georgia', 'Noto Serif SC', serif !important; }
-.theme-midnight-luxe [class*="rounded-3xl"], .theme-midnight-luxe [class*="rounded-2xl"] { border-color: rgba(214, 179, 106, .28) !important; box-shadow: 0 16px 48px rgba(0, 0, 0, .3) !important; }
-.theme-midnight-luxe header { background: rgba(17, 19, 24, .92) !important; border-bottom: 1px solid rgba(214, 179, 106, .48) !important; color: #f5e8c8 !important; }
-.theme-midnight-luxe button:not([class*="bg-transparent"]) { border-color: rgba(214, 179, 106, .55) !important; }
-
 /* 16. Editorial */
 .theme-editorial { background-color: #f7f5f0 !important; color: #25221f !important; font-family: 'Georgia', 'Noto Serif SC', serif !important; }
 .theme-editorial header { background: #fbfaf7 !important; border-bottom: 2px solid #25221f !important; color: #25221f !important; }
 .theme-editorial [class*="rounded-3xl"], .theme-editorial [class*="rounded-2xl"] { border-color: #d8d2c8 !important; border-radius: 4px !important; box-shadow: none !important; }
 .theme-editorial button:not([class*="bg-transparent"]) { border-radius: 3px !important; border-bottom-width: 2px !important; }
 
-
-/* Signature theme refinements: tactile visual language also applies to authentication. */
-.theme-steampunk {
-  --theme-accent: #d9a441;
-  background: radial-gradient(ellipse at 18% 4%, rgba(225, 170, 77, .20), transparent 35%), linear-gradient(135deg, #17120d, #332313 52%, #17130f) !important;
-  color: #f4e4c3 !important;
-  font-family: Georgia, 'Noto Serif SC', serif !important;
-}
-.theme-steampunk header { background: linear-gradient(180deg, rgba(56, 39, 22, .96), rgba(30, 23, 16, .96)) !important; border-bottom: 1px solid #a77a32 !important; color: #f3d89f !important; box-shadow: 0 4px 24px rgba(0,0,0,.3); }
-.theme-steampunk [class*="rounded-3xl"], .theme-steampunk [class*="rounded-2xl"] { border-color: rgba(207, 158, 73, .42) !important; box-shadow: inset 0 1px rgba(255,237,190,.07), 0 16px 40px rgba(0,0,0,.24) !important; }
-.theme-steampunk button:not([class*="bg-transparent"]) { border-color: rgba(223,178,95,.65) !important; }
-.theme-steampunk .auth-modal-panel { color: #f5e8cd !important; background: radial-gradient(ellipse at 50% -20%, rgba(214,164,73,.20), transparent 58%), linear-gradient(145deg,#382a1b,#21180f 72%) !important; border: 1px solid #bd9148 !important; box-shadow: 0 24px 90px rgba(0,0,0,.62), inset 0 0 0 5px rgba(190,145,72,.08) !important; }
-.theme-steampunk .auth-modal-panel input { color: #fff0d2 !important; background: rgba(15,12,9,.65) !important; border-color: rgba(215,172,98,.55) !important; }
-.theme-steampunk .auth-modal-panel button[type="submit"] { background: linear-gradient(110deg,#8d5d22,#d7a84c 52%,#8d5d22) !important; color: #21170c !important; }
-
-.theme-terminal { background: radial-gradient(ellipse at 50% 0%, #092b1c, #020906 70%) !important; color: #c4ffd7 !important; font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace !important; }
-.theme-terminal header { background: rgba(2,12,7,.96) !important; border-bottom: 1px solid rgba(56,235,128,.42) !important; color: #b8ffce !important; box-shadow: 0 4px 28px rgba(0,255,119,.08); }
-.theme-terminal [class*="rounded-3xl"], .theme-terminal [class*="rounded-2xl"] { border-color: rgba(56,235,128,.3) !important; box-shadow: inset 0 1px rgba(180,255,207,.04), 0 10px 38px rgba(0,0,0,.36) !important; }
-.theme-terminal button:not([class*="bg-transparent"]) { border-color: rgba(69,245,139,.48) !important; }
-.theme-terminal .auth-modal-panel { color: #c8ffda !important; background: linear-gradient(160deg,rgba(6,31,19,.98),rgba(2,10,6,.99)) !important; border: 1px solid #27c765 !important; border-radius: 10px !important; box-shadow: 0 0 0 1px rgba(45,255,126,.10),0 0 55px rgba(0,255,100,.18) !important; font-family: 'SFMono-Regular',Consolas,monospace !important; }
-.theme-terminal .auth-modal-panel input { color: #c8ffda !important; background: #020906 !important; border-color: rgba(52,211,103,.45) !important; }
-.theme-terminal .auth-modal-panel button[type="submit"] { background: #0b6b34 !important; color: #e3ffe9 !important; border: 1px solid #48ed7d !important; }
-
-.theme-parchment { background: radial-gradient(ellipse at 50% 10%, #fff9e9, #e7d8b7 75%) !important; color: #382c1c !important; font-family: Georgia, 'Noto Serif SC', serif !important; }
-.theme-parchment header { background: rgba(248,239,218,.95) !important; color: #382c1c !important; border-bottom: 1px solid #a89066 !important; }
-.theme-parchment [class*="rounded-3xl"], .theme-parchment [class*="rounded-2xl"] { border-color: #b7a27c !important; box-shadow: 0 7px 20px rgba(87,62,29,.12) !important; }
-.theme-parchment .auth-modal-panel { color: #382c1c !important; background: repeating-linear-gradient(0deg,rgba(109,82,43,.018) 0 1px,transparent 1px 5px),linear-gradient(135deg,#fff9e9,#eadbb9) !important; border: 1px solid #9a8056 !important; border-radius: 5px !important; box-shadow: 0 24px 70px rgba(69,48,21,.34),inset 0 0 0 5px rgba(148,113,63,.09) !important; }
-.theme-parchment .auth-modal-panel input { color: #302416 !important; background: rgba(255,252,242,.82) !important; border-color: #b4a17f !important; }
-.theme-parchment .auth-modal-panel button[type="submit"] { background: linear-gradient(110deg,#6e4528,#9a6940) !important; color: #fff4dc !important; }
-
-.theme-gameboy { background: linear-gradient(145deg,#c1cf77,#8ea64a 52%,#71873b) !important; color: #172b20 !important; font-family: 'Courier New', monospace !important; }
-.theme-gameboy header { background: #d8dfaa !important; border-bottom: 4px solid #71873b !important; color: #233b2c !important; }
-.theme-gameboy [class*="rounded-3xl"], .theme-gameboy [class*="rounded-2xl"] { border: 2px solid #526a3c !important; border-radius: 4px !important; box-shadow: 4px 4px 0 rgba(44,66,39,.35) !important; }
-.theme-gameboy button:not([class*="bg-transparent"]) { border-color: #405a37 !important; border-radius: 3px !important; }
-.theme-gameboy .auth-modal-panel { color: #203528 !important; background: linear-gradient(135deg,#dce5af,#a9bd71) !important; border: 4px solid #526a3c !important; border-radius: 4px !important; box-shadow: 8px 8px 0 rgba(37,57,37,.55) !important; font-family: 'Courier New',monospace !important; }
-.theme-gameboy .auth-modal-panel input { color: #203528 !important; background: #edf2d0 !important; border: 2px solid #526a3c !important; border-radius: 3px !important; }
-.theme-gameboy .auth-modal-panel button[type="submit"] { background: #344f38 !important; color: #e6efbd !important; border-radius: 3px !important; }
-
-.theme-midnight-luxe { background: radial-gradient(ellipse at 50% -10%,#36313a,#121318 58%,#090a0d) !important; color: #f2ead9 !important; font-family: 'Bodoni 72',Georgia,'Noto Serif SC',serif !important; }
-.theme-midnight-luxe header { background: rgba(15,16,21,.94) !important; border-bottom: 1px solid rgba(223,190,122,.5) !important; color: #f5e7c5 !important; box-shadow: 0 8px 30px rgba(0,0,0,.32); }
-.theme-midnight-luxe [class*="rounded-3xl"], .theme-midnight-luxe [class*="rounded-2xl"] { border-color: rgba(221,190,128,.27) !important; box-shadow: 0 18px 54px rgba(0,0,0,.32),inset 0 1px rgba(255,240,204,.04) !important; }
-.theme-midnight-luxe button:not([class*="bg-transparent"]) { border-color: rgba(222,188,117,.5) !important; }
-.theme-midnight-luxe .auth-modal-panel { color: #f1e6ce !important; background: radial-gradient(ellipse at 50% 0%,rgba(217,183,112,.17),transparent 58%),linear-gradient(145deg,#26242a,#111217 72%) !important; border: 1px solid rgba(222,190,124,.62) !important; box-shadow: 0 28px 100px rgba(0,0,0,.72),inset 0 0 0 5px rgba(223,190,124,.045) !important; }
-.theme-midnight-luxe .auth-modal-panel input { color: #fbf2df !important; background: rgba(8,9,12,.68) !important; border-color: rgba(222,190,124,.38) !important; }
-.theme-midnight-luxe .auth-modal-panel button[type="submit"] { background: linear-gradient(110deg,#927347,#d9bd7d 52%,#927347) !important; color: #17151a !important; }
+/* Fashion-forward themes */
+.theme-pearl-mist { background: radial-gradient(ellipse at 15% 0%,#fff,#f2eee9 72%) !important; color:#393631 !important; }
+.theme-pearl-mist header { background:rgba(255,255,255,.88) !important; border-bottom:1px solid #e6dfd8 !important; color:#393631 !important; }
+.theme-pearl-mist [class*="rounded-3xl"],.theme-pearl-mist [class*="rounded-2xl"] { border-color:#e5ded7 !important; box-shadow:0 14px 38px rgba(92,78,64,.08) !important; }
+.theme-sage-atelier { background:linear-gradient(145deg,#f4f5ef,#e8ece3) !important; color:#354238 !important; }
+.theme-sage-atelier header { background:rgba(247,248,243,.92) !important; border-bottom:1px solid #d8dfd3 !important; color:#354238 !important; }
+.theme-sage-atelier [class*="rounded-3xl"],.theme-sage-atelier [class*="rounded-2xl"] { border-color:#dce2d7 !important; box-shadow:0 12px 34px rgba(63,83,64,.08) !important; }
+.theme-terracotta { background:radial-gradient(ellipse at 80% 0%,#fff8f0,#f1e6dc 72%) !important; color:#49352d !important; }
+.theme-terracotta header { background:rgba(250,244,237,.94) !important; border-bottom:1px solid #e2d1c4 !important; color:#49352d !important; }
+.theme-terracotta [class*="rounded-3xl"],.theme-terracotta [class*="rounded-2xl"] { border-color:#e4d4c8 !important; box-shadow:0 12px 34px rgba(130,76,52,.09) !important; }
+.theme-coastal-blue { background:linear-gradient(150deg,#f7f9f8,#e8f0f2) !important; color:#304653 !important; }
+.theme-coastal-blue header { background:rgba(247,250,250,.92) !important; border-bottom:1px solid #d8e3e7 !important; color:#304653 !important; }
+.theme-coastal-blue [class*="rounded-3xl"],.theme-coastal-blue [class*="rounded-2xl"] { border-color:#dce6e9 !important; box-shadow:0 12px 36px rgba(58,91,108,.09) !important; }
+.theme-velvet-plum { background:radial-gradient(ellipse at 85% 0%,#fff9fd,#eee7ed 70%) !important; color:#483a48 !important; }
+.theme-velvet-plum header { background:rgba(250,246,250,.93) !important; border-bottom:1px solid #e0d5e0 !important; color:#483a48 !important; }
+.theme-velvet-plum [class*="rounded-3xl"],.theme-velvet-plum [class*="rounded-2xl"] { border-color:#e3d9e3 !important; box-shadow:0 14px 38px rgba(91,65,89,.09) !important; }
+/* Authentication dialogs inherit the active theme's palette without changing AuthModal. */
+.theme-pearl-mist .auth-modal-panel,.theme-sage-atelier .auth-modal-panel,.theme-terracotta .auth-modal-panel,.theme-coastal-blue .auth-modal-panel,.theme-velvet-plum .auth-modal-panel { color:inherit !important; background:rgba(255,255,255,.94) !important; border-color:rgba(120,120,120,.2) !important; box-shadow:0 24px 80px rgba(35,40,45,.2) !important; backdrop-filter:blur(18px); }
+.theme-pearl-mist .auth-modal-panel input,.theme-sage-atelier .auth-modal-panel input,.theme-terracotta .auth-modal-panel input,.theme-coastal-blue .auth-modal-panel input,.theme-velvet-plum .auth-modal-panel input { color:inherit !important; background:rgba(255,255,255,.8) !important; }

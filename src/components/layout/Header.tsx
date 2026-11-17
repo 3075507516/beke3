@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import {
   BookOpen,
@@ -24,10 +24,13 @@ import {
   Cloud,
   Globe,
   Palette,
+  Bell,
 } from 'lucide-react';
 import { SafeImage } from '../common/SafeImage';
 import { clearAdminSessionToken } from '../../utils/adminSession';
 import { clearUserSessionToken } from '../../utils/userSession';
+import { getAdminSessionToken } from '../../utils/adminSession';
+import { getUserSessionToken } from '../../utils/userSession';
 
 interface HeaderProps {
   currentTab: string;
@@ -44,8 +47,6 @@ export const Header: React.FC<HeaderProps> = ({
     currentUser,
     setCurrentUser,
     systemSettings,
-    deviceMode,
-    setDeviceMode,
     syncState,
     triggerManualSync,
     locale,
@@ -56,6 +57,7 @@ export const Header: React.FC<HeaderProps> = ({
 
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   // Check admin privileges
   const isAdmin = currentUser?.role === 'admin';
@@ -72,7 +74,8 @@ export const Header: React.FC<HeaderProps> = ({
     { id: 'books', label: t('nav.books'), icon: BookOpen, restricted: true },
     { id: 'gallery', label: t('nav.gallery'), icon: Image, restricted: true },
     { id: 'media', label: t('nav.media'), icon: Film, restricted: true },
-    { id: 'shop', label: t('nav.shop'), icon: ShoppingBag, restricted: true },
+    { id: 'shop', label: t('nav.shop'), icon: ShoppingBag },
+    { id: 'legal', label: '政策与联系', icon: ShieldAlert },
     { id: 'backup', label: '备份区', icon: Cloud, adminOnly: true },
     { id: 'mail', label: t('nav.mail'), icon: Mail, adminOnly: true },
     { id: 'settings', label: t('nav.settings'), icon: Settings, adminOnly: true },
@@ -95,10 +98,27 @@ export const Header: React.FC<HeaderProps> = ({
     setCurrentUser(null);
   };
 
-  const toggleDeviceMode = () => {
-    // Isolated toggle between responsive and mobile
-    setDeviceMode(deviceMode === 'mobile' ? 'responsive' : 'mobile');
-  };
+  useEffect(() => {
+    if (!currentUser) {
+      setUnreadCount(0);
+      return;
+    }
+    let active = true;
+    const refreshUnread = async () => {
+      const token = isAdmin ? getAdminSessionToken() : getUserSessionToken();
+      if (!token) return;
+      try {
+        const response = await fetch('/api/notifications/unread', { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' });
+        const result = await response.json();
+        if (active && response.ok && result.success) setUnreadCount(Math.max(0, Number(result.count) || 0));
+      } catch {
+        if (active) setUnreadCount(0);
+      }
+    };
+    void refreshUnread();
+    const timer = window.setInterval(refreshUnread, 30000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [currentUser?.id, isAdmin]);
 
 
   return (
@@ -181,24 +201,23 @@ export const Header: React.FC<HeaderProps> = ({
               </select>
             </label>
 
-            {/* Device Mode Switcher (Independent phone view vs responsive) */}
-            <button
-              onClick={toggleDeviceMode}
-              title={`界面模式: ${deviceMode === 'mobile' ? t('header.mobileView') : t('header.desktopView')}`}
-              className={`p-2 rounded-lg transition ${
-                deviceMode === 'mobile'
-                  ? 'bg-sky-500 text-white shadow-sm'
-                  : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800'
-              }`}
-            >
-              {deviceMode === 'mobile' ? (
-                <Smartphone className="w-4 h-4" />
-              ) : (
-                <Monitor className="w-4 h-4" />
-              )}
-            </button>
-
-
+            {currentUser && (
+              <button
+                onClick={() => {
+                  setCurrentTab('shop');
+                  try { window.sessionStorage.setItem('fox3-open-messages', '1'); } catch {}
+                  window.dispatchEvent(new Event('fox3-open-messages'));
+                  const token = isAdmin ? getAdminSessionToken() : getUserSessionToken();
+                  if (token) void fetch('/api/notifications/read', { method: 'POST', headers: { Authorization: `Bearer ${token}` } }).catch(() => {});
+                }}
+                title={unreadCount ? `有 ${unreadCount} 条未读站内消息，打开商城/对话` : '打开商城与站内对话'}
+                aria-label={unreadCount ? `${unreadCount} 条未读站内消息` : '站内消息'}
+                className="relative p-2 rounded-lg text-slate-500 hover:text-sky-600 dark:hover:text-sky-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+              >
+                <Bell className="w-4 h-4" />
+                {unreadCount > 0 && <span className="absolute -right-0.5 -top-0.5 min-w-4 h-4 px-1 rounded-full bg-rose-500 text-white text-[9px] font-bold flex items-center justify-center animate-pulse">{unreadCount > 99 ? '99+' : unreadCount}</span>}
+              </button>
+            )}
             {/* Collapse / Expand Header Toggle */}
             <button
               onClick={() => setIsCollapsed(!isCollapsed)}

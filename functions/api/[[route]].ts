@@ -1,6 +1,7 @@
 import { createVerificationCode, dispatchEmail, escapeHtml, normalizeEmail, probeResendConnection, type MailProvider, type OutboundMailSettings } from '../mail';
 import { getExternalObjectStoreConfig, getExternalObject, putExternalObject, probeExternalObjectStore } from '../object-storage';
 import { handleWebDavAction } from '../webdav';
+import { handleCommerceRequest } from '../commerce';
 
 // Cloudflare Pages Functions API Handler
 // Routes: /api/*
@@ -466,6 +467,15 @@ export const onRequest = async (context: any) => {
   if (request.method === 'OPTIONS') {
     return new Response(null, { headers });
   }
+  const commerceResponse = await handleCommerceRequest(request, path, env, headers, {
+    isAdmin: req => hasAdminSession(req, env),
+    getUser: req => getAuthenticatedUser(req, env),
+    sendMail: async (to, subject, text, html) => {
+      const result = await dispatchEmail(getOutboundSettings({}, env), { to, subject, text, html });
+      return { success: result.success, error: result.error };
+    },
+  });
+  if (commerceResponse) return commerceResponse;
   // WebDAV proxy: keeps remote Basic Auth out of third-party browser requests and
   // restricts every operation to a signed administrator session.
   if (path.startsWith('/webdav/')) {
@@ -1321,7 +1331,7 @@ export const onRequest = async (context: any) => {
         }
         const settings = source.systemSettings && typeof source.systemSettings === 'object' ? source.systemSettings : {};
         result.systemSettings = Object.fromEntries(publicSettings.filter(key => settings[key] !== undefined).map(key => [key, settings[key]]));
-        if (['modern','win98','mac-classic','terminal','parchment','gameboy','cyberpunk','steampunk','nordic','leather','blueprint','retro','aurora-glass','neo-brutal','soft-pastel','midnight-luxe','editorial'].includes(source.themeMode)) result.themeMode = source.themeMode;
+        if (['modern','win98','mac-classic','cyberpunk','nordic','leather','blueprint','retro','aurora-glass','neo-brutal','soft-pastel','editorial','pearl-mist','sage-atelier','terracotta','coastal-blue','velvet-plum'].includes(source.themeMode)) result.themeMode = source.themeMode;
         return result;
       };
       const publicUserMedia = async (data: Record<string, any>) => {

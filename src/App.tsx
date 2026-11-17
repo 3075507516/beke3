@@ -13,6 +13,7 @@ import { ShopSection } from './components/shop/ShopSection';
 import { WebDavBackupSection } from './components/backup/WebDavBackupSection';
 import { SettingsSection } from './components/settings/SettingsSection';
 import { GuideSection } from './components/guide/GuideSection';
+import { LegalPagesSection } from './components/legal/LegalPagesSection';
 import { AuthModal } from './components/modals/AuthModal';
 import { TransferProgressBar } from './components/common/TransferProgressBar';
 import { ArrowUp, Sparkles, Compass } from 'lucide-react';
@@ -24,6 +25,11 @@ const MainLayout: React.FC = () => {
 
   const isAdmin = currentUser?.role === 'admin';
   const isGuestRestricted = !currentUser && systemSettings.hideNonBlogForGuests;
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.has('paymentOrder') || params.has('paymentCancel')) setCurrentTab('shop');
+  }, []);
 
   // If non-admin tries to access admin-only tabs (sites, mail, settings, backup), redirect safely to blog
   useEffect(() => {
@@ -37,7 +43,7 @@ const MainLayout: React.FC = () => {
     if (
       !currentUser &&
       systemSettings.hideNonBlogForGuests &&
-      ['books', 'gallery', 'media', 'shop', 'backup'].includes(currentTab)
+      ['books', 'gallery', 'media', 'backup'].includes(currentTab)
     ) {
       setCurrentTab('blog');
     }
@@ -90,6 +96,7 @@ const MainLayout: React.FC = () => {
           {currentTab === 'gallery' && <GallerySection />}
           {currentTab === 'media' && <MediaSection />}
           {currentTab === 'shop' && <ShopSection />}
+          {currentTab === 'legal' && <LegalPagesSection />}
           {currentTab === 'backup' && isAdmin && <WebDavBackupSection />}
           {currentTab === 'mail' && isAdmin && <MailSection />}
           {currentTab === 'settings' && isAdmin && (
@@ -111,6 +118,10 @@ const MainLayout: React.FC = () => {
             </div>
             <div className="flex items-center gap-4 text-[11px] shrink-0">
               <span>依托 Cloudflare D1 + R2 原生构建</span>
+              <span>•</span>
+              <button onClick={() => setCurrentTab('blog')} className="hover:underline transition">首页</button>
+              <button onClick={() => setCurrentTab('shop')} className="hover:underline transition">价格与商品</button>
+              <button onClick={() => setCurrentTab('legal')} className="hover:underline transition">退款 / 隐私 / 服务条款 / 联系</button>
               <span>•</span>
               <button
                 onClick={() => setCurrentTab('guide')}

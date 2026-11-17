@@ -1,1339 +1,302 @@
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { QRCodeSVG } from 'qrcode.react';
 import { useApp } from '../../context/AppContext';
-import { Product, Order, OrderStatus, ChatMessage } from '../../types';
+import { Product } from '../../types';
 import { SafeImage } from '../common/SafeImage';
-import {
-  ShoppingBag,
-  Plus,
-  Trash2,
-  Edit3,
-  CreditCard,
-  MessageCircle,
-  X,
-  Send,
-  CheckCircle,
-  Truck,
-  ShieldCheck,
-  Search,
-  Check,
-} from 'lucide-react';
+import { getUserSessionToken } from '../../utils/userSession';
+import { getAdminSessionToken } from '../../utils/adminSession';
+import { CheckCircle, Edit3, MessageCircle, Plus, Send, ShoppingBag, Trash2, Truck, X } from 'lucide-react';
+
+type Provider = 'alipay' | 'wechat' | 'stripe' | 'paypal';
+type Order = {
+  id: string; status: string; amountMinor: number; amount?: number; currency: string;
+  createdAt: number; productName: string; productId: string; quantity: number;
+  customerName?: string; customerPhone?: string; customerEmail?: string; shippingAddress?: string; username?: string;
+  paymentProvider: Provider; trackingNumber?: string; carrier?: string;
+};
+type Conversation = { id: string; username?: string; userName?: string; lastMessage?: string; unread?: number; unreadCount?: number };
+type ChatMessage = { id: string; senderRole: 'admin' | 'user'; senderName: string; message: string; createdAt: number };
+type PaymentState = { orderId: string; payment?: { redirectUrl?: string; qrCode?: string }; order?: Order };
+
+const statusLabels: Record<string, string> = {
+  paid: '已支付', failed: '支付失败', pending: '待支付', cancelled: '已取消',
+  refunded: '已退款', refund_pending: '退款处理中', shipped: '已发货',
+};
+const money = (order: Order) => `${order.currency || 'CNY'} ${(Number(order.amountMinor || 0) / 100).toFixed(2)}`;
 
 export const ShopSection: React.FC = () => {
-  const {
-    products,
-    setProducts,
-    orders,
-    setOrders,
-    chatMessages,
-    setChatMessages,
-    currentUser,
-    paymentSettings,
-    updatePaymentSettings,
-    uploadFile,
-    systemSettings,
-    deviceMode,
-  } = useApp();
-
-  const [activeShowcase, setActiveShowcase] = useState<string>('all');
-  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
-
-  // Chat window state
-  const [isChatOpen, setIsChatOpen] = useState(false);
-  const [chatInput, setChatInput] = useState('');
-  const chatBottomRef = useRef<HTMLDivElement>(null);
-
-  // Currency selection: CNY (¥), USD ($), EUR (€)
-  const [currency, setCurrency] = useState<'CNY' | 'USD' | 'EUR'>('CNY');
-  const currencyRate: Record<'CNY' | 'USD' | 'EUR', { symbol: string; rate: number }> = {
-    CNY: { symbol: '¥', rate: 1 },
-    USD: { symbol: '$', rate: 0.14 },
-    EUR: { symbol: '€', rate: 0.13 },
+  const { products, setProducts, currentUser, uploadFile, systemSettings, deviceMode } = useApp();
+  const isAdmin = currentUser?.role === 'admin';
+  const token = isAdmin ? getAdminSessionToken() : getUserSessionToken();
+  const headers = (): HeadersInit => ({ Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' });
+  const api = async (path: string, init: RequestInit = {}) => {
+    const response = await fetch(path, { ...init, headers: { ...headers(), ...(init.headers as Record<string, string> || {}) }, cache: 'no-store' });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.success === false) throw new Error(data.error || data.message || `请求失败 (${response.status})`);
+    return data;
   };
 
-  // Checkout modal
-  const [checkoutProduct, setCheckoutProduct] = useState<Product | null>(null);
-  const [orderQuantity, setOrderQuantity] = useState(1);
-  const [couponCode, setCouponCode] = useState('');
-  const [discountPercent, setDiscountPercent] = useState(0);
-  const [customerName, setCustomerName] = useState('');
-  const [customerEmail, setCustomerEmail] = useState('');
+  const [showcase, setShowcase] = useState('all');
+  const [editing, setEditing] = useState<Partial<Product> | null>(null);
+  const [checkout, setCheckout] = useState<Product | null>(null);
+  const [quantity, setQuantity] = useState(1);
+  const [provider, setProvider] = useState<Provider>('alipay');
+  const [customerName, setCustomerName] = useState(currentUser?.username || '');
   const [customerPhone, setCustomerPhone] = useState('');
-  const [customerAddress, setCustomerAddress] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState<
-    'paypal' | 'worldfirst' | 'wechat' | 'alipay' | 'stripe' | 'usdt' | 'unionpay'
-  >('wechat');
-  const [orderSuccess, setOrderSuccess] = useState<string | null>(null);
+  const [customerEmail, setCustomerEmail] = useState(currentUser?.email || '');
+  const [shippingAddress, setShippingAddress] = useState('');
+  const [couponCode, setCouponCode] = useState('');
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [conversationId, setConversationId] = useState('');
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messageText, setMessageText] = useState('');
+  const [chatOpen, setChatOpen] = useState(false);
+  const [payment, setPayment] = useState<PaymentState | null>(null);
+  const [search, setSearch] = useState('');
+  const [tracking, setTracking] = useState<Record<string, string>>({});
+  const [adminEmail, setAdminEmail] = useState('');
+  const [notifyEmail, setNotifyEmail] = useState(false);
+  const [settingsSaved, setSettingsSaved] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
 
-  // Admin view tabs
-  const [adminView, setAdminView] = useState<'showcase' | 'orders' | 'gateways'>('showcase');
-  const [orderFilter, setOrderFilter] = useState<'all' | OrderStatus>('all');
-  const [orderSearch, setOrderSearch] = useState('');
-
-  // Product editor modal state
-  const [isEditingProduct, setIsEditingProduct] = useState(false);
-  const [editingProduct, setEditingProduct] = useState<Partial<Product>>({
-    name: '',
-    description: '',
-    price: 99.0,
-    images: [],
-    category: '数字化产品',
-    stock: 50,
-    showcaseId: 'showcase-main',
-  });
-
-  // Tracking edit state for admin
-  const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
-  const [trackingNumberInput, setTrackingNumberInput] = useState('');
-  const [carrierInput, setCarrierInput] = useState('');
-
-  const showcases = [
-    { id: 'all', name: '全系列展区' },
-    { id: 'showcase-main', name: '主打数字化展区' },
-    { id: 'showcase-hardware', name: '限定周边展区' },
-    { id: 'showcase-service', name: '定制服务展区' },
-  ];
-
-  const filteredProducts = products.filter(p => {
-    if (activeShowcase === 'all') return true;
-    return p.showcaseId === activeShowcase;
-  });
-
-  const filteredOrders = orders.filter(o => {
-    const matchFilter = orderFilter === 'all' || o.status === orderFilter;
-    const matchSearch =
-      !orderSearch ||
-      o.id.toLowerCase().includes(orderSearch.toLowerCase()) ||
-      o.customerName.toLowerCase().includes(orderSearch.toLowerCase()) ||
-      o.customerPhone.includes(orderSearch) ||
-      o.customerEmail.toLowerCase().includes(orderSearch.toLowerCase()) ||
-      (o.trackingNumber && o.trackingNumber.toLowerCase().includes(orderSearch.toLowerCase()));
-    return matchFilter && matchSearch;
-  });
-
-  const handleUploadImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-
-    for (let i = 0; i < files.length; i++) {
-      const res = await uploadFile(files[i]);
-      setEditingProduct(prev => ({
-        ...prev,
-        images: [...(prev.images || []), res.url],
-      }));
-    }
+  const loadOrders = async () => {
+    if (!currentUser || !token) return;
+    try {
+      const data = await api('/api/orders');
+      setOrders(Array.isArray(data.orders) ? data.orders : []);
+    } catch (e) { setError(e instanceof Error ? e.message : '订单加载失败'); }
+  };
+  const loadConversations = async () => {
+    if (!currentUser || !token) return;
+    try {
+      const data = await api('/api/chat/conversations');
+      const list: Conversation[] = Array.isArray(data.conversations) ? data.conversations : [];
+      setConversations(list);
+      if (isAdmin && !list.some(item => item.id === conversationId)) setConversationId(list[0]?.id || '');
+      if (!conversationId && list[0]) setConversationId(list[0].id);
+    } catch (e) { setError(e instanceof Error ? e.message : '对话加载失败'); }
+  };
+  const loadMessages = async (id: string) => {
+    if (!id || !token) return;
+    try {
+      const data = await api(`/api/chat/messages?conversationId=${encodeURIComponent(id)}`);
+      setMessages(Array.isArray(data.messages) ? data.messages : []);
+    } catch (e) { setError(e instanceof Error ? e.message : '消息加载失败'); }
   };
 
-  const handleRemoveImage = (index: number) => {
-    setEditingProduct(prev => ({
-      ...prev,
-      images: (prev.images || []).filter((_, idx) => idx !== index),
-    }));
-  };
-
-  const handleSaveProduct = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingProduct.name || !editingProduct.price) return;
-
-    const defaultImg =
-      'https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?auto=format&fit=crop&w=800&q=80';
-    const imgs =
-      editingProduct.images && editingProduct.images.length > 0
-        ? editingProduct.images
-        : [defaultImg];
-
-    if (editingProduct.id) {
-      setProducts(prev =>
-        prev.map(p =>
-          p.id === editingProduct.id
-            ? ({ ...p, ...editingProduct, images: imgs, updatedAt: Date.now() } as Product)
-            : p
-        )
-      );
-    } else {
-      const newP: Product = {
-        id: `prod-${Date.now()}`,
-        name: editingProduct.name,
-        description: editingProduct.description || '',
-        price: Number(editingProduct.price),
-        images: imgs,
-        category: editingProduct.category || '默认',
-        stock: Number(editingProduct.stock || 10),
-        showcaseId: editingProduct.showcaseId || 'showcase-main',
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      };
-      setProducts(prev => [newP, ...prev]);
-    }
-
-    setIsEditingProduct(false);
-  };
-
-  const handleDeleteProduct = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (window.confirm('确认删除此商品展示吗？')) {
-      setProducts(prev => prev.filter(p => p.id !== id));
-      if (selectedProduct?.id === id) setSelectedProduct(null);
-    }
-  };
-
-  const handleApplyCoupon = () => {
-    if (couponCode.toUpperCase() === 'FOX3' || couponCode.toUpperCase() === 'WELCOME') {
-      setDiscountPercent(15);
-      alert('优惠券兑换成功！立享 85 折专享特惠。');
-    } else {
-      alert('无效或已过期的优惠码！');
-    }
-  };
-
-  // Submit checkout order
-  const handleSubmitOrder = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!checkoutProduct) return;
-
-    if (!customerAddress || !customerPhone || !customerEmail) {
-      alert('请完整填写联系地址、联系电话与联系邮箱！');
+  useEffect(() => { void loadOrders(); void loadConversations(); }, [currentUser?.id, token]);
+  useEffect(() => {
+    const openMessages = () => {
+      try { window.sessionStorage.removeItem('fox3-open-messages'); } catch {}
+      setChatOpen(true);
+      void loadConversations();
+    };
+    window.addEventListener('fox3-open-messages', openMessages);
+    try { if (window.sessionStorage.getItem('fox3-open-messages') === '1') openMessages(); } catch {}
+    return () => window.removeEventListener('fox3-open-messages', openMessages);
+  }, [currentUser?.id, token]);
+  useEffect(() => { if (conversationId) void loadMessages(conversationId); else setMessages([]); }, [conversationId, token]);
+  useEffect(() => {
+    if (!currentUser || !isAdmin) return;
+    void api('/api/payment-settings').then(data => {
+      setAdminEmail(data.settings?.adminEmail || ''); setNotifyEmail(Boolean(data.settings?.notifyEmail));
+    }).catch(() => {});
+  }, [currentUser?.id, isAdmin, token]);
+  useEffect(() => {
+    if (!orders.some(order => order.status === 'pending')) return;
+    const timer = window.setInterval(() => { void loadOrders(); }, 8000);
+    return () => window.clearInterval(timer);
+  }, [orders, currentUser?.id, token]);
+  useEffect(() => {
+    if (!payment?.orderId || !currentUser) return;
+    let active = true;
+    const refresh = async () => {
+      try {
+        const data = await api(`/api/orders/${encodeURIComponent(payment.orderId)}`);
+        if (active && data.order) setPayment(current => current?.orderId === payment.orderId ? { ...current, order: data.order } : current);
+      } catch { /* The regular order list still exposes service-side errors. */ }
+    };
+    void refresh();
+    const timer = window.setInterval(refresh, 5000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [payment?.orderId, currentUser?.id, token]);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const orderId = params.get('paymentOrder');
+    const cancelledId = params.get('paymentCancel');
+    if (cancelledId) {
+      setError(`支付流程已取消或中止（订单 ${cancelledId}）；这不代表支付成功。`);
+      params.delete('paymentCancel');
+      const query = params.toString(); window.history.replaceState({}, '', `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`);
       return;
     }
-
-    const baseTotal = checkoutProduct.price * orderQuantity;
-    const finalTotal = discountPercent > 0 ? baseTotal * ((100 - discountPercent) / 100) : baseTotal;
-
-    const newOrder: Order = {
-      id: `ord-${Date.now()}`,
-      productId: checkoutProduct.id,
-      productName: checkoutProduct.name,
-      productImage: checkoutProduct.images[0],
-      quantity: orderQuantity,
-      totalPrice: finalTotal,
-      customerName: customerName || '客户',
-      customerEmail,
-      customerPhone,
-      customerAddress,
-      paymentMethod,
-      status: 'paid',
-      createdAt: Date.now(),
+    if (!orderId || !currentUser || !token) return;
+    let active = true;
+    const finishReturn = async () => {
+      try {
+        const data = await api(`/api/orders/${encodeURIComponent(orderId)}`);
+        let order: Order = data.order;
+        if (order.paymentProvider === 'paypal' && order.status === 'pending') {
+          await api(`/api/orders/${encodeURIComponent(orderId)}/capture`, { method: 'POST', body: '{}' });
+          const latest = await api(`/api/orders/${encodeURIComponent(orderId)}`);
+          order = latest.order;
+        }
+        if (!active) return;
+        setPayment({ orderId, order });
+        await loadOrders();
+      } catch (e) {
+        if (active) setError(e instanceof Error ? e.message : '支付返回状态读取失败；请稍后刷新订单');
+      } finally {
+        params.delete('paymentOrder'); params.delete('session_id');
+        const query = params.toString(); window.history.replaceState({}, '', `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`);
+      }
     };
+    void finishReturn();
+    return () => { active = false; };
+  }, [currentUser?.id, token]);
 
-    // Deduct stock if valid
-    setProducts(prev =>
-      prev.map(p =>
-        p.id === checkoutProduct.id
-          ? { ...p, stock: Math.max(0, (p.stock || 10) - orderQuantity) }
-          : p
-      )
-    );
+  const filteredProducts = useMemo(() => products.filter(product => showcase === 'all' || product.showcaseId === showcase), [products, showcase]);
+  const filteredOrders = useMemo(() => orders.filter(order => !search || `${order.id} ${order.customerName || ''} ${order.customerEmail || ''} ${order.username || ''}`.toLowerCase().includes(search.toLowerCase())), [orders, search]);
+  const panel = `rounded-3xl border shadow-sm ${systemSettings.transparentCards ? 'bg-white/75 dark:bg-slate-900/75 backdrop-blur-md border-white/30' : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800'}`;
 
-    setOrders(prev => [newOrder, ...prev]);
-    setOrderSuccess(`订单创建成功！编号: ${newOrder.id}。我们已向 ${customerEmail} 发送确认函。`);
-    setTimeout(() => {
-      setCheckoutProduct(null);
-      setOrderSuccess(null);
-      setDiscountPercent(0);
-      setCouponCode('');
-    }, 2000);
+  const saveProduct = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!editing?.name || !Number(editing.price)) return;
+    const now = Date.now();
+    const images = editing.images?.length ? editing.images : [];
+    if (editing.id) setProducts(items => items.map(item => item.id === editing.id ? { ...item, ...editing, price: Number(editing.price), images, updatedAt: now } as Product : item));
+    else setProducts(items => [{ id: `prod-${crypto.randomUUID()}`, name: String(editing.name), description: editing.description || '', price: Number(editing.price), images, category: editing.category || '默认', stock: Number(editing.stock || 10), showcaseId: editing.showcaseId || 'showcase-main', createdAt: now, updatedAt: now }, ...items]);
+    setEditing(null);
   };
 
-  // Update order status & tracking
-  const handleUpdateOrderStatus = (orderId: string, status: OrderStatus) => {
-    setOrders(prev =>
-      prev.map(o => (o.id === orderId ? { ...o, status, updatedAt: Date.now() } : o))
-    );
+  const submitOrder = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!currentUser || !token) { setError('请先登录已注册账户，再创建订单。'); return; }
+    if (!checkout) return;
+    setBusy(true); setError('');
+    try {
+      const data = await api('/api/orders', { method: 'POST', body: JSON.stringify({ productId: checkout.id, quantity, paymentProvider: provider, customerName, customerPhone, customerEmail, shippingAddress, couponCode: couponCode.trim() || undefined }) });
+      const paymentData = data.payment || {};
+      setPayment({ orderId: data.order.id, payment: paymentData, order: data.order });
+      setCheckout(null);
+      await loadOrders();
+      if (paymentData.redirectUrl) window.location.assign(paymentData.redirectUrl);
+    } catch (e) { setError(e instanceof Error ? e.message : '订单创建失败；请检查登录和支付服务配置'); }
+    finally { setBusy(false); }
   };
 
-  const handleSaveTracking = (orderId: string) => {
-    setOrders(prev =>
-      prev.map(o =>
-        o.id === orderId
-          ? {
-              ...o,
-              trackingNumber: trackingNumberInput,
-              carrier: carrierInput || '顺丰速运',
-              status: o.status === 'paid' ? 'shipped' : o.status,
-              updatedAt: Date.now(),
-            }
-          : o
-      )
-    );
-    setEditingOrderId(null);
+  const orderAction = async (orderId: string, action: string, body: Record<string, unknown> = {}) => {
+    try {
+      const result = await api(`/api/orders/${encodeURIComponent(orderId)}/${action}`, { method: 'POST', body: JSON.stringify(body) });
+      await loadOrders();
+      if (result.order && payment?.orderId === orderId) setPayment(current => current ? { ...current, order: result.order } : current);
+    } catch (e) { setError(e instanceof Error ? e.message : '订单操作失败'); }
+  };
+  const sendMessage = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!currentUser || !token) { setError('请先登录后再联系客服，系统不会把访客留言伪存成已发送消息。'); return; }
+    const message = messageText.trim(); if (!message) return;
+    try {
+      const result = await api('/api/chat/messages', { method: 'POST', body: JSON.stringify({ ...(conversationId ? { conversationId } : {}), message }) });
+      setMessageText(''); setConversationId(result.conversationId || conversationId);
+      if (result.conversationId) await loadMessages(result.conversationId);
+      await loadConversations();
+    } catch (e) { setError(e instanceof Error ? e.message : '消息发送失败'); }
+  };
+  const savePaymentNoticeSettings = async (event: React.FormEvent) => {
+    event.preventDefault();
+    try {
+      const result = await api('/api/payment-settings', { method: 'POST', body: JSON.stringify({ adminEmail, notifyEmail }) });
+      setAdminEmail(result.settings.adminEmail); setNotifyEmail(Boolean(result.settings.notifyEmail)); setSettingsSaved(true);
+      window.setTimeout(() => setSettingsSaved(false), 2500);
+    } catch (e) { setError(e instanceof Error ? e.message : '邮箱通知设置保存失败'); }
   };
 
-  // Chat message send
-  const handleSendMessage = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!chatInput.trim()) return;
+  return <div className="space-y-6">
+    <section className={`${panel} p-5 flex flex-wrap items-center justify-between gap-3`}>
+      <div><h2 className="text-xl font-bold flex items-center gap-2"><ShoppingBag className="text-sky-500"/>商品专区与价格</h2><p className="mt-1 text-xs text-slate-500">商品浏览公开可见；支付订单要求注册账户，金额由服务端以 D1 已发布商品目录核验。</p></div>
+      {isAdmin && <button onClick={() => setEditing({ name: '', description: '', price: 99, images: [], category: '数字化产品', stock: 50, showcaseId: 'showcase-main' })} className="rounded-xl bg-sky-500 px-4 py-2 text-xs text-white"><Plus className="mr-1 inline h-4 w-4"/>新增商品</button>}
+    </section>
 
-    const newMsg: ChatMessage = {
-      id: `chat-${Date.now()}`,
-      sender: currentUser?.role === 'admin' ? 'admin' : 'customer',
-      userName: currentUser ? currentUser.username : '在线访客',
-      userEmail: currentUser?.email,
-      message: chatInput.trim(),
-      createdAt: Date.now(),
-    };
+    {error && <div role="alert" className="rounded-xl bg-rose-50 p-3 text-sm text-rose-700 dark:bg-rose-950/30 dark:text-rose-300">{error}<button aria-label="关闭提示" className="float-right" onClick={() => setError('')}><X className="h-4 w-4"/></button></div>}
 
-    setChatMessages(prev => [...prev, newMsg]);
-    setChatInput('');
-    setTimeout(() => {
-      chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, 100);
-  };
+    <nav aria-label="商品分类" className="flex gap-2 overflow-x-auto">
+      {[['all', '全部商品'], ['showcase-main', '主打数字产品'], ['showcase-hardware', '限定周边'], ['showcase-service', '定制服务']].map(([id, label]) => <button key={id} onClick={() => setShowcase(id)} className={`whitespace-nowrap rounded-xl px-3 py-2 text-xs ${showcase === id ? 'bg-sky-500 text-white' : 'bg-slate-100 dark:bg-slate-800'}`}>{label}</button>)}
+    </nav>
 
-  return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className={`p-5 rounded-3xl border shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 ${
-        systemSettings.transparentCards
-          ? 'bg-white/70 dark:bg-slate-900/70 backdrop-blur-md border-white/20'
-          : 'bg-white dark:bg-slate-900 border-slate-200/80 dark:border-slate-800'
-      }`}>
-        <div>
-          <h2 className="text-xl font-bold font-serif-sc text-slate-800 dark:text-slate-100 flex items-center gap-2">
-            <ShoppingBag className="w-5 h-5 text-sky-500" />
-            <span>商品专区 & 定制展示台</span>
-          </h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            多展区管理、多图轮播、全通道支付 (PayPal/万里汇/微信/支付宝/Stripe/USDT/银联)、订单全程物流追踪与在线客服对话
-          </p>
+    {currentUser && <section className={`${panel} space-y-3 p-4`}>
+      <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-bold">{isAdmin ? '订单管理' : '我的订单'}（{orders.length}）</h3>{isAdmin && <input value={search} onChange={event => setSearch(event.target.value)} placeholder="搜索订单号、客户" className="rounded-xl border bg-transparent p-2 text-sm dark:border-slate-700"/>}</div>
+      {filteredOrders.map(order => <article key={order.id} className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 py-3 text-sm dark:border-slate-800">
+        <div className="min-w-[220px] flex-1"><b>{order.productName || order.productId} × {order.quantity}</b><div className="mt-1 break-all text-xs text-slate-500">{order.id} · {new Date(order.createdAt).toLocaleString()}</div><div className="mt-1 text-xs text-slate-500">{order.customerName}　{order.customerPhone}　{order.customerEmail}</div>{order.shippingAddress && <div className="text-xs text-slate-500">{order.shippingAddress}</div>}{order.trackingNumber && <div className="text-xs text-sky-600">{order.carrier || '物流'}：{order.trackingNumber}</div>}</div>
+        <div className="flex flex-wrap items-center gap-2"><span className="font-semibold">{money(order)} · {statusLabels[order.status] || order.status}</span>
+          {isAdmin && order.status === 'paid' && <><input value={tracking[order.id] || ''} onChange={event => setTracking(value => ({ ...value, [order.id]: event.target.value }))} placeholder="物流单号" className="w-28 rounded border bg-transparent p-1 text-xs dark:border-slate-700"/><button onClick={() => void orderAction(order.id, 'ship', { trackingNumber: tracking[order.id] || '' })} className="rounded bg-sky-500 px-2 py-1 text-xs text-white">确认发货 <Truck className="inline h-3 w-3"/></button><button onClick={() => void orderAction(order.id, 'refund', { reason: '管理员发起退款' })} className="rounded bg-rose-500 px-2 py-1 text-xs text-white">原路退款</button></>}
+          {!isAdmin && order.status === 'pending' && <button onClick={() => void orderAction(order.id, 'cancel')} className="text-xs text-rose-600">取消订单</button>}
+          {!isAdmin && order.status === 'failed' && <button onClick={() => { const product = products.find(item => item.id === order.productId); if (product) { setCheckout(product); setQuantity(order.quantity || 1); setError(''); } }} className="text-xs text-sky-600">重新下单</button>}
+          {!isAdmin && order.paymentProvider === 'paypal' && order.status === 'pending' && <button onClick={() => void orderAction(order.id, 'capture')} className="text-xs text-sky-600">继续 PayPal 支付</button>}
         </div>
+      </article>)}
+      {!filteredOrders.length && <p className="text-xs text-slate-500">暂无订单。订单和付款状态保存在站点数据库，不通过浏览器本地缓存同步。</p>}
+      {isAdmin && <form onSubmit={savePaymentNoticeSettings} className="grid gap-2 border-t border-slate-200 pt-3 dark:border-slate-800 sm:grid-cols-[1fr_auto_auto] sm:items-center">
+        <label className="text-xs text-slate-600 dark:text-slate-300">支付成功邮件接收地址<input type="email" value={adminEmail} onChange={event => setAdminEmail(event.target.value)} placeholder="管理员邮箱（可选）" className="mt-1 w-full rounded-xl border bg-transparent p-2 text-sm dark:border-slate-700"/></label>
+        <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={notifyEmail} onChange={event => setNotifyEmail(event.target.checked)}/>同时发邮件</label>
+        <button className="rounded-xl bg-slate-800 px-3 py-2 text-xs text-white dark:bg-slate-200 dark:text-slate-900">{settingsSaved ? '已保存' : '保存通知设置'}</button>
+      </form>}
+      {isAdmin && <p className="text-[11px] text-slate-500">支付到账同时会生成管理员站内消息。邮件接收需要正确配置服务端发信环境变量；此处只保存接收邮箱，不保存支付密钥。</p>}
+    </section>}
 
-        <div className="flex items-center gap-2 flex-wrap">
-          {currentUser?.role === 'admin' && (
-            <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs">
-              <button
-                onClick={() => setAdminView('showcase')}
-                className={`px-3 py-1.5 rounded-lg font-medium transition ${
-                  adminView === 'showcase' ? 'bg-white dark:bg-slate-700 shadow-xs text-sky-600' : 'text-slate-500'
-                }`}
-              >
-                商品展厅
-              </button>
-              <button
-                onClick={() => setAdminView('orders')}
-                className={`px-3 py-1.5 rounded-lg font-medium transition ${
-                  adminView === 'orders' ? 'bg-white dark:bg-slate-700 shadow-xs text-sky-600' : 'text-slate-500'
-                }`}
-              >
-                订单中心 ({orders.length})
-              </button>
-              <button
-                onClick={() => setAdminView('gateways')}
-                className={`px-3 py-1.5 rounded-lg font-medium transition ${
-                  adminView === 'gateways' ? 'bg-white dark:bg-slate-700 shadow-xs text-sky-600' : 'text-slate-500'
-                }`}
-              >
-                收费接口设置 (仅管理员)
-              </button>
-            </div>
-          )}
-
-          {currentUser?.role === 'admin' && adminView === 'showcase' && (
-            <button
-              onClick={() => {
-                setEditingProduct({
-                  name: '',
-                  description: '',
-                  price: 99.0,
-                  images: [],
-                  category: '数字化产品',
-                  stock: 50,
-                  showcaseId: activeShowcase === 'all' ? 'showcase-main' : activeShowcase,
-                });
-                setIsEditingProduct(true);
-              }}
-              className="flex items-center gap-1.5 px-4 py-2 bg-sky-500 hover:bg-sky-600 text-white text-xs font-semibold rounded-xl shadow-md transition"
-            >
-              <Plus className="w-4 h-4" />
-              <span>新增展示商品</span>
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* VIEW: Admin Payment Gateways Settings (Visible ONLY to Admin) */}
-      {currentUser?.role === 'admin' && adminView === 'gateways' && (
-        <div className={`p-6 rounded-3xl border shadow-sm space-y-6 animate-in fade-in ${
-          systemSettings.transparentCards
-            ? 'bg-white/70 dark:bg-slate-900/70 backdrop-blur-md border-white/20'
-            : 'bg-white dark:bg-slate-900 border-slate-200/80 dark:border-slate-800'
-        }`}>
-          <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
-            <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100 flex items-center gap-2">
-              <ShieldCheck className="w-4 h-4 text-sky-500" />
-              <span>全通道支付网关接口预留与配置说明 (仅管理员可见)</span>
-            </h3>
-            <span className="text-[11px] text-slate-400">
-              前台客户下单时将唤起对应支付凭据或预留结算网关
-            </span>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-            {/* PayPal */}
-            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-blue-600 flex items-center gap-1.5">
-                  <CreditCard className="w-4 h-4" /> PayPal 国际支付
-                </span>
-                <input
-                  type="checkbox"
-                  checked={paymentSettings.paypal.enabled}
-                  onChange={e =>
-                    updatePaymentSettings({
-                      paypal: { ...paymentSettings.paypal, enabled: e.target.checked },
-                    })
-                  }
-                  className="w-4 h-4 text-sky-500 rounded"
-                />
-              </div>
-              <input
-                type="text"
-                value={paymentSettings.paypal.clientId}
-                onChange={e =>
-                  updatePaymentSettings({
-                    paypal: { ...paymentSettings.paypal, clientId: e.target.value },
-                  })
-                }
-                placeholder="PayPal Client ID"
-                className="w-full px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-mono"
-              />
-              <input
-                type="password"
-                value={paymentSettings.paypal.secret}
-                onChange={e =>
-                  updatePaymentSettings({
-                    paypal: { ...paymentSettings.paypal, secret: e.target.value },
-                  })
-                }
-                placeholder="PayPal Client Secret"
-                className="w-full px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-mono"
-              />
-            </div>
-
-            {/* WorldFirst */}
-            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-emerald-600 flex items-center gap-1.5">
-                  <CreditCard className="w-4 h-4" /> 万里汇 (WorldFirst)
-                </span>
-                <input
-                  type="checkbox"
-                  checked={paymentSettings.worldfirst.enabled}
-                  onChange={e =>
-                    updatePaymentSettings({
-                      worldfirst: { ...paymentSettings.worldfirst, enabled: e.target.checked },
-                    })
-                  }
-                  className="w-4 h-4 text-sky-500 rounded"
-                />
-              </div>
-              <input
-                type="text"
-                value={paymentSettings.worldfirst.partnerId}
-                onChange={e =>
-                  updatePaymentSettings({
-                    worldfirst: { ...paymentSettings.worldfirst, partnerId: e.target.value },
-                  })
-                }
-                placeholder="Partner ID / 商户编号"
-                className="w-full px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-mono"
-              />
-              <input
-                type="password"
-                value={paymentSettings.worldfirst.privateKey}
-                onChange={e =>
-                  updatePaymentSettings({
-                    worldfirst: { ...paymentSettings.worldfirst, privateKey: e.target.value },
-                  })
-                }
-                placeholder="商户 RSA 签名私钥"
-                className="w-full px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-mono"
-              />
-            </div>
-
-            {/* WeChat Pay */}
-            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-green-600 flex items-center gap-1.5">
-                  <CreditCard className="w-4 h-4" /> 微信支付 (Native/JSAPI)
-                </span>
-                <input
-                  type="checkbox"
-                  checked={paymentSettings.wechatPay.enabled}
-                  onChange={e =>
-                    updatePaymentSettings({
-                      wechatPay: { ...paymentSettings.wechatPay, enabled: e.target.checked },
-                    })
-                  }
-                  className="w-4 h-4 text-sky-500 rounded"
-                />
-              </div>
-              <input
-                type="text"
-                value={paymentSettings.wechatPay.appId}
-                onChange={e =>
-                  updatePaymentSettings({
-                    wechatPay: { ...paymentSettings.wechatPay, appId: e.target.value },
-                  })
-                }
-                placeholder="微信 AppID"
-                className="w-full px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-mono"
-              />
-              <input
-                type="text"
-                value={paymentSettings.wechatPay.mchId}
-                onChange={e =>
-                  updatePaymentSettings({
-                    wechatPay: { ...paymentSettings.wechatPay, mchId: e.target.value },
-                  })
-                }
-                placeholder="微信商户号 MCHID"
-                className="w-full px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-mono"
-              />
-            </div>
-
-            {/* Alipay */}
-            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-sky-600 flex items-center gap-1.5">
-                  <CreditCard className="w-4 h-4" /> 支付宝 (当面付/手机网页)
-                </span>
-                <input
-                  type="checkbox"
-                  checked={paymentSettings.alipay.enabled}
-                  onChange={e =>
-                    updatePaymentSettings({
-                      alipay: { ...paymentSettings.alipay, enabled: e.target.checked },
-                    })
-                  }
-                  className="w-4 h-4 text-sky-500 rounded"
-                />
-              </div>
-              <input
-                type="text"
-                value={paymentSettings.alipay.appId}
-                onChange={e =>
-                  updatePaymentSettings({
-                    alipay: { ...paymentSettings.alipay, appId: e.target.value },
-                  })
-                }
-                placeholder="支付宝 AppID"
-                className="w-full px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-mono"
-              />
-              <input
-                type="password"
-                value={paymentSettings.alipay.privateKey}
-                onChange={e =>
-                  updatePaymentSettings({
-                    alipay: { ...paymentSettings.alipay, privateKey: e.target.value },
-                  })
-                }
-                placeholder="应用私钥 Private Key"
-                className="w-full px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-mono"
-              />
-            </div>
-
-            {/* Stripe */}
-            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-indigo-600 flex items-center gap-1.5">
-                  <CreditCard className="w-4 h-4" /> Stripe 信用卡清算
-                </span>
-                <input
-                  type="checkbox"
-                  checked={paymentSettings.stripe?.enabled}
-                  onChange={e =>
-                    updatePaymentSettings({
-                      stripe: { ...(paymentSettings.stripe || {} as any), enabled: e.target.checked },
-                    })
-                  }
-                  className="w-4 h-4 text-sky-500 rounded"
-                />
-              </div>
-              <input
-                type="text"
-                value={paymentSettings.stripe?.publishableKey || ''}
-                onChange={e =>
-                  updatePaymentSettings({
-                    stripe: { ...(paymentSettings.stripe || {} as any), publishableKey: e.target.value },
-                  })
-                }
-                placeholder="Stripe Publishable Key"
-                className="w-full px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-mono"
-              />
-              <input
-                type="password"
-                value={paymentSettings.stripe?.secretKey || ''}
-                onChange={e =>
-                  updatePaymentSettings({
-                    stripe: { ...(paymentSettings.stripe || {} as any), secretKey: e.target.value },
-                  })
-                }
-                placeholder="Stripe Secret Key"
-                className="w-full px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-mono"
-              />
-            </div>
-
-            {/* USDT Crypto */}
-            <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-teal-600 flex items-center gap-1.5">
-                  <CreditCard className="w-4 h-4" /> USDT 加密货币收款
-                </span>
-                <input
-                  type="checkbox"
-                  checked={paymentSettings.usdt?.enabled}
-                  onChange={e =>
-                    updatePaymentSettings({
-                      usdt: { ...(paymentSettings.usdt || {} as any), enabled: e.target.checked },
-                    })
-                  }
-                  className="w-4 h-4 text-sky-500 rounded"
-                />
-              </div>
-              <select
-                value={paymentSettings.usdt?.network || 'TRC20'}
-                onChange={e =>
-                  updatePaymentSettings({
-                    usdt: { ...(paymentSettings.usdt || {} as any), network: e.target.value as any },
-                  })
-                }
-                className="w-full px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs"
-              >
-                <option value="TRC20">TRC20 网络 (推荐)</option>
-                <option value="ERC20">ERC20 网络</option>
-              </select>
-              <input
-                type="text"
-                value={paymentSettings.usdt?.walletAddress || ''}
-                onChange={e =>
-                  updatePaymentSettings({
-                    usdt: { ...(paymentSettings.usdt || {} as any), walletAddress: e.target.value },
-                  })
-                }
-                placeholder="USDT 钱包收款地址"
-                className="w-full px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-mono"
-              />
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* VIEW: Admin Order Management (Paid vs Unpaid vs Shipped) */}
-      {currentUser?.role === 'admin' && adminView === 'orders' && (
-        <div className={`rounded-3xl border shadow-sm overflow-hidden animate-in fade-in ${
-          systemSettings.transparentCards
-            ? 'bg-white/70 dark:bg-slate-900/70 backdrop-blur-md border-white/20'
-            : 'bg-white dark:bg-slate-900 border-slate-200/80 dark:border-slate-800'
-        }`}>
-          <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-xs font-bold text-slate-800 dark:text-slate-100">
-                订单列表 ({filteredOrders.length})
-              </span>
-              <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-lg text-xs overflow-x-auto">
-                <button
-                  onClick={() => setOrderFilter('all')}
-                  className={`px-2.5 py-1 rounded ${orderFilter === 'all' ? 'bg-white dark:bg-slate-700 font-semibold shadow-xs' : ''}`}
-                >
-                  全部
-                </button>
-                <button
-                  onClick={() => setOrderFilter('paid')}
-                  className={`px-2.5 py-1 rounded ${orderFilter === 'paid' ? 'bg-emerald-500 text-white font-semibold' : ''}`}
-                >
-                  已支付
-                </button>
-                <button
-                  onClick={() => setOrderFilter('shipped')}
-                  className={`px-2.5 py-1 rounded ${orderFilter === 'shipped' ? 'bg-sky-500 text-white font-semibold' : ''}`}
-                >
-                  已发货
-                </button>
-                <button
-                  onClick={() => setOrderFilter('unpaid')}
-                  className={`px-2.5 py-1 rounded ${orderFilter === 'unpaid' ? 'bg-amber-500 text-white font-semibold' : ''}`}
-                >
-                  待支付
-                </button>
-                <button
-                  onClick={() => setOrderFilter('refunded')}
-                  className={`px-2.5 py-1 rounded ${orderFilter === 'refunded' ? 'bg-rose-500 text-white font-semibold' : ''}`}
-                >
-                  已退款
-                </button>
-              </div>
-            </div>
-
-            <div className="relative min-w-[200px]">
-              <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input
-                type="text"
-                placeholder="搜索订单号/买家/单号..."
-                value={orderSearch}
-                onChange={e => setOrderSearch(e.target.value)}
-                className="w-full pl-8 pr-3 py-1.5 rounded-full text-xs border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
-              />
-            </div>
-          </div>
-
-          <div className="divide-y divide-slate-100 dark:divide-slate-800">
-            {filteredOrders.length === 0 ? (
-              <div className="p-8 text-center text-xs text-slate-400">暂无订单数据</div>
-            ) : (
-              filteredOrders.map(order => (
-                <div key={order.id} className="p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-14 h-14 rounded-xl overflow-hidden shrink-0 border border-slate-200 dark:border-slate-700">
-                      <SafeImage src={order.productImage} alt={order.productName} className="w-full h-full object-cover" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-xs font-bold text-slate-900 dark:text-slate-100">
-                          {order.productName}
-                        </span>
-                        <span className="text-xs text-sky-500 font-bold">x{order.quantity}</span>
-                        <span
-                          className={`text-[10px] px-2 py-0.5 rounded-full font-semibold uppercase ${
-                            order.status === 'paid'
-                              ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400'
-                              : order.status === 'shipped'
-                              ? 'bg-sky-50 text-sky-600 dark:bg-sky-950/40 dark:text-sky-400'
-                              : order.status === 'completed'
-                              ? 'bg-purple-50 text-purple-600 dark:bg-purple-950/40 dark:text-purple-400'
-                              : 'bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400'
-                          }`}
-                        >
-                          {order.status}
-                        </span>
-                        <span className="text-[10px] font-mono text-slate-400">
-                          ({order.paymentMethod})
-                        </span>
-                      </div>
-                      <div className="text-[11px] text-slate-400 mt-1 space-y-0.5">
-                        <p>买家: {order.customerName} ({order.customerPhone} / {order.customerEmail})</p>
-                        <p className="truncate max-w-md">地址: {order.customerAddress}</p>
-                        {order.trackingNumber && (
-                          <p className="text-sky-600 dark:text-sky-400 flex items-center gap-1 font-mono">
-                            <Truck className="w-3 h-3" /> {order.carrier || '顺丰速运'}: {order.trackingNumber}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col items-end gap-2 shrink-0 self-end md:self-center">
-                    <div className="text-right">
-                      <span className="text-base font-bold text-sky-500">
-                        ¥{order.totalPrice.toFixed(2)}
-                      </span>
-                      <span className="block text-[10px] text-slate-400 font-mono">
-                        {new Date(order.createdAt).toLocaleString('zh-CN')}
-                      </span>
-                    </div>
-
-                    {/* Order Action Buttons */}
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      {editingOrderId === order.id ? (
-                        <div className="flex items-center gap-1">
-                          <input
-                            type="text"
-                            placeholder="物流单号"
-                            value={trackingNumberInput}
-                            onChange={e => setTrackingNumberInput(e.target.value)}
-                            className="w-24 px-2 py-0.5 text-[10px] border rounded bg-white dark:bg-slate-800"
-                          />
-                          <button
-                            onClick={() => handleSaveTracking(order.id)}
-                            className="p-1 bg-emerald-500 text-white rounded text-[10px]"
-                          >
-                            <Check className="w-3 h-3" />
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          onClick={() => {
-                            setEditingOrderId(order.id);
-                            setTrackingNumberInput(order.trackingNumber || '');
-                            setCarrierInput(order.carrier || '顺丰速运');
-                          }}
-                          className="px-2 py-0.5 bg-slate-100 dark:bg-slate-800 text-[10px] rounded hover:text-sky-500"
-                        >
-                          填单号
-                        </button>
-                      )}
-
-                      <select
-                        value={order.status}
-                        onChange={e => handleUpdateOrderStatus(order.id, e.target.value as any)}
-                        className="px-2 py-0.5 bg-slate-100 dark:bg-slate-800 text-[10px] rounded"
-                      >
-                        <option value="unpaid">设为未支付</option>
-                        <option value="paid">设为已支付</option>
-                        <option value="shipped">设为已发货</option>
-                        <option value="completed">设为已完成</option>
-                        <option value="refunded">设为已退款</option>
-                      </select>
-                    </div>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* VIEW: Main Showcase Grid (For Visitors and Admin) */}
-      {adminView === 'showcase' && (
-        <>
-          {/* Multiple Showcase Switcher */}
-          <div className="flex items-center gap-2 overflow-x-auto pb-1">
-            {showcases.map(s => (
-              <button
-                key={s.id}
-                onClick={() => setActiveShowcase(s.id)}
-                className={`px-4 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition ${
-                  activeShowcase === s.id
-                    ? 'bg-sky-500 text-white shadow-sm'
-                    : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800'
-                }`}
-              >
-                {s.name}
-              </button>
-            ))}
-          </div>
-
-          {/* Products Grid */}
-          <div className={`grid gap-6 ${deviceMode === 'mobile' ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3'}`}>
-            {filteredProducts.map(product => (
-              <div
-                key={product.id}
-                className={`group rounded-3xl overflow-hidden border shadow-sm hover:shadow-xl transition-all duration-300 flex flex-col justify-between ${
-                  systemSettings.transparentCards
-                    ? 'bg-white/70 dark:bg-slate-900/70 backdrop-blur-md border-white/20'
-                    : 'bg-white dark:bg-slate-900 border-slate-200/80 dark:border-slate-800'
-                }`}
-              >
-                <div>
-                  <div className="relative aspect-[4/3] w-full overflow-hidden bg-slate-100 dark:bg-slate-800">
-                    <SafeImage
-                      src={product.images[0] || ''}
-                      alt={product.name}
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                    />
-
-                    {product.images.length > 1 && (
-                      <span className="absolute bottom-2 right-2 px-2 py-0.5 bg-black/60 backdrop-blur-md text-white text-[10px] rounded-lg">
-                        共 {product.images.length} 张图
-                      </span>
-                    )}
-
-                    <span className="absolute top-3 left-3 px-2.5 py-1 bg-black/60 backdrop-blur-md text-white text-[11px] font-medium rounded-lg">
-                      {product.category}
-                    </span>
-
-                    {currentUser?.role === 'admin' && (
-                      <div className="absolute top-3 right-3 flex items-center gap-1.5 z-10">
-                        <button
-                          onClick={e => {
-                            e.stopPropagation();
-                            setEditingProduct(product);
-                            setIsEditingProduct(true);
-                          }}
-                          title="编辑商品与多图"
-                          className="p-2 bg-black/75 hover:bg-black text-white rounded-xl shadow transition"
-                        >
-                          <Edit3 className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={e => handleDeleteProduct(product.id, e)}
-                          title="删除商品"
-                          className="p-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl shadow transition"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="p-5 space-y-2">
-                    <h3 className="text-base font-bold font-serif-sc text-slate-800 dark:text-slate-100 line-clamp-1">
-                      {product.name}
-                    </h3>
-                    <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2 leading-relaxed">
-                      {product.description}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="px-5 pb-5 pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
-                  <div>
-                    <span className="text-xs text-slate-400">库存 {product.stock || 50} 件</span>
-                    <div className="text-xl font-black text-sky-500 font-mono">
-                      ¥{product.price.toFixed(2)}
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={() => {
-                      setCheckoutProduct(product);
-                      setOrderQuantity(1);
-                      setDiscountPercent(0);
-                      setCouponCode('');
-                    }}
-                    className="flex items-center gap-1.5 px-4 py-2 bg-sky-500 hover:bg-sky-600 text-white text-xs font-semibold rounded-xl shadow-md transition"
-                  >
-                    <span>立即选购</span>
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
-
-      {/* Floating Chat Button */}
-      <button
-        onClick={() => setIsChatOpen(!isChatOpen)}
-        className="fixed bottom-6 right-6 z-40 p-4 bg-sky-500 hover:bg-sky-600 text-white rounded-full shadow-2xl hover:scale-105 transition flex items-center justify-center gap-2 group"
-        title="打开商品展台在线客服"
-      >
-        <MessageCircle className="w-6 h-6" />
-        <span className="hidden sm:inline text-xs font-bold pr-1">商品展台客服</span>
-      </button>
-
-      {/* Chat Dialog Widget */}
-      {isChatOpen && (
-        <div className="fixed bottom-20 right-4 sm:right-6 z-50 w-80 sm:w-96 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-2xl flex flex-col h-[460px] overflow-hidden animate-in fade-in slide-in-from-bottom-5">
-          <div className="p-3.5 bg-sky-500 text-white flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <MessageCircle className="w-5 h-5" />
-              <div>
-                <h4 className="text-xs font-bold">商品展台咨询 & 客服对话</h4>
-                <span className="text-[10px] text-white/80">管理员站内实时对话系统</span>
-              </div>
-            </div>
-            <button onClick={() => setIsChatOpen(false)} className="p-1 hover:bg-white/20 rounded-lg">
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-
-          <div className="flex-1 p-4 overflow-y-auto space-y-3">
-            {chatMessages.map(msg => {
-              const isAdmin = msg.sender === 'admin';
-              return (
-                <div
-                  key={msg.id}
-                  className={`flex flex-col ${isAdmin ? 'items-start' : 'items-end'}`}
-                >
-                  <span className="text-[10px] text-slate-400 mb-0.5">
-                    {msg.userName} {isAdmin && ' (官方客服)'}
-                  </span>
-                  <div
-                    className={`max-w-[80%] px-3.5 py-2 rounded-2xl text-xs leading-relaxed ${
-                      isAdmin
-                        ? 'bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-100 rounded-tl-xs'
-                        : 'bg-sky-500 text-white rounded-tr-xs'
-                    }`}
-                  >
-                    {msg.message}
-                  </div>
-                </div>
-              );
-            })}
-            <div ref={chatBottomRef} />
-          </div>
-
-          <form onSubmit={handleSendMessage} className="p-3 border-t border-slate-100 dark:border-slate-800 flex gap-2">
-            <input
-              type="text"
-              value={chatInput}
-              onChange={e => setChatInput(e.target.value)}
-              placeholder="输入咨询内容或留言..."
-              className="flex-1 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 focus:outline-none"
-            />
-            <button
-              type="submit"
-              className="p-2 bg-sky-500 text-white rounded-xl hover:bg-sky-600 transition shrink-0"
-            >
-              <Send className="w-4 h-4" />
-            </button>
-          </form>
-        </div>
-      )}
-
-      {/* Checkout Order Form Modal */}
-      {checkoutProduct && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 md:p-8 max-w-lg w-full border border-slate-200 dark:border-slate-800 shadow-2xl max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800 mb-4">
-              <h3 className="text-base font-bold font-serif-sc text-slate-900 dark:text-slate-100">
-                提交订单并选择数量
-              </h3>
-              <button
-                onClick={() => setCheckoutProduct(null)}
-                className="text-slate-400 hover:text-slate-600"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {orderSuccess ? (
-              <div className="p-6 text-center space-y-3">
-                <CheckCircle className="w-12 h-12 text-emerald-500 mx-auto animate-bounce" />
-                <h4 className="text-base font-bold text-slate-900 dark:text-slate-100">
-                  {orderSuccess}
-                </h4>
-              </div>
-            ) : (
-              <form onSubmit={handleSubmitOrder} className="space-y-4">
-                <div className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-slate-800/40 rounded-2xl">
-                  <div className="w-16 h-16 rounded-xl overflow-hidden shrink-0 border border-slate-200 dark:border-slate-700">
-                    <SafeImage
-                      src={checkoutProduct.images[0] || ''}
-                      alt={checkoutProduct.name}
-                      className="w-full h-full object-cover"
-                    />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <h4 className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">
-                      {checkoutProduct.name}
-                    </h4>
-                    <span className="text-sm font-black text-sky-500 font-mono">
-                      单价: ¥{checkoutProduct.price.toFixed(2)}
-                    </span>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                    选购数量
-                  </label>
-                  <div className="flex items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setOrderQuantity(Math.max(1, orderQuantity - 1))}
-                      className="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 rounded-lg text-sm font-bold"
-                    >
-                      -
-                    </button>
-                    <span className="font-bold text-sm">{orderQuantity}</span>
-                    <button
-                      type="button"
-                      onClick={() => setOrderQuantity(Math.min(checkoutProduct.stock || 50, orderQuantity + 1))}
-                      className="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 rounded-lg text-sm font-bold"
-                    >
-                      +
-                    </button>
-                    <span className="text-xs text-slate-400 ml-auto">
-                      小计: <b className="text-sky-500 text-base">¥{(checkoutProduct.price * orderQuantity * ((100 - discountPercent) / 100)).toFixed(2)}</b>
-                    </span>
-                  </div>
-                </div>
-
-                {/* Coupon Code Section */}
-                <div className="pt-2">
-                  <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                    优惠券代码 (输入 FOX3 享 85 折)
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="text"
-                      value={couponCode}
-                      onChange={e => setCouponCode(e.target.value)}
-                      placeholder="优惠码 (如 FOX3)"
-                      className="flex-1 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-xs font-mono uppercase"
-                    />
-                    <button
-                      type="button"
-                      onClick={handleApplyCoupon}
-                      className="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-xs rounded-xl font-medium"
-                    >
-                      应用
-                    </button>
-                  </div>
-                  {discountPercent > 0 && (
-                    <span className="text-[11px] text-emerald-500 font-medium block mt-1">
-                      已享受 {discountPercent}% 折扣减免
-                    </span>
-                  )}
-                </div>
-
-                <div className="space-y-3 pt-2 border-t border-slate-100 dark:border-slate-800">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                      联系人姓名 <span className="text-rose-500">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      value={customerName}
-                      onChange={e => setCustomerName(e.target.value)}
-                      placeholder="您的姓名"
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100"
-                      required
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                        联系电话 <span className="text-rose-500">*</span>
-                      </label>
-                      <input
-                        type="tel"
-                        value={customerPhone}
-                        onChange={e => setCustomerPhone(e.target.value)}
-                        placeholder="138xxxxxxxx"
-                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100"
-                        required
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                        联系邮箱 <span className="text-rose-500">*</span>
-                      </label>
-                      <input
-                        type="email"
-                        value={customerEmail}
-                        onChange={e => setCustomerEmail(e.target.value)}
-                        placeholder="yourname@domain.com"
-                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100"
-                        required
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                      收件地址 / 寄送地址 <span className="text-rose-500">*</span>
-                    </label>
-                    <textarea
-                      rows={2}
-                      value={customerAddress}
-                      onChange={e => setCustomerAddress(e.target.value)}
-                      placeholder="省市区街道门牌号"
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100"
-                      required
-                    />
-                  </div>
-                </div>
-
-                {/* Extended Payment Gateway Options */}
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                    选择支付通道
-                  </label>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-                    <button
-                      type="button"
-                      onClick={() => setPaymentMethod('wechat')}
-                      className={`p-2 rounded-xl border flex items-center justify-center gap-1 font-medium ${
-                        paymentMethod === 'wechat'
-                          ? 'border-green-500 bg-green-50 text-green-700 dark:bg-green-950/40 dark:text-green-300'
-                          : 'border-slate-200 dark:border-slate-700 text-slate-600'
-                      }`}
-                    >
-                      <span>微信支付</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setPaymentMethod('alipay')}
-                      className={`p-2 rounded-xl border flex items-center justify-center gap-1 font-medium ${
-                        paymentMethod === 'alipay'
-                          ? 'border-sky-500 bg-sky-50 text-sky-700 dark:bg-sky-950/40 dark:text-sky-300'
-                          : 'border-slate-200 dark:border-slate-700 text-slate-600'
-                      }`}
-                    >
-                      <span>支付宝</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setPaymentMethod('paypal')}
-                      className={`p-2 rounded-xl border flex items-center justify-center gap-1 font-medium ${
-                        paymentMethod === 'paypal'
-                          ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300'
-                          : 'border-slate-200 dark:border-slate-700 text-slate-600'
-                      }`}
-                    >
-                      <span>PayPal</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setPaymentMethod('worldfirst')}
-                      className={`p-2 rounded-xl border flex items-center justify-center gap-1 font-medium ${
-                        paymentMethod === 'worldfirst'
-                          ? 'border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
-                          : 'border-slate-200 dark:border-slate-700 text-slate-600'
-                      }`}
-                    >
-                      <span>万里汇</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setPaymentMethod('stripe')}
-                      className={`p-2 rounded-xl border flex items-center justify-center gap-1 font-medium ${
-                        paymentMethod === 'stripe'
-                          ? 'border-indigo-500 bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300'
-                          : 'border-slate-200 dark:border-slate-700 text-slate-600'
-                      }`}
-                    >
-                      <span>Stripe</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setPaymentMethod('usdt')}
-                      className={`p-2 rounded-xl border flex items-center justify-center gap-1 font-medium ${
-                        paymentMethod === 'usdt'
-                          ? 'border-teal-500 bg-teal-50 text-teal-700 dark:bg-teal-950/40 dark:text-teal-300'
-                          : 'border-slate-200 dark:border-slate-700 text-slate-600'
-                      }`}
-                    >
-                      <span>USDT</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setPaymentMethod('unionpay')}
-                      className={`p-2 rounded-xl border flex items-center justify-center gap-1 font-medium ${
-                        paymentMethod === 'unionpay'
-                          ? 'border-rose-500 bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300'
-                          : 'border-slate-200 dark:border-slate-700 text-slate-600'
-                      }`}
-                    >
-                      <span>银联</span>
-                    </button>
-                  </div>
-                </div>
-
-                <button
-                  type="submit"
-                  className="w-full py-2.5 bg-sky-500 hover:bg-sky-600 text-white font-semibold rounded-xl text-sm shadow-md transition"
-                >
-                  确认提交并支付 ¥{(checkoutProduct.price * orderQuantity).toFixed(2)}
-                </button>
-              </form>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Product Creator & Multi-image Editor Modal */}
-      {isEditingProduct && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 md:p-8 max-w-lg w-full border border-slate-200 dark:border-slate-800 shadow-2xl max-h-[90vh] overflow-y-auto">
-            <h3 className="text-base font-bold font-serif-sc text-slate-900 dark:text-slate-100 mb-4">
-              {editingProduct.id ? '编辑商品展示信息' : '创建新商品与多图展示'}
-            </h3>
-
-            <form onSubmit={handleSaveProduct} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                  商品名称
-                </label>
-                <input
-                  type="text"
-                  value={editingProduct.name || ''}
-                  onChange={e => setEditingProduct({ ...editingProduct, name: e.target.value })}
-                  placeholder="例如: fox3 全能知识库交付套件"
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100"
-                  required
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                    价格 (元)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={editingProduct.price || 0}
-                    onChange={e => setEditingProduct({ ...editingProduct, price: parseFloat(e.target.value) })}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 font-mono"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                    归属展示区
-                  </label>
-                  <select
-                    value={editingProduct.showcaseId}
-                    onChange={e => setEditingProduct({ ...editingProduct, showcaseId: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100"
-                  >
-                    <option value="showcase-main">主打数字化展区</option>
-                    <option value="showcase-hardware">限定周边展区</option>
-                    <option value="showcase-service">定制服务展区</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                  商品说明
-                </label>
-                <textarea
-                  rows={3}
-                  value={editingProduct.description || ''}
-                  onChange={e => setEditingProduct({ ...editingProduct, description: e.target.value })}
-                  placeholder="详细介绍商品特性..."
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">
-                  商品多图展示区 (可上传与删除多张图片)
-                </label>
-
-                <div className="grid grid-cols-3 gap-2 mb-2">
-                  {editingProduct.images?.map((imgUrl, idx) => (
-                    <div key={idx} className="relative aspect-video rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700">
-                      <SafeImage src={imgUrl} alt={`Prod Img ${idx}`} className="w-full h-full object-cover" />
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveImage(idx)}
-                        className="absolute top-1 right-1 p-1 bg-black/70 hover:bg-rose-600 text-white rounded-md"
-                        title="删除该图"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-
-                <label className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-medium rounded-xl cursor-pointer transition">
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>添加本地展示图片</span>
-                  <input
-                    type="file"
-                    multiple
-                    onChange={handleUploadImage}
-                    accept="image/*"
-                    className="hidden"
-                  />
-                </label>
-              </div>
-
-              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100 dark:border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setIsEditingProduct(false)}
-                  className="px-4 py-2 text-xs font-medium text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl"
-                >
-                  取消
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 bg-sky-500 hover:bg-sky-600 text-white text-xs font-semibold rounded-xl shadow-md transition"
-                >
-                  保存商品
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+    <div className={`grid gap-6 ${deviceMode === 'mobile' ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3'}`}>
+      {filteredProducts.map(product => <article key={product.id} className={`${panel} flex flex-col overflow-hidden`}>
+        <div className="relative aspect-[4/3] bg-slate-100 dark:bg-slate-800"><SafeImage src={product.images[0] || ''} alt={product.name} className="h-full w-full object-cover"/>{isAdmin && <div className="absolute right-2 top-2 flex gap-2"><button aria-label="编辑商品" onClick={() => setEditing({ ...product })} className="rounded bg-black/70 p-2 text-white"><Edit3 className="h-4 w-4"/></button><button aria-label="删除商品" onClick={() => { if (window.confirm('确认删除此商品展示？已创建订单不会被删除。')) setProducts(items => items.filter(item => item.id !== product.id)); }} className="rounded bg-rose-600 p-2 text-white"><Trash2 className="h-4 w-4"/></button></div>}</div>
+        <div className="flex-1 p-5"><span className="text-xs text-sky-500">{product.category}</span><h3 className="mt-1 font-bold">{product.name}</h3><p className="mt-2 line-clamp-3 text-xs text-slate-500">{product.description}</p></div>
+        <div className="flex items-center justify-between border-t border-slate-200 p-5 dark:border-slate-800"><div><span className="block text-xs text-slate-400">库存 {product.stock || 50}</span><b className="text-xl text-sky-500">¥{Number(product.price).toFixed(2)}</b></div><button onClick={() => { setCheckout(product); setQuantity(1); setCouponCode(''); setError(''); }} className="rounded-xl bg-sky-500 px-4 py-2 text-xs text-white">立即选购</button></div>
+      </article>)}
     </div>
-  );
+
+    <section className={`${panel} p-4`}>
+      <div className="flex items-center justify-between"><h3 className="flex items-center gap-2 font-bold"><MessageCircle className="text-sky-500"/>站内客服对话</h3><button onClick={() => setChatOpen(open => !open)} className="text-xs text-sky-600">{chatOpen ? '收起' : '打开对话'}</button></div>
+      {!currentUser && <p className="mt-2 text-xs text-slate-500">登录注册账户后可与站长建立持久对话；访客留言不会显示为已发送。</p>}
+      {chatOpen && <div className="mt-3">
+        {isAdmin && <div className="mb-3 flex flex-wrap gap-2">{conversations.map(conversation => <div key={conversation.id} className={`flex max-w-full items-start gap-2 rounded-xl p-2 text-xs ${conversationId === conversation.id ? 'bg-sky-500 text-white' : 'bg-slate-100 dark:bg-slate-800'}`}><button onClick={() => setConversationId(conversation.id)} className="min-w-0 text-left"><span className="block font-semibold">{conversation.username || conversation.userName || conversation.id}{(conversation.unread || conversation.unreadCount) ? ` · 未读 ${conversation.unread || conversation.unreadCount}` : ''}</span><span className="block max-w-[240px] truncate">{conversation.lastMessage || '打开对话'}</span></button><button type="button" aria-label={`删除与${conversation.username || '用户'}的对话`} title="删除对话及消息" onClick={async () => { if (!window.confirm('确定永久删除这段客服对话及其全部消息吗？')) return; try { await api(`/api/chat/conversations/${encodeURIComponent(conversation.id)}`, { method: 'DELETE' }); if (conversationId === conversation.id) { setConversationId(''); setMessages([]); } await loadConversations(); } catch (e) { setError(e instanceof Error ? e.message : '删除对话失败'); } }} className="rounded p-1 text-rose-600 hover:bg-rose-100 dark:hover:bg-rose-950/40"><Trash2 className="h-3.5 w-3.5"/></button></div>)}</div>}
+        {currentUser && <><div className="max-h-72 space-y-2 overflow-auto border-y border-slate-200 py-3 dark:border-slate-800">{messages.map(message => <div key={message.id} className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm ${message.senderRole === 'admin' ? 'bg-slate-100 dark:bg-slate-800' : 'ml-auto bg-sky-50 dark:bg-sky-950/50'}`}><div className="mb-1 text-[10px] text-slate-500">{message.senderName} · {new Date(message.createdAt).toLocaleString()}</div>{message.message}</div>)}{!messages.length && <p className="text-xs text-slate-500">{isAdmin ? '选择一位用户打开对话；新消息会显示在页眉通知灯。' : '你好，请留下问题，站长回复后页眉会显示提醒。'}</p>}</div><form onSubmit={sendMessage} className="mt-3 flex gap-2"><input value={messageText} onChange={event => setMessageText(event.target.value)} placeholder="输入消息…" maxLength={4000} className="min-w-0 flex-1 rounded-xl border bg-transparent px-3 py-2 text-sm dark:border-slate-700"/><button className="rounded-xl bg-sky-500 p-2 text-white" aria-label="发送消息"><Send className="h-4 w-4"/></button></form></>}
+      </div>}
+    </section>
+
+    {checkout && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"><form onSubmit={submitOrder} className={`${panel} max-h-[90vh] w-full max-w-lg space-y-3 overflow-auto p-6`}>
+      <div className="flex items-center justify-between"><h3 className="font-bold">订单信息：{checkout.name}</h3><button type="button" onClick={() => setCheckout(null)} aria-label="关闭"><X/></button></div>
+      {!currentUser && <p className="text-sm text-rose-600">请先登录注册账户。为了保存用户订单，游客不能付款。</p>}
+      <p className="text-sm">商品展示价：¥{Number(checkout.price).toFixed(2)} / 件。最终金额由服务端根据 D1 已发布商品目录核验。</p>
+      <label className="block text-xs">购买数量<input type="number" min={1} max={Math.max(1, Number(checkout.stock || 50))} value={quantity} onChange={event => setQuantity(Math.max(1, Math.min(Number(checkout.stock || 50), Number(event.target.value) || 1)))} className="mt-1 w-full rounded border bg-transparent p-2 dark:border-slate-700"/></label>
+      <div className="grid grid-cols-2 gap-2">{([['alipay','支付宝'],['wechat','微信支付'],['stripe','Stripe'],['paypal','PayPal']] as const).map(([id, label]) => <button type="button" key={id} onClick={() => setProvider(id)} className={`rounded-xl border p-2 text-sm ${provider === id ? 'border-sky-500 text-sky-600' : 'border-slate-200 dark:border-slate-700'}`}>{label}</button>)}</div>
+      <input required value={customerName} onChange={event => setCustomerName(event.target.value)} placeholder="联系人姓名" className="w-full rounded-xl border bg-transparent p-2 text-sm dark:border-slate-700"/>
+      <input required type="tel" value={customerPhone} onChange={event => setCustomerPhone(event.target.value)} placeholder="联系电话" className="w-full rounded-xl border bg-transparent p-2 text-sm dark:border-slate-700"/>
+      <input required type="email" value={customerEmail} onChange={event => setCustomerEmail(event.target.value)} placeholder="联系邮箱" className="w-full rounded-xl border bg-transparent p-2 text-sm dark:border-slate-700"/>
+      <textarea required rows={2} value={shippingAddress} onChange={event => setShippingAddress(event.target.value)} placeholder="收货/服务联系地址" className="w-full rounded-xl border bg-transparent p-2 text-sm dark:border-slate-700"/>
+      <input value={couponCode} onChange={event => setCouponCode(event.target.value)} placeholder="优惠码（如有）—服务端核验" className="w-full rounded-xl border bg-transparent p-2 text-sm dark:border-slate-700"/>
+      <p className="rounded-xl bg-amber-50 p-3 text-xs leading-relaxed text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">付款跳转或二维码展示不代表订单已付款。真正到账以本站服务端验签并处理支付平台异步通知为准。</p>
+      <button disabled={busy || !currentUser} className="w-full rounded-xl bg-sky-500 p-3 text-sm font-semibold text-white disabled:opacity-50">{busy ? '正在创建订单…' : '创建订单并继续支付'}</button>
+    </form></div>}
+
+    {payment && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"><div className={`${panel} w-full max-w-sm space-y-3 p-6`}>
+      <div className="flex items-center justify-between"><h3 className="font-bold">订单 {payment.orderId}</h3><button onClick={() => setPayment(null)} aria-label="关闭支付信息"><X/></button></div>
+      {payment.order && <p className="text-sm">当前状态：<b>{statusLabels[payment.order.status] || payment.order.status}</b> · {money(payment.order)}</p>}
+      <p className="text-xs text-amber-700 dark:text-amber-300">二维码/跳转成功不代表已到账；请等待服务端验签异步回调更新订单状态。</p>
+      {payment.payment?.redirectUrl && <a href={payment.payment.redirectUrl} className="block rounded-xl bg-sky-500 p-3 text-center text-sm text-white">前往支付平台</a>}
+      {payment.payment?.qrCode && <div className="mx-auto w-fit rounded-xl bg-white p-3"><QRCodeSVG value={payment.payment.qrCode} size={224} includeMargin/></div>}
+      {payment.payment?.qrCode && <p className="break-all text-center text-[10px] text-slate-500">二维码由本站本地生成，不会将支付码发送给第三方。</p>}
+      <button onClick={() => { void loadOrders(); if (payment.orderId) void api(`/api/orders/${encodeURIComponent(payment.orderId)}`).then(result => setPayment(current => current ? { ...current, order: result.order } : current)).catch(() => {}); }} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm dark:border-slate-700">刷新服务端订单状态</button>
+    </div></div>}
+
+    {editing && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"><form onSubmit={saveProduct} className={`${panel} max-h-[90vh] w-full max-w-lg space-y-3 overflow-auto p-6`}>
+      <h3 className="font-bold">{editing.id ? '编辑商品' : '新增商品'}</h3>
+      <input required value={editing.name || ''} onChange={event => setEditing(value => value ? { ...value, name: event.target.value } : value)} placeholder="商品名称" className="w-full rounded border bg-transparent p-2 text-sm dark:border-slate-700"/>
+      <input required type="number" min="0.01" step="0.01" value={editing.price || ''} onChange={event => setEditing(value => value ? { ...value, price: Number(event.target.value) } : value)} placeholder="价格（元）" className="w-full rounded border bg-transparent p-2 text-sm dark:border-slate-700"/>
+      <input type="number" min="0" value={editing.stock ?? 50} onChange={event => setEditing(value => value ? { ...value, stock: Number(event.target.value) } : value)} placeholder="库存" className="w-full rounded border bg-transparent p-2 text-sm dark:border-slate-700"/>
+      <select value={editing.showcaseId || 'showcase-main'} onChange={event => setEditing(value => value ? { ...value, showcaseId: event.target.value } : value)} className="w-full rounded border bg-transparent p-2 text-sm dark:border-slate-700"><option value="showcase-main">主打数字产品</option><option value="showcase-hardware">限定周边</option><option value="showcase-service">定制服务</option></select>
+      <textarea value={editing.description || ''} onChange={event => setEditing(value => value ? { ...value, description: event.target.value } : value)} placeholder="商品说明" rows={3} className="w-full rounded border bg-transparent p-2 text-sm dark:border-slate-700"/>
+      <div className="flex flex-wrap gap-2">{(editing.images || []).map((image, index) => <div key={`${image}-${index}`} className="relative"><SafeImage src={image} alt="商品图片" className="h-16 w-20 rounded object-cover"/><button type="button" onClick={() => setEditing(value => value ? { ...value, images: value.images?.filter((_, i) => i !== index) } : value)} className="absolute -right-2 -top-2 rounded-full bg-rose-500 p-1 text-white"><X className="h-3 w-3"/></button></div>)}<label className="flex cursor-pointer items-center rounded-xl border px-3 text-xs dark:border-slate-700">上传图片<input type="file" accept="image/*" multiple className="hidden" onChange={async event => { const files = Array.from(event.target.files || []); for (const file of files) { try { const result = await uploadFile(file); setEditing(value => value ? { ...value, images: [...(value.images || []), result.url] } : value); } catch (e) { setError(e instanceof Error ? e.message : '图片上传失败'); } } event.target.value = ''; }}/></label></div>
+      <div className="flex justify-end gap-2"><button type="button" onClick={() => setEditing(null)} className="px-4 py-2 text-sm">取消</button><button className="rounded-xl bg-sky-500 px-4 py-2 text-sm text-white">保存商品</button></div>
+    </form></div>}
+  </div>;
 };
