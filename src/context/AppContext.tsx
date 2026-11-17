@@ -27,6 +27,7 @@ import {
   loadLocalStorage,
   saveLocalStorage,
   saveFileToIndexedDB,
+  getFileFromIndexedDB,
   DEFAULT_SETTINGS,
   DEFAULT_POSTS,
   DEFAULT_BOOKS,
@@ -840,18 +841,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const siteContentLastSavedRef = useRef('');
   const [siteContentNeedsSeed, setSiteContentNeedsSeed] = useState(false);
   const applyPublicSiteContent = useCallback((data: any, initialized: boolean, legacyAvailable = false) => {
-    const preserveLocalOwned = <T extends { id: string; ownerId?: string }>(published: T[], cached: T[]) => {
+    const preserveLocalOwned = <T extends { id: string; ownerId?: string; [key: string]: any }>(published: T[], cached: T[]) => {
       const publishedIds = new Set(published.map(item => item.id));
-      return [...published, ...cached.filter(item => item.ownerId && item.ownerId !== 'user_fox_admin' && !publishedIds.has(item.id))];
+      const hasLocalFile = (item: T) => ['url', 'src', 'fileUrl', 'cover', 'thumbnail', 'poster', 'icon'].some(key => {
+        const value = item[key];
+        return typeof value === 'string' && (value.startsWith('idb_file_') || value.startsWith('data:') || value.startsWith('blob:'));
+      }) || (Array.isArray(item.images) && item.images.some((url: unknown) => typeof url === 'string' && /^(?:idb_file_|data:|blob:)/i.test(url))) || (typeof item.content === 'string' && /(?:idb_file_|data:|blob:)/i.test(item.content));
+      const localById = new Map(cached.filter(hasLocalFile).map(item => [item.id, item]));
+      const merged = published.map(item => localById.get(item.id) || item);
+      const mergedIds = new Set(merged.map(item => item.id));
+      return [...merged, ...cached.filter(item => !mergedIds.has(item.id) && (hasLocalFile(item) || (item.ownerId && item.ownerId !== 'user_fox_admin')))];
     };
     if (initialized || legacyAvailable) {
-      if (Array.isArray(data?.posts)) setPosts(data.posts);
+      if (Array.isArray(data?.posts)) setPosts(prev => preserveLocalOwned(data.posts, prev));
       if (Array.isArray(data?.books)) setBooks(prev => preserveLocalOwned(data.books, prev));
       if (Array.isArray(data?.photos)) setPhotos(prev => preserveLocalOwned(data.photos, prev));
       if (Array.isArray(data?.photoFolders)) setPhotoFolders(data.photoFolders);
       if (Array.isArray(data?.media)) setMedia(prev => preserveLocalOwned(data.media, prev));
-      if (Array.isArray(data?.products)) setProducts(data.products);
-      if (Array.isArray(data?.websites)) setWebsites(data.websites);
+      if (Array.isArray(data?.products)) setProducts(prev => preserveLocalOwned(data.products, prev));
+      if (Array.isArray(data?.websites)) setWebsites(prev => preserveLocalOwned(data.websites, prev));
     } else if (!getAdminSessionToken()) {
       // A fresh public deployment must not show device-specific starter samples as if published.
       setPosts([]); setBooks(prev => prev.filter(item => item.ownerId && item.ownerId !== 'user_fox_admin'));
@@ -917,8 +925,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (siteContentTimeoutRef.current) clearTimeout(siteContentTimeoutRef.current);
     siteContentTimeoutRef.current = setTimeout(async () => {
       const publicSettingKeys = ['siteName', 'themeColor', 'customPaletteBg', 'fullBackgroundUrl', 'avatarUrl', 'heroIntroImage', 'heroBadge', 'heroTitle', 'heroSubtitle', 'transparentCards', 'bottomButtonsEnabled', 'hideNonBlogForGuests', 'globalTheme', 'deviceView', 'timezone'];
-      const publicSettings = Object.fromEntries(publicSettingKeys.filter(key => (systemSettings as any)[key] !== undefined).map(key => [key, (systemSettings as any)[key]]));
-      const data: Record<string, any> = { posts, books, photos, photoFolders, media, products, websites, systemSettings: publicSettings };
+      const hasLocalUrl = (value: unknown) => typeof value === 'string' && /^(?:idb_file_|data:|blob:)/i.test(value);
+      const removeLocalRefs = (value: string) => value.replace(/(?:idb_file_[\w.-]+|data:[^\s"'<>)]*)/gi, '');
+      const publicSettings = Object.fromEntries(publicSettingKeys.filter(key => (systemSettings as any)[key] !== undefined && !hasLocalUrl((systemSettings as any)[key])).map(key => [key, (systemSettings as any)[key]]));
+      const publicPosts = posts.map(post => ({ ...post, cover: hasLocalUrl(post.cover) ? undefined : post.cover, content: typeof post.content === 'string' ? removeLocalRefs(post.content) : post.content }));
+      const publicBooks = books.filter(book => !hasLocalUrl(book.fileUrl)).map(book => ({ ...book, cover: hasLocalUrl(book.cover) ? undefined : book.cover }));
+      const publicPhotos = photos.filter(photo => !hasLocalUrl(photo.url)).map(photo => ({ ...photo, thumbnail: hasLocalUrl(photo.thumbnail) ? undefined : photo.thumbnail }));
+      const publicMedia = media.filter(item => !hasLocalUrl(item.src)).map(item => ({ ...item, cover: hasLocalUrl(item.cover) ? undefined : item.cover }));
+      const publicProducts = products.map(product => ({ ...product, images: Array.isArray(product.images) ? product.images.filter(url => !hasLocalUrl(url)) : product.images }));
+      const publicWebsites = websites.map(item => ({ ...item, poster: hasLocalUrl(item.poster) ? undefined : item.poster }));
+      const data: Record<string, any> = { posts: publicPosts, books: publicBooks, photos: publicPhotos, photoFolders, media: publicMedia, products: publicProducts, websites: publicWebsites, systemSettings: publicSettings };
       if (isGlobalThemeMode(themeMode)) data.themeMode = themeMode;
       const serializedData = JSON.stringify(data);
       if (serializedData === siteContentLastSavedRef.current) return;
@@ -952,7 +968,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return new Promise(async (resolve, reject) => {
       let isCompleted = false;
 
-      const doFallbackLocal = async () => {
+      const doFallbackLocal = async (cloudFailureReason = '云端存储暂不可用') => {
         if (isCompleted) return;
         isCompleted = true;
         try {
@@ -960,25 +976,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
           const fileKey = `idb_file_${Date.now()}_${safeName}`;
           await saveFileToIndexedDB(fileKey, file);
-
-          let resolvedUrl = '';
-          try {
-            const reader = new FileReader();
-            resolvedUrl = await new Promise<string>((res) => {
-              reader.onload = (e) => res((e.target?.result as string) || '');
-              reader.onerror = () => res('');
-              reader.readAsDataURL(file);
-            });
-          } catch (e) {
-            resolvedUrl = fileKey;
-          }
+          const storedFile = await getFileFromIndexedDB(fileKey);
+          if (!storedFile) throw new Error('浏览器本地文件库不可用，文件未能保存');
 
           addStorageUsage(file.size);
           updateTransferPercent(100);
           finishTransfer();
-          showToast(`文件《${file.name}》已安全保存至本地持久存储！`, 'success');
+          showToast(`文件《${file.name}》${cloudFailureReason}，仅保存于本浏览器 IndexedDB；跨设备访问请检查云端存储配置并重新上传。`, 'info');
           resolve({
-            url: resolvedUrl || fileKey,
+            url: fileKey,
             size: file.size,
             name: file.name,
           });
@@ -1017,11 +1023,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             try {
               const data = JSON.parse(xhr.responseText);
               if (data && data.success && data.url) {
+                if (data.storedTarget === 'memory') {
+                  doFallbackLocal('服务器只能临时保存在易失内存');
+                  return;
+                }
                 isCompleted = true;
                 addStorageUsage(file.size);
                 updateTransferPercent(100);
                 finishTransfer();
-                const targetName = data.storedTarget === 'r2' ? 'Cloudflare R2' : data.storedTarget === 'd1' ? 'Cloudflare D1 存储' : '云端同步库';
+                const targetName = data.storedTarget === 'r2' ? 'Cloudflare R2' : data.storedTarget === 'd1' ? 'Cloudflare D1 存储' : data.storedTarget === 'kv' ? 'Cloudflare KV 临时存储' : data.storedTarget === 'cos' ? '腾讯 COS' : data.storedTarget === 'oss' ? '阿里云 OSS' : data.storedTarget === 's3' ? 'S3 兼容存储' : '配置的云存储';
                 showToast(`文件《${file.name}》已成功同步至 ${targetName}！`, 'success');
                 resolve({
                   url: data.url,
@@ -1032,20 +1042,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               }
             } catch (e) {}
           }
-          doFallbackLocal();
+          let reason = `云端上传失败（HTTP ${xhr.status || '未知'}）`;
+          try { const errorPayload = JSON.parse(xhr.responseText); if (errorPayload?.error) reason = `云端上传失败：${String(errorPayload.error).slice(0, 100)}`; } catch {}
+          doFallbackLocal(reason);
         };
 
         xhr.onerror = () => {
-          doFallbackLocal();
+          doFallbackLocal('云端网络连接失败');
         };
 
         xhr.ontimeout = () => {
-          doFallbackLocal();
+          doFallbackLocal('云端上传超时');
         };
 
         xhr.send(formData);
       } catch (e) {
-        doFallbackLocal();
+        doFallbackLocal('浏览器云端上传请求初始化失败');
       }
     });
   };
