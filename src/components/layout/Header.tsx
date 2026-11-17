@@ -28,6 +28,7 @@ import {
 import { SafeImage } from '../common/SafeImage';
 import { Locale } from '../../utils/i18n';
 import { clearAdminSessionToken } from '../../utils/adminSession';
+import { clearUserSessionToken } from '../../utils/userSession';
 
 interface HeaderProps {
   currentTab: string;
@@ -91,6 +92,7 @@ export const Header: React.FC<HeaderProps> = ({
 
   const handleLogout = () => {
     clearAdminSessionToken();
+    clearUserSessionToken();
     setCurrentUser(null);
   };
 

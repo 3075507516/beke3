@@ -33,7 +33,7 @@ export const GuideSection: React.FC = () => {
           <span>fox3 博客全平台极速部署指引与 D1 / R2 / WebDAV 使用说明</span>
         </h2>
         <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-          实际存储位置：浏览器 localStorage 保存博客/邮件列表/订单/系统设置及前台邮箱配置；IndexedDB 缓存本机文件。Cloudflare D1 保存注册账户、验证码/限流、管理员共享同步 JSON 与文件回退表；R2 Bucket 保存上传文件对象；KV 仅用于兼容回退/短期记录，存在日写入额度限制。前台邮箱密码保留在当前浏览器，不上传同步且未加密。未绑定相应资源时不能把本地回退视为云端持久化；本项目没有接入 Supabase、腾讯 COS 或阿里 OSS 适配器。
+          实际存储位置：浏览器 localStorage 保存页面数据缓存/设备偏好、前台邮箱配置及登录会话令牌；IndexedDB 只保存云上传失败时的本机文件回退。Cloudflare D1 保存公开站点内容、注册账户和按账户隔离的用户媒体目录（仅元数据）；R2 或已配置的 COS/OSS/S3 保存文件对象；KV 仅是有期限的兼容回退，内存回退不能持久化。已登录用户在管理员开启文件管理后上传的照片、视频和电子书目录会跨设备同步并在站点展示，文件本体必须成功写入云对象存储；EPUB/TXT 正文按需从原文件加载，不写入 D1 快照；若回退至 IndexedDB 则只在当前浏览器可用。前台邮箱凭据保留在当前浏览器，不上传同步且未加密。
         </p>
       </div>
 

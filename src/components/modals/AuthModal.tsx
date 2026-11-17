@@ -3,6 +3,7 @@ import { useApp } from '../../context/AppContext';
 import { X, Mail, Lock, User, CheckCircle, AlertCircle, Key, Sparkles, UserCheck, KeyRound } from 'lucide-react';
 import { hashPassword, verifyPassword } from '../../utils/password';
 import { clearAdminSessionToken, setAdminSessionToken } from '../../utils/adminSession';
+import { clearUserSessionToken, setUserSessionToken } from '../../utils/userSession';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -149,8 +150,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
               return;
             }
             setAdminSessionToken(resJson.sessionToken);
+            clearUserSessionToken();
           } else {
             clearAdminSessionToken();
+            if (!resJson.userSessionToken) {
+              setStatusMsg({ type: 'error', text: '用户登录未取得服务端会话，无法安全同步个人文件；请更新部署后重试。' });
+              return;
+            }
+            setUserSessionToken(resJson.userSessionToken);
           }
           setCurrentUser(remoteUser);
           // Sync with local users list
@@ -173,6 +180,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
       const localAdminPass = (adminPassword || '').trim();
       if (isLocalDevelopment && localAdminPass.length >= 6 && inputPass === localAdminPass) {
         clearAdminSessionToken();
+        clearUserSessionToken();
         const adminUser = users.find(u => u.role === 'admin' || u.username.toLowerCase() === configuredAdminName) || {
           id: 'user_fox_admin',
           username: configuredAdminName,
@@ -239,8 +247,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
       }
 
       clearAdminSessionToken();
+      clearUserSessionToken();
       setCurrentUser(matchedUser);
-      setStatusMsg({ type: 'success', text: `登录成功，欢迎 ${matchedUser.username}！` });
+      setStatusMsg({ type: 'success', text: `本机登录成功，欢迎 ${matchedUser.username}；此账号没有服务端会话，个人文件不会跨设备同步。` });
       setTimeout(() => { onClose(); }, 500);
     } else {
       setStatusMsg({ type: 'error', text: '账号不存在或密码错误，请检查用户名/邮箱与密码' });

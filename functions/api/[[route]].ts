@@ -299,6 +299,61 @@ async function hasAdminSession(request: Request, env: any): Promise<boolean> {
   }
 }
 
+async function createUserSessionToken(env: any, userId: string): Promise<string> {
+  const secret = getAdminSessionSecret(env);
+  if (!secret || !userId) return '';
+  const payload = base64UrlEncode(new TextEncoder().encode(JSON.stringify({ role: 'user', sub: userId, exp: Date.now() + 7 * 24 * 60 * 60 * 1000 })));
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const signature = new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(payload)));
+  return `${payload}.${base64UrlEncode(signature)}`;
+}
+
+async function getAuthenticatedUser(request: Request, env: any): Promise<{ id: string; username: string } | null> {
+  const secret = getAdminSessionSecret(env);
+  const token = request.headers.get('Authorization')?.replace(/^Bearer\s+/i, '') || '';
+  if (!secret || !token || !env.DB) return null;
+  const [payload, signature, extra] = token.split('.');
+  if (!payload || !signature || extra) return null;
+  try {
+    const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['verify']);
+    const signatureBytes = Uint8Array.from(atob(signature.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - signature.length % 4) % 4)), ch => ch.charCodeAt(0));
+    if (!await crypto.subtle.verify('HMAC', key, signatureBytes, new TextEncoder().encode(payload))) return null;
+    const payloadBytes = Uint8Array.from(atob(payload.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - payload.length % 4) % 4)), ch => ch.charCodeAt(0));
+    const claims = JSON.parse(new TextDecoder().decode(payloadBytes));
+    if (claims.role !== 'user' || typeof claims.sub !== 'string' || Number(claims.exp) <= Date.now()) return null;
+    await ensureUsersTable(env.DB);
+    const user = await env.DB.prepare("SELECT id, username, role, status FROM fox3_users WHERE id = ? LIMIT 1").bind(claims.sub).first();
+    if (!user || user.role !== 'user' || user.status !== 'active') return null;
+    return { id: String(user.id), username: String(user.username) };
+  } catch {
+    return null;
+  }
+}
+
+async function readJsonRequestLimited(request: Request, maxBytes: number): Promise<any> {
+  const declaredLength = Number(request.headers.get('content-length') || 0);
+  if (declaredLength > maxBytes) throw Object.assign(new Error('请求体超过大小限制'), { code: 'PAYLOAD_TOO_LARGE' });
+  const reader = request.body?.getReader();
+  if (!reader) return {};
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      try { await reader.cancel(); } catch {}
+      throw Object.assign(new Error('请求体超过大小限制'), { code: 'PAYLOAD_TOO_LARGE' });
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+  try { return JSON.parse(new TextDecoder().decode(bytes)); }
+  catch { throw Object.assign(new Error('JSON 请求体格式错误'), { code: 'INVALID_JSON' }); }
+}
+
 async function hashUserPassword(password: string): Promise<string> {
   // Cloudflare Workers Web Crypto currently rejects PBKDF2 counts above 100,000.
   const iterations = 100_000;
@@ -524,6 +579,12 @@ export const onRequest = async (context: any) => {
     }), { headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
   }
 
+  if (path === '/auth/user-session' && request.method === 'GET') {
+    const authenticatedUser = await getAuthenticatedUser(request, env);
+    if (!authenticatedUser) return Response.json({ success: false, authenticated: false, error: '用户会话无效或已过期' }, { status: 401, headers });
+    return Response.json({ success: true, authenticated: true, user: { ...authenticatedUser, role: 'user' } }, { headers });
+  }
+
   // Admin credentials verification & backend variable resolver endpoint
   // Ensures single admin uniqueness. Reads ADMIN_PASSWORD and ADMIN_USERNAME from dashboard/environment variables.
   if (path === '/admin/config' || path === '/auth/admin') {
@@ -654,10 +715,14 @@ export const onRequest = async (context: any) => {
                 headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
               });
             }
+            if (userRow.status !== 'active') return new Response(JSON.stringify({ success: false, authenticated: false, message: '该账户已停用，请联系管理员' }), { status: 403, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
             if (await verifyUserPassword(env.DB, userRow, inputPass)) {
+              const userSessionToken = await createUserSessionToken(env, String(userRow.id));
+              if (!userSessionToken) return Response.json({ success: false, authenticated: false, message: '用户云端同步会话不可用，请检查 ADMIN_SESSION_SECRET 配置' }, { status: 503, headers });
               return new Response(JSON.stringify({
                 success: true,
                 authenticated: true,
+                userSessionToken,
                 user: {
                   id: userRow.id,
                   username: userRow.username,
@@ -1123,6 +1188,75 @@ export const onRequest = async (context: any) => {
     });
   }
 
+  // Registered users store only their own media metadata in a separate D1 row.
+  // The file bytes remain in the configured object store; this endpoint never accepts inline file data.
+  if (path === '/user-media') {
+    const user = await getAuthenticatedUser(request, env);
+    if (!user) return Response.json({ success: false, error: '请重新登录后同步个人媒体' }, { status: 401, headers });
+    if (!env.DB) return Response.json({ success: false, error: '个人媒体跨设备同步需要 D1（DB）' }, { status: 503, headers });
+    try {
+      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS fox3_user_media (
+        userId TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        revision INTEGER NOT NULL DEFAULT 1,
+        updatedAt INTEGER NOT NULL
+      )`).run();
+      const current = await env.DB.prepare('SELECT value, revision, updatedAt FROM fox3_user_media WHERE userId = ?').bind(user.id).first();
+      if (request.method === 'GET') {
+        return Response.json({ success: true, initialized: Boolean(current?.value), revision: Number(current?.revision || 0), updatedAt: Number(current?.updatedAt || 0), data: current?.value ? JSON.parse(String(current.value)) : { books: [], photos: [], media: [] } }, { headers: { ...Object.fromEntries(headers.entries()), 'Cache-Control': 'no-store' } });
+      }
+      if (request.method !== 'POST') return Response.json({ success: false, error: 'Method not allowed' }, { status: 405, headers });
+      const length = Number(request.headers.get('content-length') || 0);
+      if (length > 2 * 1024 * 1024) return Response.json({ success: false, error: '个人媒体目录超过 2 MiB 限制；文件本体必须上传到对象存储' }, { status: 413, headers });
+      const published = await env.DB.prepare('SELECT value FROM fox3_site_content WHERE id = ?').bind('published').first();
+      const siteSettings = published?.value ? JSON.parse(String(published.value))?.systemSettings : null;
+      if (siteSettings?.allowUserMediaManagement !== true) return Response.json({ success: false, error: '管理员尚未开启注册用户文件管理' }, { status: 403, headers });
+      let body: any;
+      try { body = await readJsonRequestLimited(request, 2 * 1024 * 1024); }
+      catch (error: any) {
+        const tooLarge = error?.code === 'PAYLOAD_TOO_LARGE';
+        return Response.json({ success: false, error: tooLarge ? '个人媒体目录超过 2 MiB 限制；文件本体必须上传到对象存储' : '请求 JSON 格式无效' }, { status: tooLarge ? 413 : 400, headers });
+      }
+      const expectedRevision = Number(body?.expectedRevision);
+      if (!Number.isInteger(expectedRevision) || expectedRevision < 0) return Response.json({ success: false, error: '个人媒体版本号无效，请重新加载' }, { status: 400, headers });
+      const definitions: Record<string, string[]> = {
+        books: ['id','title','author','format','cover','description','fileSize','fileUrl','createdAt','updatedAt'],
+        photos: ['id','title','url','thumbnail','category','folderId','folderName','width','height','description','createdAt','updatedAt'],
+        media: ['id','type','title','artist','src','cover','duration','fileSize','uploadedAt','createdAt','updatedAt'],
+      };
+      const clean: Record<string, any[]> = {};
+      for (const [kind, allowed] of Object.entries(definitions)) {
+        const records = Array.isArray(body?.data?.[kind]) ? body.data[kind].slice(0, 2000) : [];
+        clean[kind] = records.filter((item: any) => item && typeof item.id === 'string' && item.id.length <= 200 && !item.deleted)
+          .map((item: any) => {
+            const record: Record<string, unknown> = { ownerId: user.id, ownerUsername: user.username };
+            for (const key of allowed) {
+              const value = item[key];
+              if (value === undefined) continue;
+              if (typeof value === 'string' && /^(?:idb_file_|data:|blob:)/i.test(value)) continue;
+              record[key] = value;
+            }
+            return record;
+          });
+      }
+      const serialized = JSON.stringify(clean);
+      if (new TextEncoder().encode(serialized).byteLength > 2 * 1024 * 1024) return Response.json({ success: false, error: '个人媒体目录超过 2 MiB；大文件请使用对象存储链接' }, { status: 413, headers });
+      const now = Date.now();
+      const result = await env.DB.prepare(`INSERT INTO fox3_user_media (userId, value, revision, updatedAt)
+        SELECT ?, ?, 1, ? WHERE ? = 0 OR EXISTS (SELECT 1 FROM fox3_user_media WHERE userId = ?)
+        ON CONFLICT(userId) DO UPDATE SET value = excluded.value, revision = fox3_user_media.revision + 1, updatedAt = excluded.updatedAt
+        WHERE fox3_user_media.revision = ?`).bind(user.id, serialized, now, expectedRevision, user.id, expectedRevision).run();
+      if (!Number(result?.meta?.changes || 0)) {
+        const latest = await env.DB.prepare('SELECT revision FROM fox3_user_media WHERE userId = ?').bind(user.id).first();
+        return Response.json({ success: false, conflict: true, revision: Number(latest?.revision || 0), error: '个人文件已在其他设备更新，请刷新后重试' }, { status: 409, headers });
+      }
+      return Response.json({ success: true, revision: expectedRevision + 1, updatedAt: now }, { headers });
+    } catch (error: any) {
+      console.error('[User Media] D1 operation failed:', String(error?.message || error).slice(0, 180));
+      return Response.json({ success: false, error: '个人媒体同步失败，请检查 D1（DB）绑定' }, { status: 503, headers });
+    }
+  }
+
   // Canonical, public site content is stored separately from private/admin sync data
   // and from WebDAV backup files. Public GET is read-only; writes require admin auth.
   if (path === '/site-content') {
@@ -1136,8 +1270,14 @@ export const onRequest = async (context: any) => {
         revision INTEGER NOT NULL DEFAULT 1,
         updatedAt INTEGER NOT NULL
       )`).run();
+      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS fox3_user_media (
+        userId TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        revision INTEGER NOT NULL DEFAULT 1,
+        updatedAt INTEGER NOT NULL
+      )`).run();
       const publicFields = ['posts', 'books', 'photos', 'photoFolders', 'media', 'products', 'websites', 'systemSettings', 'themeMode'];
-      const publicSettings = ['siteName', 'themeColor', 'customPaletteBg', 'fullBackgroundUrl', 'avatarUrl', 'heroIntroImage', 'heroBadge', 'heroTitle', 'heroSubtitle', 'transparentCards', 'bottomButtonsEnabled', 'hideNonBlogForGuests', 'globalTheme', 'deviceView', 'timezone'];
+      const publicSettings = ['siteName', 'themeColor', 'customPaletteBg', 'fullBackgroundUrl', 'avatarUrl', 'heroIntroImage', 'heroBadge', 'heroTitle', 'heroSubtitle', 'transparentCards', 'bottomButtonsEnabled', 'hideNonBlogForGuests', 'allowUserMediaManagement', 'globalTheme', 'deviceView', 'timezone'];
       const cleanRecords = (value: unknown, kind: string): any[] => {
         if (!Array.isArray(value)) return [];
         const adminUsername = String(env.ADMIN_USERNAME || 'fox').trim().toLowerCase();
@@ -1153,7 +1293,7 @@ export const onRequest = async (context: any) => {
         }).map((item: any) => {
           const allowed: Record<string, string[]> = {
             posts: ['id','title','summary','content','category','tags','cover','author','views','likes','createdAt','updatedAt'],
-            books: ['id','title','author','format','cover','description','fileSize','fileUrl','content','createdAt','updatedAt'],
+            books: ['id','title','author','format','cover','description','fileSize','fileUrl','createdAt','updatedAt'],
             photos: ['id','title','url','thumbnail','category','folderId','folderName','width','height','description','createdAt','updatedAt'],
             photoFolders: ['id','name','createdAt'],
             media: ['id','type','title','artist','src','cover','duration','fileSize','uploadedAt','createdAt','updatedAt'],
@@ -1184,9 +1324,30 @@ export const onRequest = async (context: any) => {
         if (['modern','win98','mac-classic','terminal','parchment','gameboy','cyberpunk','steampunk','nordic','leather','blueprint','retro','aurora-glass','neo-brutal','soft-pastel','midnight-luxe','editorial'].includes(source.themeMode)) result.themeMode = source.themeMode;
         return result;
       };
+      const publicUserMedia = async (data: Record<string, any>) => {
+        const merged: Record<string, any[]> = { ...data, books: [...(data.books || [])], photos: [...(data.photos || [])], media: [...(data.media || [])] };
+        const rows = await env.DB.prepare('SELECT value FROM fox3_user_media ORDER BY updatedAt DESC LIMIT 1000').all();
+        for (const row of rows?.results || []) {
+          try {
+            const accountData = JSON.parse(String(row.value || '{}'));
+            for (const kind of ['books', 'photos', 'media']) {
+              if (!Array.isArray(accountData[kind])) continue;
+              const ids = new Set(merged[kind].map((item: any) => item.id));
+              for (const item of accountData[kind]) if (item?.id && !ids.has(item.id)) { merged[kind].push(item); ids.add(item.id); }
+            }
+          } catch {}
+        }
+        const stats = await env.DB.prepare('SELECT COALESCE(MAX(updatedAt), 0) AS updatedAt FROM fox3_user_media').first();
+        const user = await getAuthenticatedUser(request, env);
+        const ownRow = user ? await env.DB.prepare('SELECT revision FROM fox3_user_media WHERE userId = ?').bind(user.id).first() : null;
+        return { data: merged, userMediaUpdatedAt: Number(stats?.updatedAt || 0), userMediaRevision: Number(ownRow?.revision || 0) };
+      };
       const current = await env.DB.prepare('SELECT value, revision, updatedAt FROM fox3_site_content WHERE id = ?').bind('published').first();
       if (request.method === 'GET') {
-        if (current?.value) return Response.json({ success: true, initialized: true, revision: Number(current.revision || 1), updatedAt: Number(current.updatedAt || 0), data: sanitize(JSON.parse(current.value)) }, { headers: { ...Object.fromEntries(headers.entries()), 'Cache-Control': 'no-store' } });
+        if (current?.value) {
+          const userContent = await publicUserMedia(sanitize(JSON.parse(current.value)));
+          return Response.json({ success: true, initialized: true, revision: Number(current.revision || 1), updatedAt: Number(current.updatedAt || 0), userMediaUpdatedAt: userContent.userMediaUpdatedAt, userMediaRevision: userContent.userMediaRevision, data: userContent.data }, { headers: { ...Object.fromEntries(headers.entries()), 'Cache-Control': 'no-store' } });
+        }
         // One-time safe bootstrap from the legacy mixed snapshot; only public-whitelisted fields leave the server.
         let legacy: any = null;
         try {
@@ -1196,20 +1357,27 @@ export const onRequest = async (context: any) => {
         if (!legacy && env.KV) {
           try { const old = await env.KV.get('fox3_sync_global_state'); if (old) legacy = JSON.parse(old); } catch {}
         }
-        return Response.json({ success: true, initialized: false, legacyAvailable: Boolean(legacy), revision: 0, updatedAt: 0, data: sanitize(legacy || {}) }, { headers: { ...Object.fromEntries(headers.entries()), 'Cache-Control': 'no-store' } });
+        const userContent = await publicUserMedia(sanitize(legacy || {}));
+        return Response.json({ success: true, initialized: false, legacyAvailable: Boolean(legacy), revision: 0, updatedAt: 0, userMediaUpdatedAt: userContent.userMediaUpdatedAt, userMediaRevision: userContent.userMediaRevision, data: userContent.data }, { headers: { ...Object.fromEntries(headers.entries()), 'Cache-Control': 'no-store' } });
       }
       if (request.method === 'POST') {
         if (!await hasAdminSession(request, env)) return Response.json({ success: false, error: '发布站点内容需要管理员登录' }, { status: 401, headers });
         const length = Number(request.headers.get('content-length') || 0);
         if (length > 4 * 1024 * 1024) return Response.json({ success: false, error: '站点内容同步请求超过 4 MiB 限制' }, { status: 413, headers });
-        const body = await request.json();
+        let body: any;
+        try { body = await readJsonRequestLimited(request, 4 * 1024 * 1024); }
+        catch (error: any) {
+          const tooLarge = error?.code === 'PAYLOAD_TOO_LARGE';
+          return Response.json({ success: false, error: tooLarge ? '站点内容同步请求超过 4 MiB 限制' : '请求 JSON 格式无效' }, { status: tooLarge ? 413 : 400, headers });
+        }
         const expectedRevision = Number(body?.expectedRevision);
         if (!Number.isInteger(expectedRevision) || expectedRevision < 0) return Response.json({ success: false, error: '缺少有效的站点内容版本号，请先刷新' }, { status: 400, headers });
         const content = sanitize(body?.data);
         const serialized = JSON.stringify(content);
         if (new TextEncoder().encode(serialized).byteLength > 4 * 1024 * 1024) return Response.json({ success: false, error: '站点内容超过 4 MiB；大文件请存入对象存储，仅同步文件链接和元数据' }, { status: 413, headers });
+        if (current?.value && String(current.value) === serialized) return Response.json({ success: true, syncedToCloud: true, unchanged: true, revision: Number(current.revision || 1), updatedAt: Number(current.updatedAt || 0) }, { headers });
         const result = await env.DB.prepare(`INSERT INTO fox3_site_content (id, value, revision, updatedAt)
-          SELECT 'published', ?, 1, ? WHERE ? = 0
+          SELECT 'published', ?, 1, ? WHERE ? = 0 OR EXISTS (SELECT 1 FROM fox3_site_content WHERE id = 'published')
           ON CONFLICT(id) DO UPDATE SET value = excluded.value, revision = fox3_site_content.revision + 1, updatedAt = excluded.updatedAt
           WHERE fox3_site_content.revision = ?`).bind(serialized, Date.now(), expectedRevision, expectedRevision).run();
         if (!Number(result?.meta?.changes || 0)) {
