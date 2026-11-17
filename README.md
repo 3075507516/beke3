@@ -1,6 +1,6 @@
 # fox3 - 次世代现代化全能个人博客与数字知识库系统
 
-> **fox3** 是一款响应式个人博客与数字资产管理前端。博客/设置数据默认保存在浏览器本机；Cloudflare D1/R2/KV 提供部分账户、共享同步和文件服务能力，必须正确绑定才可使用，不应将本地回退视为云端容灾。
+> **fox3** 是一款响应式个人博客与数字资产管理网站。已发布的博客、书架、相册/媒体、产品目录、站点链接和公开外观设置以 Cloudflare D1 为权威数据源；所有设备和访客可读取/刷新，只有管理员会话可发布。浏览器不再以 localStorage 作为这些核心内容的来源；未登录设备在内存中显示数据库内容，附件本体放 R2/兼容对象存储。邮件、订单、聊天等私人数据不进入公开站点内容 API；WebDAV 备份属于独立链路。必须正确绑定 Pages Functions 与 D1。
 
 ---
 
@@ -48,9 +48,9 @@
    * **Build command**: `npm run build`
    * **Build output directory**: `dist`
 4. 部署成功后，进入 **Settings** -> **Functions** -> **Bindings** 绑定资源：
-     * **D1 Database 绑定**：名称填写 `DB`；用于用户账户/密码重置、验证码及限流记录、管理员跨设备共享同步和 Resend webhook 收件。注册账户与密码重置需 D1；验证码可在代码支持范围内回退 KV，但没有 D1 的情况下并不提供完整账户/同步功能。
+     * **D1 Database 绑定**：名称填写 `DB`；用于公开站点内容主库、用户账户/密码重置、验证码及限流记录、Resend webhook 收件。跨设备博客内容必须可用 D1；KV 不作为公开站点内容的回退主库。
    * **R2 Bucket 绑定**：变量名称填写 `R2_BUCKET`，用于应用文件上传；无 R2 时可回退 D1 文件表，超大/不适用场景不保证。
-   * **KV Namespace 绑定**：名称填写 `KV`，作为兼容回退/临时数据层；验证码和共享同步在 D1 不可用时可回退到 KV。KV 有日写入额度，绑定不代表写入额度充足。
+   * **KV Namespace 绑定**：名称填写 `KV`，作为验证码/旧私有同步的兼容回退与临时数据层；公开站点内容严格使用 D1，不回退 KV，避免把临时存储误当权威数据。KV 有日写入额度。
    * **环境变量设置 (Environment Variables)**：
      * `ADMIN_USERNAME`：自定义管理员账号名（默认 `fox`）。
      * `ADMIN_PASSWORD`：管理员自行选择的生产登录密码，至少 6 个字符，可用数字、字母、符号或组合；未设置时管理员登录被拒绝。仅在 Cloudflare Pages 的 Variables and Secrets 中设置或修改。
@@ -130,9 +130,9 @@ http://<你的服务器IP>:8080
 
 | 变量名 / 绑定键 | 平台 / 类型 | 实际用途 | 建议 |
 | :--- | :--- | :--- | :--- |
-| `DB` | Cloudflare Pages D1 Binding | 注册用户、注册/重置验证码与限流、共享同步 JSON、Resend 收件箱、R2 不可用时的文件回退表 | 注册/重置、收件箱及 D1 主存储同步需要 |
+| `DB` | Cloudflare Pages D1 Binding | 已发布站点内容主库（`fox3_site_content`）、注册用户/验证码与限流、Resend 收件箱、文件回退表及旧版私有同步 | 必须绑定；站点内容不使用 KV 替代 |
 | `R2_BUCKET` | Cloudflare Pages R2 Binding | 文件上传对象与下载读取 | 推荐 |
-| `KV` | Cloudflare Pages KV Binding | D1 不可用时验证码/共享同步的兼容回退及临时数据；不是主博客数据库，免费配额可能限制写入 | 可选 |
+| `KV` | Cloudflare Pages KV Binding | 旧版私有同步/验证码等兼容回退；不是站点内容数据库 | 可选 |
 | `ADMIN_USERNAME` | Pages Environment Variable | 管理员账号名，默认 `fox` | 推荐设置 |
 | `ADMIN_PASSWORD` | Pages Secret | 管理员自行设定的登录密码；至少 6 个字符，字符类型不限。未设置则管理员登录被拒绝 | 必须设置 |
 | `ADMIN_SESSION_SECRET` | Pages Secret | 独立 HMAC 会话签名密钥；至少 32 个字符；不以管理员密码回退 | 必须单独设置 |
@@ -148,6 +148,20 @@ http://<你的服务器IP>:8080
 | `OSS_ACCESS_KEY_ID` / `OSS_ACCESS_KEY_SECRET` / `OSS_REGION` / `OSS_BUCKET` | Pages Variables/Secrets | 阿里 OSS AccessKey ID/Secret、地域（如 `cn-hangzhou`）、Bucket 名称 | 选择 OSS 后配置；AccessKey 设为 Secrets |
 | `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` / `S3_REGION` / `S3_BUCKET` / `S3_ENDPOINT` | Pages Variables/Secrets | 通用 AWS SigV4 S3-compatible endpoint、地域、Bucket 与密钥 | 为未单独适配的平台提供对象存储后备；需支持 path-style 请求 |
 
+### 站点内容数据库与跨设备刷新
+
+Cloudflare Pages 项目必须部署 `functions/api/[[route]].ts` Functions，并在生产/预览环境绑定一个 D1 数据库，binding 名称必须为 `DB`。核心公开站点内容存入 `fox3_site_content`；无管理员身份的所有设备都可通过 `GET /api/site-content` 读取最新已发布内容和使用顶部刷新按钮，管理员修改内容后自动写入 D1。访客不能写入内容。接口只公开白名单字段：文章/书籍/照片/媒体/产品目录/站点链接与公开外观设置；订单、邮件、聊天、账户、管理员/邮件/支付/WebDAV 凭据不进入公开 API。带 ownerId/ownerUsername 的用户个人媒体不公开同步。
+
+新部署可在绑定 D1 后预建表（应用也会在首次请求时安全执行 `CREATE TABLE IF NOT EXISTS`）：
+
+```bash
+npx wrangler d1 execute <你的数据库名称> --remote --file=migrations/0001_site_content.sql
+```
+
+本地 D1 用 `--local`。旧版本管理员共享快照会在新表为空时被服务端读取并严格筛选白名单，只将安全公开字段返回；管理员首次会话可把筛选后的内容迁入新表，旧私有同步记录不会作为公开接口返回。内容使用 revision 乐观锁，两个管理员设备同时编辑时，较旧版本的提交会得到冲突提示，需先刷新再编辑。纯静态 Direct Upload/Vercel 不包含 Functions 和 D1，不能实现跨设备站点内容。
+
+顶部的刷新/同步按钮对所有人开放，执行的是公开站点内容读取，不会写入，也不会触碰 WebDAV 或管理员私有数据。设备前台时每分钟、重新聚焦/联网时会检查 D1 版本；若服务端版本没有改变，不会重载内容或额外写库。数据库不可用时界面会显示错误，不会把本机内容伪报为云端成功。
+
 ### Resend 发信与收件配置
 
 在 Resend 中创建 API Key 并验证发件域名。Cloudflare Pages 的 Functions Variables/Secrets 至少设置 `MAIL_PROVIDER=resend`、`RESEND_API_KEY` 和 `MAIL_SENDER`。这些服务端变量用于验证码和后台触发的业务邮件；前端 provider/key 只保存在本机，不能代替后端配置。建议 API Key 至少具有发信和读取 inbound 内容所需权限；连接指示状态以已部署的 `/api/mail/status` 返回的服务端配置为准，不代表 Resend Dashboard 中的域名、MX、Receiving 或 webhook 已完成实际验证。
@@ -160,7 +174,7 @@ http://<你的服务器IP>:8080
 
 在“备份区”配置 HTTPS WebDAV 服务地址、目录、账号和应用专用密码后，应用通过本站 Cloudflare Pages Functions 的 `/api/webdav/*` 代理执行 DAV 操作：服务端认证探测、`PROPFIND` 远端列表、`PUT` 上传、`GET` 下载和 `DELETE` 删除。连接状态灯只在服务端真实认证请求成功后转绿；远端文件列表直接从 WebDAV 读取，因此同一目录也可在 WebDAV 服务商界面查看。服务端代理要求有效管理员会话，静态 Direct Upload/Vercel 部署不提供该 Functions API。
 
-当前本站生成的是带版本号的 fox3 JSON 数据快照；它能恢复应用记录/设置，但并不把照片、视频、书籍附件等二进制本体打包进 JSON。远端已有任意扩展名文件会按原文件名/格式列出，管理员也可手动上传不超过 25 MiB 的本地原格式文件，并从本站下载或删除；本站的“恢复”仅适用于本站格式的 JSON 快照，其他文件需下载后在对应功能中重新导入。目前代理单文件上限 25 MiB、无断点续传，浏览器到 Pages Functions/远端的网络时限也可能导致传输失败；先选择文章、文字与设置文件，图片/视频或大电子书容易卡住或超时，不应将其当作可靠的大型媒体灾备方案。WebDAV 凭据只保存在当前浏览器本机，不写入共享同步载荷；文件列表元数据可随应用状态保存/同步，但换设备需再次配置凭据并重新读取 WebDAV 目录。
+当前本站生成的是带版本号的 fox3 JSON 数据快照；它能恢复应用记录/设置，但并不把照片、视频、书籍附件等二进制本体打包进 JSON。远端已有任意扩展名文件会按原文件名/格式列出，管理员也可手动上传不超过 25 MiB 的本地原格式文件，并从本站下载或删除；本站的“恢复”仅适用于本站格式的 JSON 快照，其他文件需下载后在对应功能中重新导入。目前代理单文件上限 25 MiB、无断点续传，浏览器到 Pages Functions/远端的网络时限也可能导致传输失败；先选择文章、文字与设置文件，图片/视频或大电子书容易卡住或超时，不应将其当作可靠的大型媒体灾备方案。WebDAV 凭据只保存在当前浏览器本机，不写入共享同步载荷；远端文件列表每次从 WebDAV 目录直接读取；备份文件与 WebDAV 元数据完全不进入站点内容数据库。换设备需再次配置凭据并重新读取 WebDAV 目录。
 
 ### 注册账户与密码重置
 
@@ -168,13 +182,13 @@ http://<你的服务器IP>:8080
 
 ### 数据实际存储映射
 
-- **浏览器 `localStorage`**：当前设备的博客文章、书籍、照片元数据、媒体、站内邮件列表、商品/订单、聊天、站点与系统设置、前台邮箱设置（SMTP/API 密钥）等应用状态。前台密钥保存在本机浏览器且未加密；不随共享同步上传，导出备份会剔除邮件密钥。公用设备不要保存密钥。
+- **浏览器内存/`localStorage`**：公开核心内容可从既有 localStorage 读取为启动缓存，并在数据库成功拉取后被 D1 最新版本覆盖；本地回写也仅作为可丢弃缓存，不是跨设备内容的权威来源。设备偏好与邮件/支付/WebDAV 配置仍留在本机浏览器；前台密钥未加密，不要在公用设备保存。
 - **浏览器 IndexedDB**：浏览器本地文件/Blob 缓存与部分上传文件回退数据。清除浏览器站点数据会影响这些本机数据。
-- **Cloudflare D1 (`DB`)**：`fox3_users` 保存注册账户和 PBKDF2 密码哈希；`fox3_email_verifications`、`fox3_password_resets`、`fox3_email_ip_rates` 用于注册/找回验证码及限流；`fox3_inbound_emails` 保存经过 Resend webhook 验签并拉取的来信正文和附件元数据；`fox3_sync` 保存管理员手动同步的共享 JSON（包括当前全局主题模式）；`fox3_files` 是无 R2 时的文件回退表。邮件凭据/WebDAV 凭据不在共享同步载荷中。
+- **Cloudflare D1 (`DB`)**：`fox3_site_content` 是公开站点内容的规范主库，含 revision；`fox3_users` 保存注册账户和 PBKDF2 密码哈希；`fox3_email_verifications`、`fox3_password_resets`、`fox3_email_ip_rates` 用于注册/找回验证码及限流；`fox3_inbound_emails` 保存经过 Resend webhook 验签并拉取的来信正文和附件元数据；`fox3_sync` 仅是旧版管理员私有同步兼容表，不是网站公开内容主库；`fox3_files` 是无 R2 时的文件回退表。邮件凭据/WebDAV 凭据不在公开站点载荷中。
 - **Cloudflare R2 (`R2_BUCKET`)**：上传文件对象的首选存储，下载同样优先从 R2 读取；单文件上传上限为 90 MiB，并拒绝常见可执行/活动内容扩展名。R2 不可用时可按 `OBJECT_STORAGE_PROVIDER` 选择服务端 Tencent COS、Alibaba OSS 或通用 AWS SigV4 S3-compatible 对象存储后备。COS/OSS/S3 密钥只配置在 Pages Functions Secrets，绝不写入浏览器；COS Bucket 要填写带 APPID 的完整桶名（`bucketname-APPID`），COS region 形如 `ap-guangzhou`；OSS region 形如 `cn-hangzhou`。通用 S3 需提供 HTTPS endpoint、地域、桶名及密钥，并使用适配器支持的 path-style 请求。外部对象存储仍由当前 Cloudflare Pages Functions 代为签名读写，不会自动迁移 D1 用户/博客数据，也不代表前端静态部署已带有后端 API。对象存储失败时，文件不超过 1 MiB 才可回退 D1 文件表；KV 回退上限为 18 MiB；最后的 Worker 内存回退仅适用于 4 MiB 以内文件。内存回退会在实例重启/切换后丢失，无法视为持久存储；D1/KV 回退也不是等价的大文件对象存储。超过可用后备容量时 API 返回 JSON 503，不会报告虚假成功。
-- **Cloudflare KV (`KV`)**：仅作兼容回退/短期记录；正常验证码和共享同步优先 D1，只有 D1 不可用时才回退。成功发送邮件的回执由 API 返回并保存在前端应用状态，不再额外写 KV。KV 免费配额仍可能在回退数据写入频繁时耗尽。
+- **Cloudflare KV (`KV`)**：仅作旧版管理员私有同步/验证码兼容回退及短期记录；公开站点内容不写 KV。成功发送邮件回执由 API 返回并保存在前端状态，不额外写 KV。
 - **邮箱配置归属与收信范围**：前台邮件配置只保存在设置它的浏览器（本机存储且未加密）；前台配置只能用于管理员显式选择前台来源的手动邮件/本机测试，不会令验证码或后端自动触发的业务邮件生效。验证码与后端业务发信使用 Pages Functions 环境变量/Secrets。手动邮件也可选择后台环境变量。前台测试会真实发送测试邮件至配置的发件地址；后台连接检查只探测服务状态，不发信。Resend `email.received` webhook 验签并通过 Resend API 拉取正文后才写入 D1 收件箱；它不是通用个人邮箱 IMAP 收件，也不会把发往管理员个人邮箱的邮件或 Email Routing/普通转发自动导入本站。来信必须进入已配置 Resend Receiving 的域名并触发有效 webhook；转发到管理员个人邮箱仅是外部邮箱投递，不等于本站收件。
-- **跨设备同步、静态部署与权限边界**：跨设备共享同步需要 Cloudflare Pages Functions API 与可用的 D1（主要存储）或代码支持的 KV 回退，并需要管理员登录；在设置中显式启用“自动同步”后，数据变更才会触发同步，亦可手动同步。浏览器 `BroadcastChannel` 仅用于同浏览器跨标签页，不是跨设备云同步。纯静态部署（Pages Direct Upload、Vercel 静态目录、OSS 等）只有前端文件，不具备 Pages Functions、D1/R2/KV 绑定或本项目后端 COS/OSS 适配，不能启用上述服务端 API；只能使用浏览器本地功能，或看到 API 不可用。后端只在实现了会话校验的 API 上执行管理员鉴权，不应据此宣称用户文件管理具有完整、可信的后端逐用户权限强制。
+- **跨设备站点内容与权限边界**：需要 Cloudflare Pages Functions 和 D1 binding `DB`。任何访客/设备可读和刷新白名单内已发布内容；管理员更改自动保存到 D1，并使用 revision 冲突保护。普通访客不能写入 D1。顶部按钮是手动重新读取，不执行管理员私有数据同步，也不操作 WebDAV。`BroadcastChannel` 仅用于同浏览器跨标签页。纯静态部署没有 Functions/D1，无法读取跨设备内容。用户个人文件所有权目前仍需按页面功能理解，不应据此宣称所有上传操作已有后端逐用户权限强制。
 
 ---
 
