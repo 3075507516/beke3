@@ -1,4 +1,5 @@
-export type Locale = 'zh-CN' | 'zh-TW' | 'en-US' | 'ko-KR' | 'ar-SA' | 'hi-IN';
+export type BaseLocale = 'zh-CN' | 'zh-TW' | 'en-US' | 'ko-KR' | 'ar-SA' | 'hi-IN';
+export type Locale = BaseLocale | 'ja-JP' | 'fr-FR' | 'es-ES' | 'pt-BR';
 
 export interface Translations {
   common: {
@@ -195,7 +196,7 @@ export interface Translations {
   };
 }
 
-export const i18nDict: Record<Locale, Translations> = {
+const baseI18nDict: Record<BaseLocale, Translations> = {
   'zh-CN': {
     common: {
       offline: '未连接 / 离线',
@@ -1319,6 +1320,21 @@ export const i18nDict: Record<Locale, Translations> = {
     },
   },
 };
+
+import { mainstreamPacks, inlineTranslations } from './localeContent';
+export const i18nDict: Record<Locale, Translations> = {
+  ...baseI18nDict,
+  ...Object.fromEntries(Object.entries(mainstreamPacks).map(([locale, pack]) => [locale, {
+    ...baseI18nDict['en-US'], ...pack,
+    common: { ...baseI18nDict['en-US'].common, ...(pack.common || {}) },
+    header: { ...baseI18nDict['en-US'].header, ...(pack.header || {}) },
+    nav: { ...baseI18nDict['en-US'].nav, ...(pack.nav || {}) },
+  }])) as Record<Exclude<Locale, BaseLocale>, Translations>,
+};
+
+export function translateInline(locale: Locale, source: string): string {
+  return inlineTranslations[locale]?.[source] || source;
+}
 
 // Helper function to safely get nested translation key (e.g., 'nav.blog')
 export function getTranslation(dict: Translations, path: string): string {

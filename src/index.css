@@ -335,3 +335,49 @@ body.retro-theme .btn-retro-secondary:hover {
 .theme-editorial header { background: #fbfaf7 !important; border-bottom: 2px solid #25221f !important; color: #25221f !important; }
 .theme-editorial [class*="rounded-3xl"], .theme-editorial [class*="rounded-2xl"] { border-color: #d8d2c8 !important; border-radius: 4px !important; box-shadow: none !important; }
 .theme-editorial button:not([class*="bg-transparent"]) { border-radius: 3px !important; border-bottom-width: 2px !important; }
+
+
+/* Signature theme refinements: tactile visual language also applies to authentication. */
+.theme-steampunk {
+  --theme-accent: #d9a441;
+  background: radial-gradient(ellipse at 18% 4%, rgba(225, 170, 77, .20), transparent 35%), linear-gradient(135deg, #17120d, #332313 52%, #17130f) !important;
+  color: #f4e4c3 !important;
+  font-family: Georgia, 'Noto Serif SC', serif !important;
+}
+.theme-steampunk header { background: linear-gradient(180deg, rgba(56, 39, 22, .96), rgba(30, 23, 16, .96)) !important; border-bottom: 1px solid #a77a32 !important; color: #f3d89f !important; box-shadow: 0 4px 24px rgba(0,0,0,.3); }
+.theme-steampunk [class*="rounded-3xl"], .theme-steampunk [class*="rounded-2xl"] { border-color: rgba(207, 158, 73, .42) !important; box-shadow: inset 0 1px rgba(255,237,190,.07), 0 16px 40px rgba(0,0,0,.24) !important; }
+.theme-steampunk button:not([class*="bg-transparent"]) { border-color: rgba(223,178,95,.65) !important; }
+.theme-steampunk .auth-modal-panel { color: #f5e8cd !important; background: radial-gradient(ellipse at 50% -20%, rgba(214,164,73,.20), transparent 58%), linear-gradient(145deg,#382a1b,#21180f 72%) !important; border: 1px solid #bd9148 !important; box-shadow: 0 24px 90px rgba(0,0,0,.62), inset 0 0 0 5px rgba(190,145,72,.08) !important; }
+.theme-steampunk .auth-modal-panel input { color: #fff0d2 !important; background: rgba(15,12,9,.65) !important; border-color: rgba(215,172,98,.55) !important; }
+.theme-steampunk .auth-modal-panel button[type="submit"] { background: linear-gradient(110deg,#8d5d22,#d7a84c 52%,#8d5d22) !important; color: #21170c !important; }
+
+.theme-terminal { background: radial-gradient(ellipse at 50% 0%, #092b1c, #020906 70%) !important; color: #c4ffd7 !important; font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace !important; }
+.theme-terminal header { background: rgba(2,12,7,.96) !important; border-bottom: 1px solid rgba(56,235,128,.42) !important; color: #b8ffce !important; box-shadow: 0 4px 28px rgba(0,255,119,.08); }
+.theme-terminal [class*="rounded-3xl"], .theme-terminal [class*="rounded-2xl"] { border-color: rgba(56,235,128,.3) !important; box-shadow: inset 0 1px rgba(180,255,207,.04), 0 10px 38px rgba(0,0,0,.36) !important; }
+.theme-terminal button:not([class*="bg-transparent"]) { border-color: rgba(69,245,139,.48) !important; }
+.theme-terminal .auth-modal-panel { color: #c8ffda !important; background: linear-gradient(160deg,rgba(6,31,19,.98),rgba(2,10,6,.99)) !important; border: 1px solid #27c765 !important; border-radius: 10px !important; box-shadow: 0 0 0 1px rgba(45,255,126,.10),0 0 55px rgba(0,255,100,.18) !important; font-family: 'SFMono-Regular',Consolas,monospace !important; }
+.theme-terminal .auth-modal-panel input { color: #c8ffda !important; background: #020906 !important; border-color: rgba(52,211,103,.45) !important; }
+.theme-terminal .auth-modal-panel button[type="submit"] { background: #0b6b34 !important; color: #e3ffe9 !important; border: 1px solid #48ed7d !important; }
+
+.theme-parchment { background: radial-gradient(ellipse at 50% 10%, #fff9e9, #e7d8b7 75%) !important; color: #382c1c !important; font-family: Georgia, 'Noto Serif SC', serif !important; }
+.theme-parchment header { background: rgba(248,239,218,.95) !important; color: #382c1c !important; border-bottom: 1px solid #a89066 !important; }
+.theme-parchment [class*="rounded-3xl"], .theme-parchment [class*="rounded-2xl"] { border-color: #b7a27c !important; box-shadow: 0 7px 20px rgba(87,62,29,.12) !important; }
+.theme-parchment .auth-modal-panel { color: #382c1c !important; background: repeating-linear-gradient(0deg,rgba(109,82,43,.018) 0 1px,transparent 1px 5px),linear-gradient(135deg,#fff9e9,#eadbb9) !important; border: 1px solid #9a8056 !important; border-radius: 5px !important; box-shadow: 0 24px 70px rgba(69,48,21,.34),inset 0 0 0 5px rgba(148,113,63,.09) !important; }
+.theme-parchment .auth-modal-panel input { color: #302416 !important; background: rgba(255,252,242,.82) !important; border-color: #b4a17f !important; }
+.theme-parchment .auth-modal-panel button[type="submit"] { background: linear-gradient(110deg,#6e4528,#9a6940) !important; color: #fff4dc !important; }
+
+.theme-gameboy { background: linear-gradient(145deg,#c1cf77,#8ea64a 52%,#71873b) !important; color: #172b20 !important; font-family: 'Courier New', monospace !important; }
+.theme-gameboy header { background: #d8dfaa !important; border-bottom: 4px solid #71873b !important; color: #233b2c !important; }
+.theme-gameboy [class*="rounded-3xl"], .theme-gameboy [class*="rounded-2xl"] { border: 2px solid #526a3c !important; border-radius: 4px !important; box-shadow: 4px 4px 0 rgba(44,66,39,.35) !important; }
+.theme-gameboy button:not([class*="bg-transparent"]) { border-color: #405a37 !important; border-radius: 3px !important; }
+.theme-gameboy .auth-modal-panel { color: #203528 !important; background: linear-gradient(135deg,#dce5af,#a9bd71) !important; border: 4px solid #526a3c !important; border-radius: 4px !important; box-shadow: 8px 8px 0 rgba(37,57,37,.55) !important; font-family: 'Courier New',monospace !important; }
+.theme-gameboy .auth-modal-panel input { color: #203528 !important; background: #edf2d0 !important; border: 2px solid #526a3c !important; border-radius: 3px !important; }
+.theme-gameboy .auth-modal-panel button[type="submit"] { background: #344f38 !important; color: #e6efbd !important; border-radius: 3px !important; }
+
+.theme-midnight-luxe { background: radial-gradient(ellipse at 50% -10%,#36313a,#121318 58%,#090a0d) !important; color: #f2ead9 !important; font-family: 'Bodoni 72',Georgia,'Noto Serif SC',serif !important; }
+.theme-midnight-luxe header { background: rgba(15,16,21,.94) !important; border-bottom: 1px solid rgba(223,190,122,.5) !important; color: #f5e7c5 !important; box-shadow: 0 8px 30px rgba(0,0,0,.32); }
+.theme-midnight-luxe [class*="rounded-3xl"], .theme-midnight-luxe [class*="rounded-2xl"] { border-color: rgba(221,190,128,.27) !important; box-shadow: 0 18px 54px rgba(0,0,0,.32),inset 0 1px rgba(255,240,204,.04) !important; }
+.theme-midnight-luxe button:not([class*="bg-transparent"]) { border-color: rgba(222,188,117,.5) !important; }
+.theme-midnight-luxe .auth-modal-panel { color: #f1e6ce !important; background: radial-gradient(ellipse at 50% 0%,rgba(217,183,112,.17),transparent 58%),linear-gradient(145deg,#26242a,#111217 72%) !important; border: 1px solid rgba(222,190,124,.62) !important; box-shadow: 0 28px 100px rgba(0,0,0,.72),inset 0 0 0 5px rgba(223,190,124,.045) !important; }
+.theme-midnight-luxe .auth-modal-panel input { color: #fbf2df !important; background: rgba(8,9,12,.68) !important; border-color: rgba(222,190,124,.38) !important; }
+.theme-midnight-luxe .auth-modal-panel button[type="submit"] { background: linear-gradient(110deg,#927347,#d9bd7d 52%,#927347) !important; color: #17151a !important; }

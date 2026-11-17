@@ -1135,6 +1135,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Robust file upload with real XMLHttpRequest progress tracking & local fallback
   const uploadFile = async (file: File): Promise<{ url: string; size: number; name: string }> => {
+    if (file.size > 90 * 1024 * 1024) {
+      const error = new Error('单个文件超过 90 MiB 上传上限；请压缩/拆分文件后重新上传。超过上限的文件不会回退到本机并伪装成跨设备成功。');
+      showToast(error.message, 'error');
+      throw error;
+    }
     startTransfer('upload', file.name);
 
     return new Promise(async (resolve, reject) => {
@@ -1173,7 +1178,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
         const xhr = new XMLHttpRequest();
         xhr.open('POST', '/api/upload', true);
-        xhr.timeout = 25000; // 25s timeout to prevent freezing indefinitely
+        // Large videos/photos may take minutes on mobile or remote networks. The old
+        // 25-second total timeout silently forced successful-looking IndexedDB fallback.
+        xhr.timeout = 10 * 60 * 1000;
 
         const startTime = Date.now();
         xhr.upload.onprogress = (event) => {

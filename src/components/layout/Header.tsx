@@ -26,7 +26,6 @@ import {
   Palette,
 } from 'lucide-react';
 import { SafeImage } from '../common/SafeImage';
-import { Locale } from '../../utils/i18n';
 import { clearAdminSessionToken } from '../../utils/adminSession';
 import { clearUserSessionToken } from '../../utils/userSession';
 
@@ -101,11 +100,6 @@ export const Header: React.FC<HeaderProps> = ({
     setDeviceMode(deviceMode === 'mobile' ? 'responsive' : 'mobile');
   };
 
-  const cycleLocale = () => {
-    const list: Locale[] = ['zh-CN', 'zh-TW', 'en-US', 'ko-KR', 'ar-SA', 'hi-IN'];
-    const nextIdx = (list.indexOf(locale) + 1) % list.length;
-    setLocale(list[nextIdx]);
-  };
 
   return (
     <header className="sticky top-0 z-40 w-full transition-all duration-300 backdrop-blur-md bg-white/85 dark:bg-slate-900/85 border-b border-slate-200/80 dark:border-slate-800">
@@ -179,27 +173,13 @@ export const Header: React.FC<HeaderProps> = ({
               </span>
             </button>
 
-            {/* Language Switcher */}
-            <button
-              onClick={cycleLocale}
-              title={`切换语言 (当前: ${locale})`}
-              className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold border transition border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
-            >
+            {/* Language selector */}
+            <label className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300" title={`切换语言 (当前: ${locale})`}>
               <Globe className="w-3.5 h-3.5" />
-              <span className="text-[10px] uppercase font-mono">
-                {locale === 'zh-CN'
-                  ? '简'
-                  : locale === 'zh-TW'
-                    ? '繁'
-                    : locale === 'en-US'
-                      ? 'EN'
-                      : locale === 'ko-KR'
-                        ? '한국어'
-                        : locale === 'ar-SA'
-                          ? 'العربية'
-                          : 'हिन्दी'}
-              </span>
-            </button>
+              <select aria-label="界面语言" value={locale} onChange={event => setLocale(event.target.value as typeof locale)} className="max-w-[92px] bg-transparent text-[10px] uppercase font-mono focus:outline-none">
+                <option value="zh-CN">简体中文</option><option value="zh-TW">繁體中文</option><option value="en-US">English</option><option value="ja-JP">日本語</option><option value="fr-FR">Français</option><option value="es-ES">Español</option><option value="pt-BR">Português</option><option value="ko-KR">한국어</option><option value="ar-SA">العربية</option><option value="hi-IN">हिन्दी</option>
+              </select>
+            </label>
 
             {/* Device Mode Switcher (Independent phone view vs responsive) */}
             <button
