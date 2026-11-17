@@ -470,6 +470,7 @@ export const onRequest = async (context: any) => {
   const commerceResponse = await handleCommerceRequest(request, path, env, headers, {
     isAdmin: req => hasAdminSession(req, env),
     getUser: req => getAuthenticatedUser(req, env),
+    defaultAdminEmail: String(env.MAIL_SENDER || '').trim(),
     sendMail: async (to, subject, text, html) => {
       const result = await dispatchEmail(getOutboundSettings({}, env), { to, subject, text, html });
       return { success: result.success, error: result.error };

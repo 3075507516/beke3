@@ -5,21 +5,21 @@ import { Product } from '../../types';
 import { SafeImage } from '../common/SafeImage';
 import { getUserSessionToken } from '../../utils/userSession';
 import { getAdminSessionToken } from '../../utils/adminSession';
-import { CheckCircle, Edit3, MessageCircle, Plus, Send, ShoppingBag, Trash2, Truck, X } from 'lucide-react';
+import { CheckCircle, ChevronLeft, ChevronRight, Edit3, MessageCircle, Plus, Send, ShoppingBag, Trash2, Truck, X } from 'lucide-react';
 
 type Provider = 'alipay' | 'wechat' | 'stripe' | 'paypal';
 type Order = {
-  id: string; status: string; amountMinor: number; amount?: number; currency: string;
+  id: string; userId?: string; status: string; amountMinor: number; amount?: number; currency: string;
   createdAt: number; productName: string; productId: string; quantity: number;
-  customerName?: string; customerPhone?: string; customerEmail?: string; shippingAddress?: string; username?: string;
+  customerName?: string; customerPhone?: string; customerEmail?: string; shippingAddress?: string; username?: string; deletedAt?: number;
   paymentProvider: Provider; trackingNumber?: string; carrier?: string;
 };
-type Conversation = { id: string; username?: string; userName?: string; lastMessage?: string; unread?: number; unreadCount?: number };
+type Conversation = { id: string; userId?: string; username?: string; userName?: string; lastMessage?: string; unread?: number; unreadCount?: number };
 type ChatMessage = { id: string; senderRole: 'admin' | 'user'; senderName: string; message: string; createdAt: number };
 type PaymentState = { orderId: string; payment?: { redirectUrl?: string; qrCode?: string }; order?: Order };
 
 const statusLabels: Record<string, string> = {
-  paid: '已支付', failed: '支付失败', pending: '待支付', cancelled: '已取消',
+  paid: '已支付', failed: '未支付（支付失败）', pending: '未支付 / 待支付', cancelled: '已取消',
   refunded: '已退款', refund_pending: '退款处理中', shipped: '已发货',
 };
 const money = (order: Order) => `${order.currency || 'CNY'} ${(Number(order.amountMinor || 0) / 100).toFixed(2)}`;
@@ -37,6 +37,7 @@ export const ShopSection: React.FC = () => {
   };
 
   const [showcase, setShowcase] = useState('all');
+  const [activeShopTab, setActiveShopTab] = useState<'products'|'orders'|'chat'>('products');
   const [editing, setEditing] = useState<Partial<Product> | null>(null);
   const [checkout, setCheckout] = useState<Product | null>(null);
   const [quantity, setQuantity] = useState(1);
@@ -47,6 +48,8 @@ export const ShopSection: React.FC = () => {
   const [shippingAddress, setShippingAddress] = useState('');
   const [couponCode, setCouponCode] = useState('');
   const [orders, setOrders] = useState<Order[]>([]);
+  const [trashOrders, setTrashOrders] = useState<Order[]>([]);
+  const [showTrash, setShowTrash] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [conversationId, setConversationId] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -60,6 +63,9 @@ export const ShopSection: React.FC = () => {
   const [settingsSaved, setSettingsSaved] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [paymentGuideOpen, setPaymentGuideOpen] = useState(false);
+  const [paymentConfig, setPaymentConfig] = useState<Record<string, Record<string, boolean>> | null>(null);
+  const [imageIndex, setImageIndex] = useState<Record<string, number>>({});
 
   const loadOrders = async () => {
     if (!currentUser || !token) return;
@@ -67,6 +73,11 @@ export const ShopSection: React.FC = () => {
       const data = await api('/api/orders');
       setOrders(Array.isArray(data.orders) ? data.orders : []);
     } catch (e) { setError(e instanceof Error ? e.message : '订单加载失败'); }
+  };
+  const loadTrashOrders = async () => {
+    if (!currentUser || !token) return;
+    try { const data = await api('/api/orders/trash'); setTrashOrders(Array.isArray(data.orders) ? data.orders : []); }
+    catch (e) { setError(e instanceof Error ? e.message : '回收站加载失败'); }
   };
   const loadConversations = async () => {
     if (!currentUser || !token) return;
@@ -87,6 +98,7 @@ export const ShopSection: React.FC = () => {
   };
 
   useEffect(() => { void loadOrders(); void loadConversations(); }, [currentUser?.id, token]);
+  useEffect(() => { if (isAdmin) void api('/api/payment-config-status').then(data => setPaymentConfig(data.providers || {})).catch(() => setPaymentConfig(null)); }, [isAdmin, token]);
   useEffect(() => {
     const openMessages = () => {
       try { window.sessionStorage.removeItem('fox3-open-messages'); } catch {}
@@ -157,8 +169,10 @@ export const ShopSection: React.FC = () => {
     return () => { active = false; };
   }, [currentUser?.id, token]);
 
-  const filteredProducts = useMemo(() => products.filter(product => showcase === 'all' || product.showcaseId === showcase), [products, showcase]);
-  const filteredOrders = useMemo(() => orders.filter(order => !search || `${order.id} ${order.customerName || ''} ${order.customerEmail || ''} ${order.username || ''}`.toLowerCase().includes(search.toLowerCase())), [orders, search]);
+  const categoryNames = useMemo(() => Array.from(new Set(products.map(product => String(product.category || '').trim()).filter(Boolean))), [products]);
+  const filteredProducts = useMemo(() => products.filter(product => showcase === 'all' || product.category === showcase), [products, showcase]);
+  const visibleOrders = showTrash ? trashOrders : orders;
+  const filteredOrders = useMemo(() => visibleOrders.filter(order => !search || `${order.id} ${order.customerName || ''} ${order.customerEmail || ''} ${order.username || ''}`.toLowerCase().includes(search.toLowerCase())), [visibleOrders, search]);
   const panel = `rounded-3xl border shadow-sm ${systemSettings.transparentCards ? 'bg-white/75 dark:bg-slate-900/75 backdrop-blur-md border-white/30' : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800'}`;
 
   const saveProduct = (event: React.FormEvent) => {
@@ -180,6 +194,7 @@ export const ShopSection: React.FC = () => {
       const data = await api('/api/orders', { method: 'POST', body: JSON.stringify({ productId: checkout.id, quantity, paymentProvider: provider, customerName, customerPhone, customerEmail, shippingAddress, couponCode: couponCode.trim() || undefined }) });
       const paymentData = data.payment || {};
       setPayment({ orderId: data.order.id, payment: paymentData, order: data.order });
+      if (data.paymentError) setError(`订单已保存为未支付：${data.paymentError}`);
       setCheckout(null);
       await loadOrders();
       if (paymentData.redirectUrl) window.location.assign(paymentData.redirectUrl);
@@ -216,67 +231,77 @@ export const ShopSection: React.FC = () => {
 
   return <div className="space-y-6">
     <section className={`${panel} p-5 flex flex-wrap items-center justify-between gap-3`}>
-      <div><h2 className="text-xl font-bold flex items-center gap-2"><ShoppingBag className="text-sky-500"/>商品专区与价格</h2><p className="mt-1 text-xs text-slate-500">商品浏览公开可见；支付订单要求注册账户，金额由服务端以 D1 已发布商品目录核验。</p></div>
-      {isAdmin && <button onClick={() => setEditing({ name: '', description: '', price: 99, images: [], category: '数字化产品', stock: 50, showcaseId: 'showcase-main' })} className="rounded-xl bg-sky-500 px-4 py-2 text-xs text-white"><Plus className="mr-1 inline h-4 w-4"/>新增商品</button>}
+      <div><h2 className="text-xl font-bold flex items-center gap-2"><ShoppingBag className="text-sky-500"/>商品专区与价格</h2><p className="mt-1 text-xs text-slate-500">商品浏览公开可见；已登录用户可创建持久订单，支付状态由服务端异步验签决定。</p></div>
+      <div className="flex flex-wrap gap-2">{isAdmin && <button onClick={() => setEditing({ name: '', description: '', price: 99, images: [], category: '', stock: 50, showcaseId: 'showcase-main' })} className="rounded-xl bg-sky-500 px-4 py-2 text-xs text-white"><Plus className="mr-1 inline h-4 w-4"/>新增商品</button>}<button onClick={() => setPaymentGuideOpen(true)} className="rounded-xl border border-sky-300 px-4 py-2 text-xs text-sky-700 dark:text-sky-300">支付接入指南与变量状态</button></div>
     </section>
 
     {error && <div role="alert" className="rounded-xl bg-rose-50 p-3 text-sm text-rose-700 dark:bg-rose-950/30 dark:text-rose-300">{error}<button aria-label="关闭提示" className="float-right" onClick={() => setError('')}><X className="h-4 w-4"/></button></div>}
 
     <nav aria-label="商品分类" className="flex gap-2 overflow-x-auto">
-      {[['all', '全部商品'], ['showcase-main', '主打数字产品'], ['showcase-hardware', '限定周边'], ['showcase-service', '定制服务']].map(([id, label]) => <button key={id} onClick={() => setShowcase(id)} className={`whitespace-nowrap rounded-xl px-3 py-2 text-xs ${showcase === id ? 'bg-sky-500 text-white' : 'bg-slate-100 dark:bg-slate-800'}`}>{label}</button>)}
+      {['all', ...categoryNames].map(id => <button key={id} onClick={() => setShowcase(id)} className={`whitespace-nowrap rounded-xl px-3 py-2 text-xs ${showcase === id ? 'bg-sky-500 text-white' : 'bg-slate-100 dark:bg-slate-800'}`}>{id === 'all' ? '全部商品' : id}</button>)}
     </nav>
 
-    {currentUser && <section className={`${panel} space-y-3 p-4`}>
-      <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-bold">{isAdmin ? '订单管理' : '我的订单'}（{orders.length}）</h3>{isAdmin && <input value={search} onChange={event => setSearch(event.target.value)} placeholder="搜索订单号、客户" className="rounded-xl border bg-transparent p-2 text-sm dark:border-slate-700"/>}</div>
+    <nav className={`${panel} flex flex-wrap gap-2 p-3`} aria-label="商品、订单与对话分区">
+      {([['products','商品专区'],['orders','订单与回收站'],['chat','客服对话']] as const).map(([id,label]) => <button key={id} onClick={() => { setActiveShopTab(id); if (id === 'chat') setChatOpen(true); }} className={`rounded-xl px-4 py-2 text-sm ${activeShopTab === id ? 'bg-sky-500 text-white' : 'bg-slate-100 dark:bg-slate-800'}`}>{label}{id === 'orders' && currentUser ? ` (${orders.length})` : ''}</button>)}
+    </nav>
+
+    {currentUser && activeShopTab === 'orders' && <section className={`${panel} space-y-3 p-4`}>
+      <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-bold">{isAdmin ? '订单管理' : '我的订单'}（{visibleOrders.length}）</h3><div className="flex gap-2">{currentUser && <button onClick={() => { const next = !showTrash; setShowTrash(next); if (next) void loadTrashOrders(); }} className="rounded-lg border px-3 py-2 text-xs">{showTrash ? '返回订单' : '回收站'}</button>}{isAdmin && <input value={search} onChange={event => setSearch(event.target.value)} placeholder="搜索订单号、客户" className="rounded-xl border bg-transparent p-2 text-sm dark:border-slate-700"/>}</div></div>
       {filteredOrders.map(order => <article key={order.id} className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 py-3 text-sm dark:border-slate-800">
         <div className="min-w-[220px] flex-1"><b>{order.productName || order.productId} × {order.quantity}</b><div className="mt-1 break-all text-xs text-slate-500">{order.id} · {new Date(order.createdAt).toLocaleString()}</div><div className="mt-1 text-xs text-slate-500">{order.customerName}　{order.customerPhone}　{order.customerEmail}</div>{order.shippingAddress && <div className="text-xs text-slate-500">{order.shippingAddress}</div>}{order.trackingNumber && <div className="text-xs text-sky-600">{order.carrier || '物流'}：{order.trackingNumber}</div>}</div>
         <div className="flex flex-wrap items-center gap-2"><span className="font-semibold">{money(order)} · {statusLabels[order.status] || order.status}</span>
-          {isAdmin && order.status === 'paid' && <><input value={tracking[order.id] || ''} onChange={event => setTracking(value => ({ ...value, [order.id]: event.target.value }))} placeholder="物流单号" className="w-28 rounded border bg-transparent p-1 text-xs dark:border-slate-700"/><button onClick={() => void orderAction(order.id, 'ship', { trackingNumber: tracking[order.id] || '' })} className="rounded bg-sky-500 px-2 py-1 text-xs text-white">确认发货 <Truck className="inline h-3 w-3"/></button><button onClick={() => void orderAction(order.id, 'refund', { reason: '管理员发起退款' })} className="rounded bg-rose-500 px-2 py-1 text-xs text-white">原路退款</button></>}
-          {!isAdmin && order.status === 'pending' && <button onClick={() => void orderAction(order.id, 'cancel')} className="text-xs text-rose-600">取消订单</button>}
+          {isAdmin && !showTrash && <><input value={tracking[order.id] || ''} onChange={event => setTracking(value => ({ ...value, [order.id]: event.target.value }))} placeholder="物流单号（选填）" aria-label="物流单号" className="w-32 rounded border bg-transparent p-1 text-xs dark:border-slate-700"/><button disabled={order.status !== 'paid'} title={order.status !== 'paid' ? '订单付款验签成功后方可发货' : '确认发货并通知用户'} onClick={() => void orderAction(order.id, 'ship', { trackingNumber: tracking[order.id] || '' })} className="rounded bg-sky-500 px-2 py-1 text-xs text-white disabled:cursor-not-allowed disabled:opacity-40">确认发货 <Truck className="inline h-3 w-3"/></button>{order.status === 'paid' && <button onClick={() => void orderAction(order.id, 'refund', { reason: '管理员发起退款' })} className="rounded bg-rose-500 px-2 py-1 text-xs text-white">原路退款</button>}<button onClick={async () => { try { const result = await api('/api/chat/conversations/ensure', { method: 'POST', body: JSON.stringify({ userId: order.userId, username: order.username || order.customerName }) }); await loadConversations(); setConversationId(result.conversationId); setActiveShopTab('chat'); setChatOpen(true); await loadMessages(result.conversationId); } catch (e) { setError(e instanceof Error ? e.message : '打开用户对话失败'); } }} className="rounded border px-2 py-1 text-xs"><MessageCircle className="mr-1 inline h-3 w-3"/>订单对话</button><button onClick={async () => { if (!window.confirm('将订单移入回收站？付款记录不会删除。')) return; try { await api(`/api/orders/${encodeURIComponent(order.id)}`, { method: 'DELETE' }); await loadOrders(); } catch (e) { setError(e instanceof Error ? e.message : '移入回收站失败'); } }} className="rounded border border-rose-300 px-2 py-1 text-xs text-rose-600">移入回收站</button></>}
+          {showTrash && <button onClick={async () => { try { await api(`/api/orders/${encodeURIComponent(order.id)}/restore`, { method: 'POST', body: '{}' }); await loadTrashOrders(); await loadOrders(); } catch (e) { setError(e instanceof Error ? e.message : '恢复订单失败'); } }} className="rounded border px-2 py-1 text-xs">恢复订单</button>}
+          {!isAdmin && !showTrash && order.status === 'pending' && <button onClick={() => void orderAction(order.id, 'cancel')} className="text-xs text-rose-600">取消订单</button>}
           {!isAdmin && order.status === 'failed' && <button onClick={() => { const product = products.find(item => item.id === order.productId); if (product) { setCheckout(product); setQuantity(order.quantity || 1); setError(''); } }} className="text-xs text-sky-600">重新下单</button>}
           {!isAdmin && order.paymentProvider === 'paypal' && order.status === 'pending' && <button onClick={() => void orderAction(order.id, 'capture')} className="text-xs text-sky-600">继续 PayPal 支付</button>}
+          {!isAdmin && !showTrash && <button onClick={() => { setActiveShopTab('chat'); setChatOpen(true); void loadConversations(); }} className="rounded border px-2 py-1 text-xs"><MessageCircle className="mr-1 inline h-3 w-3"/>订单对话</button>}
+          {!isAdmin && !showTrash && <button onClick={async () => { if (!window.confirm('将订单移入回收站？订单支付记录会保留。')) return; try { await api(`/api/orders/${encodeURIComponent(order.id)}`, { method: 'DELETE' }); await loadOrders(); } catch (e) { setError(e instanceof Error ? e.message : '移入回收站失败'); } }} className="text-xs text-rose-600">删除订单</button>}
         </div>
       </article>)}
-      {!filteredOrders.length && <p className="text-xs text-slate-500">暂无订单。订单和付款状态保存在站点数据库，不通过浏览器本地缓存同步。</p>}
-      {isAdmin && <form onSubmit={savePaymentNoticeSettings} className="grid gap-2 border-t border-slate-200 pt-3 dark:border-slate-800 sm:grid-cols-[1fr_auto_auto] sm:items-center">
-        <label className="text-xs text-slate-600 dark:text-slate-300">支付成功邮件接收地址<input type="email" value={adminEmail} onChange={event => setAdminEmail(event.target.value)} placeholder="管理员邮箱（可选）" className="mt-1 w-full rounded-xl border bg-transparent p-2 text-sm dark:border-slate-700"/></label>
-        <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={notifyEmail} onChange={event => setNotifyEmail(event.target.checked)}/>同时发邮件</label>
+      {!filteredOrders.length && <p className="text-xs text-slate-500">{showTrash ? '回收站为空。' : '暂无订单。订单和付款状态保存在站点数据库，不通过浏览器本地缓存同步。'}</p>}
+      {isAdmin && <form onSubmit={savePaymentNoticeSettings} className="grid gap-2 border-t border-slate-200 pt-3 dark:border-slate-800 sm:grid-cols-[1fr_auto] sm:items-end">
+        <label className="text-xs text-slate-600 dark:text-slate-300">管理员订单邮件接收地址（留空默认使用验证码发信邮箱）<input type="email" value={adminEmail} onChange={event => setAdminEmail(event.target.value)} placeholder="默认：后台 MAIL_SENDER" className="mt-1 w-full rounded-xl border bg-transparent p-2 text-sm dark:border-slate-700"/></label>
         <button className="rounded-xl bg-slate-800 px-3 py-2 text-xs text-white dark:bg-slate-200 dark:text-slate-900">{settingsSaved ? '已保存' : '保存通知设置'}</button>
       </form>}
-      {isAdmin && <p className="text-[11px] text-slate-500">支付到账同时会生成管理员站内消息。邮件接收需要正确配置服务端发信环境变量；此处只保存接收邮箱，不保存支付密钥。</p>}
+      {isAdmin && <p className="text-[11px] text-slate-500">每笔订单创建时都会发管理员站内通知与订单邮件，并明确标注未支付/已支付；支付到账后会再发已支付通知。邮件通过验证码共用的后台发信服务发送；仅保存接收地址，不保存任何支付密钥。</p>}
     </section>}
 
-    <div className={`grid gap-6 ${deviceMode === 'mobile' ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3'}`}>
+    {activeShopTab === 'products' && <div className={`grid gap-6 ${deviceMode === 'mobile' ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3'}`}>
       {filteredProducts.map(product => <article key={product.id} className={`${panel} flex flex-col overflow-hidden`}>
-        <div className="relative aspect-[4/3] bg-slate-100 dark:bg-slate-800"><SafeImage src={product.images[0] || ''} alt={product.name} className="h-full w-full object-cover"/>{isAdmin && <div className="absolute right-2 top-2 flex gap-2"><button aria-label="编辑商品" onClick={() => setEditing({ ...product })} className="rounded bg-black/70 p-2 text-white"><Edit3 className="h-4 w-4"/></button><button aria-label="删除商品" onClick={() => { if (window.confirm('确认删除此商品展示？已创建订单不会被删除。')) setProducts(items => items.filter(item => item.id !== product.id)); }} className="rounded bg-rose-600 p-2 text-white"><Trash2 className="h-4 w-4"/></button></div>}</div>
+        <div className="relative aspect-[4/3] bg-slate-100 dark:bg-slate-800"><SafeImage src={product.images[imageIndex[product.id] || 0] || ''} alt={product.name} className="h-full w-full object-cover"/>{(product.images?.length || 0) > 1 && <><button aria-label="上一张商品图片" onClick={() => setImageIndex(value => ({ ...value, [product.id]: ((value[product.id] || 0) - 1 + product.images.length) % product.images.length }))} className="absolute left-2 top-1/2 rounded-full bg-black/60 p-2 text-white"><ChevronLeft className="h-4 w-4"/></button><button aria-label="下一张商品图片" onClick={() => setImageIndex(value => ({ ...value, [product.id]: ((value[product.id] || 0) + 1) % product.images.length }))} className="absolute right-2 top-1/2 rounded-full bg-black/60 p-2 text-white"><ChevronRight className="h-4 w-4"/></button><span className="absolute bottom-2 right-2 rounded-full bg-black/60 px-2 py-1 text-[10px] text-white">{(imageIndex[product.id] || 0) + 1}/{product.images.length}</span></>}{isAdmin && <div className="absolute right-2 top-2 flex gap-2"><button aria-label="编辑商品" onClick={() => setEditing({ ...product })} className="rounded bg-black/70 p-2 text-white"><Edit3 className="h-4 w-4"/></button><button aria-label="删除商品" onClick={() => { if (window.confirm('确认删除此商品展示？已创建订单不会被删除。')) setProducts(items => items.filter(item => item.id !== product.id)); }} className="rounded bg-rose-600 p-2 text-white"><Trash2 className="h-4 w-4"/></button></div>}</div>
         <div className="flex-1 p-5"><span className="text-xs text-sky-500">{product.category}</span><h3 className="mt-1 font-bold">{product.name}</h3><p className="mt-2 line-clamp-3 text-xs text-slate-500">{product.description}</p></div>
-        <div className="flex items-center justify-between border-t border-slate-200 p-5 dark:border-slate-800"><div><span className="block text-xs text-slate-400">库存 {product.stock || 50}</span><b className="text-xl text-sky-500">¥{Number(product.price).toFixed(2)}</b></div><button onClick={() => { setCheckout(product); setQuantity(1); setCouponCode(''); setError(''); }} className="rounded-xl bg-sky-500 px-4 py-2 text-xs text-white">立即选购</button></div>
+        <div className="flex items-center justify-between border-t border-slate-200 p-5 dark:border-slate-800"><div><span className="block text-xs text-slate-400">库存 {product.stock ?? 50}</span><b className="text-xl text-sky-500">¥{Number(product.price).toFixed(2)}</b></div><button disabled={Number(product.stock ?? 50) <= 0} onClick={() => { setCheckout(product); setQuantity(1); setCouponCode(''); setError(''); }} className="rounded-xl bg-sky-500 px-4 py-2 text-xs text-white disabled:opacity-40">立即选购</button></div>
       </article>)}
-    </div>
+    </div>}
 
-    <section className={`${panel} p-4`}>
+    {activeShopTab === 'chat' && <section className={`${panel} p-4`}>
       <div className="flex items-center justify-between"><h3 className="flex items-center gap-2 font-bold"><MessageCircle className="text-sky-500"/>站内客服对话</h3><button onClick={() => setChatOpen(open => !open)} className="text-xs text-sky-600">{chatOpen ? '收起' : '打开对话'}</button></div>
       {!currentUser && <p className="mt-2 text-xs text-slate-500">登录注册账户后可与站长建立持久对话；访客留言不会显示为已发送。</p>}
       {chatOpen && <div className="mt-3">
         {isAdmin && <div className="mb-3 flex flex-wrap gap-2">{conversations.map(conversation => <div key={conversation.id} className={`flex max-w-full items-start gap-2 rounded-xl p-2 text-xs ${conversationId === conversation.id ? 'bg-sky-500 text-white' : 'bg-slate-100 dark:bg-slate-800'}`}><button onClick={() => setConversationId(conversation.id)} className="min-w-0 text-left"><span className="block font-semibold">{conversation.username || conversation.userName || conversation.id}{(conversation.unread || conversation.unreadCount) ? ` · 未读 ${conversation.unread || conversation.unreadCount}` : ''}</span><span className="block max-w-[240px] truncate">{conversation.lastMessage || '打开对话'}</span></button><button type="button" aria-label={`删除与${conversation.username || '用户'}的对话`} title="删除对话及消息" onClick={async () => { if (!window.confirm('确定永久删除这段客服对话及其全部消息吗？')) return; try { await api(`/api/chat/conversations/${encodeURIComponent(conversation.id)}`, { method: 'DELETE' }); if (conversationId === conversation.id) { setConversationId(''); setMessages([]); } await loadConversations(); } catch (e) { setError(e instanceof Error ? e.message : '删除对话失败'); } }} className="rounded p-1 text-rose-600 hover:bg-rose-100 dark:hover:bg-rose-950/40"><Trash2 className="h-3.5 w-3.5"/></button></div>)}</div>}
         {currentUser && <><div className="max-h-72 space-y-2 overflow-auto border-y border-slate-200 py-3 dark:border-slate-800">{messages.map(message => <div key={message.id} className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm ${message.senderRole === 'admin' ? 'bg-slate-100 dark:bg-slate-800' : 'ml-auto bg-sky-50 dark:bg-sky-950/50'}`}><div className="mb-1 text-[10px] text-slate-500">{message.senderName} · {new Date(message.createdAt).toLocaleString()}</div>{message.message}</div>)}{!messages.length && <p className="text-xs text-slate-500">{isAdmin ? '选择一位用户打开对话；新消息会显示在页眉通知灯。' : '你好，请留下问题，站长回复后页眉会显示提醒。'}</p>}</div><form onSubmit={sendMessage} className="mt-3 flex gap-2"><input value={messageText} onChange={event => setMessageText(event.target.value)} placeholder="输入消息…" maxLength={4000} className="min-w-0 flex-1 rounded-xl border bg-transparent px-3 py-2 text-sm dark:border-slate-700"/><button className="rounded-xl bg-sky-500 p-2 text-white" aria-label="发送消息"><Send className="h-4 w-4"/></button></form></>}
       </div>}
-    </section>
+    </section>}
 
     {checkout && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"><form onSubmit={submitOrder} className={`${panel} max-h-[90vh] w-full max-w-lg space-y-3 overflow-auto p-6`}>
       <div className="flex items-center justify-between"><h3 className="font-bold">订单信息：{checkout.name}</h3><button type="button" onClick={() => setCheckout(null)} aria-label="关闭"><X/></button></div>
       {!currentUser && <p className="text-sm text-rose-600">请先登录注册账户。为了保存用户订单，游客不能付款。</p>}
       <p className="text-sm">商品展示价：¥{Number(checkout.price).toFixed(2)} / 件。最终金额由服务端根据 D1 已发布商品目录核验。</p>
-      <label className="block text-xs">购买数量<input type="number" min={1} max={Math.max(1, Number(checkout.stock || 50))} value={quantity} onChange={event => setQuantity(Math.max(1, Math.min(Number(checkout.stock || 50), Number(event.target.value) || 1)))} className="mt-1 w-full rounded border bg-transparent p-2 dark:border-slate-700"/></label>
+      <label className="block text-sm font-semibold">购买数量（必填）<input required type="number" min={1} max={Math.max(1, Number(checkout.stock ?? 50))} value={quantity} onChange={event => setQuantity(Math.max(1, Math.min(Number(checkout.stock ?? 50), Number(event.target.value) || 1)))} className="mt-1 w-full rounded border bg-transparent p-2 font-normal dark:border-slate-700"/></label>
       <div className="grid grid-cols-2 gap-2">{([['alipay','支付宝'],['wechat','微信支付'],['stripe','Stripe'],['paypal','PayPal']] as const).map(([id, label]) => <button type="button" key={id} onClick={() => setProvider(id)} className={`rounded-xl border p-2 text-sm ${provider === id ? 'border-sky-500 text-sky-600' : 'border-slate-200 dark:border-slate-700'}`}>{label}</button>)}</div>
-      <input required value={customerName} onChange={event => setCustomerName(event.target.value)} placeholder="联系人姓名" className="w-full rounded-xl border bg-transparent p-2 text-sm dark:border-slate-700"/>
-      <input required type="tel" value={customerPhone} onChange={event => setCustomerPhone(event.target.value)} placeholder="联系电话" className="w-full rounded-xl border bg-transparent p-2 text-sm dark:border-slate-700"/>
+      <label className="block text-xs font-semibold">联系人姓名（必填）<input required value={customerName} onChange={event => setCustomerName(event.target.value)} placeholder="请填写收件/服务联系人" className="mt-1 w-full rounded-xl border bg-transparent p-2 text-sm font-normal dark:border-slate-700"/></label>
+      <label className="block text-xs font-semibold">联系电话（必填）<input required type="tel" value={customerPhone} onChange={event => setCustomerPhone(event.target.value)} placeholder="请填写可联系到您的电话" className="mt-1 w-full rounded-xl border bg-transparent p-2 text-sm font-normal dark:border-slate-700"/></label>
       <input required type="email" value={customerEmail} onChange={event => setCustomerEmail(event.target.value)} placeholder="联系邮箱" className="w-full rounded-xl border bg-transparent p-2 text-sm dark:border-slate-700"/>
-      <textarea required rows={2} value={shippingAddress} onChange={event => setShippingAddress(event.target.value)} placeholder="收货/服务联系地址" className="w-full rounded-xl border bg-transparent p-2 text-sm dark:border-slate-700"/>
+      <label className="block text-xs font-semibold">收货/服务联系地址（必填）<textarea required rows={2} value={shippingAddress} onChange={event => setShippingAddress(event.target.value)} placeholder="请填写完整收货地址或服务联系地址" className="mt-1 w-full rounded-xl border bg-transparent p-2 text-sm font-normal dark:border-slate-700"/></label>
       <input value={couponCode} onChange={event => setCouponCode(event.target.value)} placeholder="优惠码（如有）—服务端核验" className="w-full rounded-xl border bg-transparent p-2 text-sm dark:border-slate-700"/>
       <p className="rounded-xl bg-amber-50 p-3 text-xs leading-relaxed text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">付款跳转或二维码展示不代表订单已付款。真正到账以本站服务端验签并处理支付平台异步通知为准。</p>
       <button disabled={busy || !currentUser} className="w-full rounded-xl bg-sky-500 p-3 text-sm font-semibold text-white disabled:opacity-50">{busy ? '正在创建订单…' : '创建订单并继续支付'}</button>
     </form></div>}
+
+    {paymentGuideOpen && <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4"><div className={`${panel} max-h-[90vh] w-full max-w-3xl space-y-4 overflow-auto p-6`}><div className="flex items-center justify-between"><h3 className="text-lg font-bold">支付网关接入指南与后台变量状态</h3><button onClick={() => setPaymentGuideOpen(false)} aria-label="关闭支付接入指南"><X/></button></div><p className="text-xs leading-relaxed text-slate-500">以下状态仅确认 Cloudflare Pages 服务端是否读到对应变量，并不代表商户已审核、私钥有效或真实收款测试通过。密钥只放 Pages → Settings → Variables and Secrets，不要放前端、本地存储或公开仓库。配置后需重新部署。</p><div className="grid gap-3 md:grid-cols-2">
+      {([['alipay','支付宝',['ALIPAY_APP_ID','ALIPAY_PRIVATE_KEY','ALIPAY_PUBLIC_KEY'],'申请电脑网站支付/手机网站支付；设置应用公私钥并配置异步回调 /api/payments/webhook/alipay。'],['wechat','微信支付',['WECHAT_MCHID','WECHAT_APPID','WECHAT_SERIAL_NO','WECHAT_PRIVATE_KEY','WECHAT_API_V3_KEY','WECHAT_PLATFORM_CERT','WECHAT_NOTIFY_URL'],'商户平台开通 Native/H5；准备商户证书、平台证书与 32 字节 APIv3 密钥，回调地址必须 HTTPS。'],['stripe','Stripe',['STRIPE_SECRET_KEY','STRIPE_WEBHOOK_SECRET'],'Stripe Dashboard 建 webhook，回调 /api/payments/webhook/stripe，并订阅支付成功、失败、过期、退款事件。'],['paypal','PayPal',['PAYPAL_CLIENT_ID','PAYPAL_CLIENT_SECRET','PAYPAL_WEBHOOK_ID'],'先用 Sandbox 凭据验证，再设置正式 API base https://api-m.paypal.com；Webhook 为 /api/payments/webhook/paypal。']] as const).map(([key,label,names,guide]) => <article key={key} className="rounded-2xl border p-4 dark:border-slate-700"><h4 className="font-bold">{label} {paymentConfig?.[key] && Object.values(paymentConfig[key]).every(Boolean) ? <span className="text-emerald-600">● 变量齐全</span> : <span className="text-amber-600">● 配置缺项/未检测</span>}</h4><p className="mt-2 text-xs leading-relaxed text-slate-600 dark:text-slate-300">{guide}</p><ul className="mt-3 space-y-1">{names.map(name => <li key={name} className="flex items-center gap-2 font-mono text-[11px]"><span className={paymentConfig?.[key]?.[name] ? 'text-emerald-500' : 'text-rose-500'}>{paymentConfig?.[key]?.[name] ? '●' : '○'}</span>{name}</li>)}</ul></article>)}
+      <article className="rounded-2xl border p-4 dark:border-slate-700"><h4 className="font-bold">万里汇（WorldFirst）</h4><p className="mt-2 text-xs leading-relaxed text-amber-700 dark:text-amber-300">当前仓库没有万里汇支付创建、Webhook 验签及退款适配器，因此不显示虚假的“已接入”灯，也不能选择其完成真实支付。需要按万里汇开放平台 API 单独开发并经沙箱/生产验证后才能上线。</p></article></div>{isAdmin && <button onClick={() => void api('/api/payment-config-status').then(data => setPaymentConfig(data.providers || {})).catch(e => setError(e instanceof Error ? e.message : '读取变量状态失败'))} className="rounded-xl border px-3 py-2 text-xs">重新读取服务端变量状态</button>}</div></div>}
 
     {payment && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"><div className={`${panel} w-full max-w-sm space-y-3 p-6`}>
       <div className="flex items-center justify-between"><h3 className="font-bold">订单 {payment.orderId}</h3><button onClick={() => setPayment(null)} aria-label="关闭支付信息"><X/></button></div>
@@ -290,11 +315,11 @@ export const ShopSection: React.FC = () => {
 
     {editing && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"><form onSubmit={saveProduct} className={`${panel} max-h-[90vh] w-full max-w-lg space-y-3 overflow-auto p-6`}>
       <h3 className="font-bold">{editing.id ? '编辑商品' : '新增商品'}</h3>
-      <input required value={editing.name || ''} onChange={event => setEditing(value => value ? { ...value, name: event.target.value } : value)} placeholder="商品名称" className="w-full rounded border bg-transparent p-2 text-sm dark:border-slate-700"/>
-      <input required type="number" min="0.01" step="0.01" value={editing.price || ''} onChange={event => setEditing(value => value ? { ...value, price: Number(event.target.value) } : value)} placeholder="价格（元）" className="w-full rounded border bg-transparent p-2 text-sm dark:border-slate-700"/>
-      <input type="number" min="0" value={editing.stock ?? 50} onChange={event => setEditing(value => value ? { ...value, stock: Number(event.target.value) } : value)} placeholder="库存" className="w-full rounded border bg-transparent p-2 text-sm dark:border-slate-700"/>
-      <select value={editing.showcaseId || 'showcase-main'} onChange={event => setEditing(value => value ? { ...value, showcaseId: event.target.value } : value)} className="w-full rounded border bg-transparent p-2 text-sm dark:border-slate-700"><option value="showcase-main">主打数字产品</option><option value="showcase-hardware">限定周边</option><option value="showcase-service">定制服务</option></select>
-      <textarea value={editing.description || ''} onChange={event => setEditing(value => value ? { ...value, description: event.target.value } : value)} placeholder="商品说明" rows={3} className="w-full rounded border bg-transparent p-2 text-sm dark:border-slate-700"/>
+      <label className="block text-xs font-semibold">商品名称<input required value={editing.name || ''} onChange={event => setEditing(value => value ? { ...value, name: event.target.value } : value)} placeholder="填写商品名称" className="mt-1 w-full rounded border bg-transparent p-2 text-sm font-normal dark:border-slate-700"/></label>
+      <label className="block text-xs font-semibold">价格（元）<input required type="number" min="0.01" step="0.01" value={editing.price || ''} onChange={event => setEditing(value => value ? { ...value, price: Number(event.target.value) } : value)} placeholder="例如：99.00" className="mt-1 w-full rounded border bg-transparent p-2 text-sm font-normal dark:border-slate-700"/></label>
+      <label className="block text-xs font-semibold">库存数量<input type="number" min="0" value={editing.stock ?? 50} onChange={event => setEditing(value => value ? { ...value, stock: Number(event.target.value) } : value)} placeholder="输入可售数量" className="mt-1 w-full rounded border bg-transparent p-2 text-sm font-normal dark:border-slate-700"/></label>
+      <label className="block text-xs font-semibold">自定义商品分类<input required value={editing.category || ''} onChange={event => setEditing(value => value ? { ...value, category: event.target.value } : value)} list="shop-category-suggestions" placeholder="输入新分类名称，例如：电子书、周边、服务" className="mt-1 w-full rounded border bg-transparent p-2 text-sm font-normal dark:border-slate-700"/><datalist id="shop-category-suggestions">{categoryNames.map(category => <option key={category} value={category}/>)}</datalist></label>
+      <label className="block text-xs font-semibold">商品说明<textarea value={editing.description || ''} onChange={event => setEditing(value => value ? { ...value, description: event.target.value } : value)} placeholder="填写商品介绍、交付方式和注意事项" rows={3} className="mt-1 w-full rounded border bg-transparent p-2 text-sm font-normal dark:border-slate-700"/></label>
       <div className="flex flex-wrap gap-2">{(editing.images || []).map((image, index) => <div key={`${image}-${index}`} className="relative"><SafeImage src={image} alt="商品图片" className="h-16 w-20 rounded object-cover"/><button type="button" onClick={() => setEditing(value => value ? { ...value, images: value.images?.filter((_, i) => i !== index) } : value)} className="absolute -right-2 -top-2 rounded-full bg-rose-500 p-1 text-white"><X className="h-3 w-3"/></button></div>)}<label className="flex cursor-pointer items-center rounded-xl border px-3 text-xs dark:border-slate-700">上传图片<input type="file" accept="image/*" multiple className="hidden" onChange={async event => { const files = Array.from(event.target.files || []); for (const file of files) { try { const result = await uploadFile(file); setEditing(value => value ? { ...value, images: [...(value.images || []), result.url] } : value); } catch (e) { setError(e instanceof Error ? e.message : '图片上传失败'); } } event.target.value = ''; }}/></label></div>
       <div className="flex justify-end gap-2"><button type="button" onClick={() => setEditing(null)} className="px-4 py-2 text-sm">取消</button><button className="rounded-xl bg-sky-500 px-4 py-2 text-sm text-white">保存商品</button></div>
     </form></div>}

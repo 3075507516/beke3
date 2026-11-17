@@ -172,7 +172,7 @@ npx wrangler d1 execute <你的数据库名称> --remote --file=migrations/0001_
 
 ### 商户支付与部署指南（Cloudflare Pages + Functions + D1）
 
-本项目支付必须部署在 **Cloudflare Pages + Pages Functions + D1**，并绑定 D1 为 `DB`。执行 `migrations/0002_commerce.sql`（或确认应用已按部署流程初始化该迁移）。D1 持久保存订单、站内会话、消息、通知及可编辑法律页面；网站内容数据库与 WebDAV 备份严格分离，WebDAV 不作为订单/站内数据主库。纯静态 Direct Upload/Vercel 不提供这些 Functions 和支付后端。全站及所有支付通知 URL 必须使用 HTTPS；国内服务器上线前完成 ICP 备案，微信 PC 网站支付接入要求备案域名。
+本项目支付必须部署在 **Cloudflare Pages + Pages Functions + D1**，并绑定 D1 为 `DB`。新安装先按顺序执行 `migrations/0002_commerce.sql` 与 `migrations/0003_order_trash.sql`；已有 0002 的站点只执行 0003 后再部署新代码。D1 持久保存订单、站内会话、消息、通知及可编辑法律页面；网站内容数据库与 WebDAV 备份严格分离，WebDAV 不作为订单/站内数据主库。支付接口初始化失败时，已创建的订单仍保存在 D1 并显示未支付/失败，不会因为没有支付链接而丢失。删除订单只会移入可恢复回收站，付款审计记录仍保留。每笔订单创建后会生成管理员站内消息并尝试发送邮件，默认收件地址为验证码邮件通道的 `MAIL_SENDER`；也可在商城订单区设置单独的管理员收件邮箱。服务端异步回调验签成功后会再生成已支付通知和邮件。邮件送达仍取决于服务端邮件 Secrets、域名验证及收件方策略。纯静态 Direct Upload/Vercel 不提供这些 Functions 和支付后端。全站及所有支付通知 URL 必须使用 HTTPS；国内服务器上线前完成 ICP 备案，微信 PC 网站支付接入要求备案域名。
 
 **商户资质准备：**通常需准备企业/个体户营业执照、法人身份证、结算账户，并按各支付机构要求提交网站、经营类目和补充材料。商户可用资格、支持币种、结算周期及最终到账以账户审核和实测为准；本代码没有提供 FX/汇率兑换，不承诺支付账户审批或平台实际收款。
 
@@ -189,6 +189,8 @@ npx wrangler d1 execute <你的数据库名称> --remote --file=migrations/0001_
 - Stripe：`STRIPE_SECRET_KEY`、`STRIPE_WEBHOOK_SECRET`。
 - PayPal：`PAYPAL_CLIENT_ID`、`PAYPAL_CLIENT_SECRET`、`PAYPAL_WEBHOOK_ID`、`PAYPAL_API_BASE`。默认 API base 是 Sandbox；正式环境使用 `https://api-m.paypal.com`。
 
+商城的“支付接入指南与变量状态”窗口提供以上四个已实现渠道的 Pages Secret 配置教学，并只用绿/黄灯显示后端是否读到每项变量，不回传 Secret 值。状态灯不是商户认证或真实收款验证。万里汇（WorldFirst）目前没有本仓库支付创建、回调验签和退款适配器，因此不能选择用于结账；需另行开发并完成平台测试后再开放，不能只配置变量就宣称已接入。
+
 四个异步回调 endpoint 为 `/api/payments/webhook/alipay`、`/api/payments/webhook/wechat`、`/api/payments/webhook/stripe`、`/api/payments/webhook/paypal`。在各平台把对应 HTTPS URL 配为通知地址：支付宝开启异步通知；微信配置支付回调；Stripe Dashboard Webhook 监听 `checkout.session.completed`、`checkout.session.async_payment_succeeded`、`checkout.session.async_payment_failed`、`checkout.session.expired`、`charge.refunded`、`refund.updated`；PayPal 至少订阅 `PAYMENT.CAPTURE.COMPLETED`、`PAYMENT.CAPTURE.DENIED`、`PAYMENT.CAPTURE.REFUNDED`。确认平台向部署 URL 实际投递并由服务端验签。
 
 **Webhook 必须按以下 6 步处理：**
@@ -199,7 +201,7 @@ npx wrangler d1 execute <你的数据库名称> --remote --file=migrations/0001_
 5. 验签失败则返回错误，不更新订单。
 6. 重复回调按幂等方式处理，不重复发货或重复授予会员权益。
 
-最终到账/支付成功以验签通过的服务端异步回调为准，不能依据前端跳转或用户返回页面判定。订单只能由后端数据库创建；用户取消只取消未支付订单。PayPal 回跳后由服务端执行 capture，但订单仍须等 Webhook 才标记 paid；Stripe/PayPal 均可能异步完成。正常支付按已验签回调更新；失败/过期保持未支付或失败状态；取消不覆盖已支付；重复回调幂等；管理员在订单页发货并可原路退款，退款处理中等待渠道通知更新状态。管理员可收到站内通知；接收邮箱可设置，但须配置项目已有邮件服务端 Secrets 和邮件服务，未配置时不能假定邮件已发送。若服务端支付 credentials 未配，结账应失败，不会伪造成功。
+最终到账/支付成功以验签通过的服务端异步回调为准，不能依据前端跳转或用户返回页面判定。订单只能由后端数据库创建；支付 credentials 未配置或支付创建失败时，订单仍持久化并标为未支付/失败，提示检查配置，不会伪造成功。用户取消只取消未支付订单。PayPal 回跳后由服务端执行 capture，但订单仍须等 Webhook 才标记 paid；Stripe/PayPal 均可能异步完成。重复回调幂等；订单删除进入回收站并可恢复，支付审计记录保留；用户可对每笔订单发起客服对话。管理员订单视图每个订单均显示确认发货按钮，只有支付验签成功订单可发货，发货确认后用户看到已发货；管理员可原路退款，退款处理中等待渠道通知更新状态。每笔新订单会生成管理员站内通知并通过服务端验证码邮件共用的 `MAIL_SENDER` 默认发送邮件；付款验签后另发已支付通知/邮件。可选设置专用收件地址；邮件是否送达取决于配置的服务端 Secrets 和邮箱服务。
 
 **建议上线检查：**先分别使用各平台沙箱/测试密钥完成下单、成功、失败、取消、重复通知及退款测试，检查签名验证、D1 状态、幂等和通知结果；确认回调公网可达、HTTPS 和密钥正确后，再按平台规则切换正式密钥并再次核实商户资格、币种和结算设置。本文不声称已经完成商户生产实测。
 
