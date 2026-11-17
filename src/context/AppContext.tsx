@@ -21,6 +21,7 @@ import {
 } from '../types';
 import { Locale, i18nDict, getTranslation } from '../utils/i18n';
 import { clearAdminSessionToken, getAdminSessionToken } from '../utils/adminSession';
+import { clearUserSessionToken, getUserSessionToken } from '../utils/userSession';
 import { deleteWebDavFile, downloadWebDavFile, listWebDavFiles, testWebDav, uploadWebDavFile } from '../utils/webdav';
 import {
   STORAGE_KEYS,
@@ -276,28 +277,36 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const localDevelopment = ['localhost', '127.0.0.1'].includes(window.location.hostname);
     const validateSession = async () => {
       const token = getAdminSessionToken();
-      if (!token) {
-        if (!localDevelopment) setCurrentUser(prev => prev?.role === 'admin' ? null : prev);
-        return;
+      if (token) {
+        try {
+          const response = await fetch('/api/auth/session', { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } });
+          if (response.status === 401 || response.status === 403) {
+            clearAdminSessionToken();
+            if (!cancelled) setCurrentUser(prev => prev?.role === 'admin' ? null : prev);
+          } else if (response.ok && (response.headers.get('content-type') || '').includes('application/json')) {
+            const data = await response.json();
+            if (data?.authenticated && data?.user?.role === 'admin' && !cancelled) setCurrentUser(data.user as User);
+          }
+        } catch {
+          // Keep the signed token on network failures; protected endpoints will revalidate it.
+        }
+      } else if (!localDevelopment) {
+        setCurrentUser(prev => prev?.role === 'admin' ? null : prev);
       }
-      try {
-        const response = await fetch('/api/auth/session', { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } });
-        if (response.status === 401 || response.status === 403) {
-          clearAdminSessionToken();
-          if (!cancelled) setCurrentUser(prev => prev?.role === 'admin' ? null : prev);
-          return;
+      const userToken = getUserSessionToken();
+      if (userToken) {
+        try {
+          const response = await fetch('/api/auth/user-session', { headers: { Authorization: `Bearer ${userToken}`, Accept: 'application/json' } });
+          if (response.status === 401 || response.status === 403) {
+            clearUserSessionToken();
+            if (!cancelled) setCurrentUser(prev => prev?.role === 'user' ? null : prev);
+          } else if (response.ok && (response.headers.get('content-type') || '').includes('application/json')) {
+            const data = await response.json();
+            if (data?.authenticated && data?.user?.role === 'user' && !cancelled) setCurrentUser(data.user as User);
+          }
+        } catch {
+          // Preserve the signed user token on transient network errors.
         }
-        // Network errors, 5xx responses, HTML fallbacks and malformed JSON are transient;
-        // keep the persisted session and let protected APIs make the final authorization decision.
-        if (!response.ok) return;
-        const contentType = response.headers.get('content-type') || '';
-        if (!contentType.includes('application/json')) return;
-        const data = await response.json();
-        if (data?.authenticated && data?.user?.role === 'admin' && !cancelled) {
-          setCurrentUser(data.user as User);
-        }
-      } catch {
-        // Preserve the signed token/profile on connection loss. It is checked again on resume/online.
       }
     };
     const onVisibility = () => { if (document.visibilityState === 'visible') void validateSession(); };
@@ -720,7 +729,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Public content localStorage is a disposable browser cache only. D1 hydrates the
   // canonical snapshot on startup and overwrites stale cache; admin writes go to D1.
   useEffect(() => saveLocalStorage(STORAGE_KEYS.POSTS, posts), [posts]);
-  useEffect(() => saveLocalStorage(STORAGE_KEYS.BOOKS, books), [books]);
+  useEffect(() => saveLocalStorage(STORAGE_KEYS.BOOKS, books.map(({ content: _localText, ...book }) => book)), [books]);
   useEffect(() => saveLocalStorage(STORAGE_KEYS.PHOTOS, photos), [photos]);
   useEffect(() => saveLocalStorage('fox3_photo_folders', photoFolders), [photoFolders]);
   useEffect(() => saveLocalStorage(STORAGE_KEYS.MEDIA, media), [media]);
@@ -835,10 +844,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // fallback/cache; WebDAV backup metadata, private mail/orders/chat and admin settings
   // never enter this public content channel.
   const siteContentRevisionRef = useRef(0);
+  const siteUserMediaUpdatedAtRef = useRef(0);
   const siteContentReadyRef = useRef(false);
   const siteContentLoadRef = useRef(false);
   const siteContentConflictRef = useRef(false);
   const siteContentLastSavedRef = useRef('');
+  const userMediaRevisionRef = useRef(0);
+  const userMediaReadyRef = useRef(false);
+  const userMediaLastSavedRef = useRef('');
+  const userMediaBaseRef = useRef<{ books: Book[]; photos: Photo[]; media: MediaItem[] }>({ books: [], photos: [], media: [] });
+  const [userMediaRetryKey, setUserMediaRetryKey] = useState(0);
   const [siteContentNeedsSeed, setSiteContentNeedsSeed] = useState(false);
   const applyPublicSiteContent = useCallback((data: any, initialized: boolean, legacyAvailable = false) => {
     const preserveLocalOwned = <T extends { id: string; ownerId?: string; [key: string]: any }>(published: T[], cached: T[]) => {
@@ -848,9 +863,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return typeof value === 'string' && (value.startsWith('idb_file_') || value.startsWith('data:') || value.startsWith('blob:'));
       }) || (Array.isArray(item.images) && item.images.some((url: unknown) => typeof url === 'string' && /^(?:idb_file_|data:|blob:)/i.test(url))) || (typeof item.content === 'string' && /(?:idb_file_|data:|blob:)/i.test(item.content));
       const localById = new Map(cached.filter(hasLocalFile).map(item => [item.id, item]));
-      const merged = published.map(item => localById.get(item.id) || item);
+      const hasRemoteFile = (item: T) => ['url', 'src', 'fileUrl', 'cover', 'thumbnail', 'poster', 'icon'].some(key => {
+        const value = item[key];
+        return typeof value === 'string' && value.length > 0 && !/^(?:idb_file_|data:|blob:)/i.test(value);
+      }) || (Array.isArray(item.images) && item.images.some((url: unknown) => typeof url === 'string' && !/^(?:idb_file_|data:|blob:)/i.test(url)));
+      const merged = published.map(item => {
+        const cachedItem = localById.get(item.id);
+        return cachedItem && !hasRemoteFile(item) ? cachedItem : item;
+      });
       const mergedIds = new Set(merged.map(item => item.id));
-      return [...merged, ...cached.filter(item => !mergedIds.has(item.id) && (hasLocalFile(item) || (item.ownerId && item.ownerId !== 'user_fox_admin')))];
+      return [...merged, ...cached.filter(item => !mergedIds.has(item.id) && hasLocalFile(item))];
     };
     if (initialized || legacyAvailable) {
       if (Array.isArray(data?.posts)) setPosts(prev => preserveLocalOwned(data.posts, prev));
@@ -878,15 +900,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     siteContentLoadRef.current = true;
     if (showStatus) setSyncState(prev => ({ ...prev, isSyncing: true, status: 'syncing', message: '正在从站点数据库读取最新内容…' }));
     try {
-      const response = await fetch('/api/site-content', { method: 'GET', headers: { Accept: 'application/json' }, cache: 'no-store' });
+      const userToken = getUserSessionToken();
+      const response = await fetch('/api/site-content', { method: 'GET', headers: { Accept: 'application/json', ...(userToken ? { Authorization: `Bearer ${userToken}` } : {}) }, cache: 'no-store' });
       const envelope = await response.json().catch(() => null);
       if (!response.ok || envelope?.success !== true) throw new Error(envelope?.error || `站点数据库读取失败 (HTTP ${response.status})`);
       const nextRevision = Number(envelope.revision || 0);
+      const nextUserMediaUpdatedAt = Number(envelope.userMediaUpdatedAt || 0);
+      if (currentUser?.role === 'user' && Number.isInteger(Number(envelope.userMediaRevision))) {
+        userMediaRevisionRef.current = Number(envelope.userMediaRevision);
+      }
       const wasReady = siteContentReadyRef.current;
       const revisionChanged = nextRevision !== siteContentRevisionRef.current;
-      if (siteContentConflictRef.current && revisionChanged && !showStatus) return;
+      const userMediaChanged = nextUserMediaUpdatedAt !== siteUserMediaUpdatedAtRef.current;
+      if (siteContentConflictRef.current && (revisionChanged || userMediaChanged) && !showStatus) return;
       siteContentRevisionRef.current = nextRevision;
-      if (!wasReady || revisionChanged) applyPublicSiteContent(envelope.data || {}, Boolean(envelope.initialized), Boolean(envelope.legacyAvailable));
+      siteUserMediaUpdatedAtRef.current = nextUserMediaUpdatedAt;
+      if (!wasReady || revisionChanged || userMediaChanged) applyPublicSiteContent(envelope.data || {}, Boolean(envelope.initialized), Boolean(envelope.legacyAvailable));
       if (showStatus) siteContentConflictRef.current = false;
       siteContentReadyRef.current = true;
       setSiteContentNeedsSeed(!envelope.initialized && Boolean(getAdminSessionToken()));
@@ -896,11 +925,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } finally {
       siteContentLoadRef.current = false;
     }
-  }, [applyPublicSiteContent]);
+  }, [applyPublicSiteContent, currentUser?.id, currentUser?.role]);
 
   const triggerManualSync = useCallback(async () => {
-    // This is a public read/refresh operation. It does not touch private data or WebDAV backups.
+    // Read public site content and retry only the signed-in user's own media directory; never touch WebDAV backups.
     await fetchLatestSiteContent(true);
+    setUserMediaRetryKey(value => value + 1);
   }, [fetchLatestSiteContent]);
 
   useEffect(() => {
@@ -924,12 +954,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!siteContentReadyRef.current || !getAdminSessionToken()) return;
     if (siteContentTimeoutRef.current) clearTimeout(siteContentTimeoutRef.current);
     siteContentTimeoutRef.current = setTimeout(async () => {
-      const publicSettingKeys = ['siteName', 'themeColor', 'customPaletteBg', 'fullBackgroundUrl', 'avatarUrl', 'heroIntroImage', 'heroBadge', 'heroTitle', 'heroSubtitle', 'transparentCards', 'bottomButtonsEnabled', 'hideNonBlogForGuests', 'globalTheme', 'deviceView', 'timezone'];
+      const publicSettingKeys = ['siteName', 'themeColor', 'customPaletteBg', 'fullBackgroundUrl', 'avatarUrl', 'heroIntroImage', 'heroBadge', 'heroTitle', 'heroSubtitle', 'transparentCards', 'bottomButtonsEnabled', 'hideNonBlogForGuests', 'allowUserMediaManagement', 'globalTheme', 'deviceView', 'timezone'];
       const hasLocalUrl = (value: unknown) => typeof value === 'string' && /^(?:idb_file_|data:|blob:)/i.test(value);
       const removeLocalRefs = (value: string) => value.replace(/(?:idb_file_[\w.-]+|data:[^\s"'<>)]*)/gi, '');
       const publicSettings = Object.fromEntries(publicSettingKeys.filter(key => (systemSettings as any)[key] !== undefined && !hasLocalUrl((systemSettings as any)[key])).map(key => [key, (systemSettings as any)[key]]));
       const publicPosts = posts.map(post => ({ ...post, cover: hasLocalUrl(post.cover) ? undefined : post.cover, content: typeof post.content === 'string' ? removeLocalRefs(post.content) : post.content }));
-      const publicBooks = books.filter(book => !hasLocalUrl(book.fileUrl)).map(book => ({ ...book, cover: hasLocalUrl(book.cover) ? undefined : book.cover }));
+      const publicBooks = books.filter(book => !hasLocalUrl(book.fileUrl)).map(({ content: _localText, ...book }) => ({ ...book, cover: hasLocalUrl(book.cover) ? undefined : book.cover }));
       const publicPhotos = photos.filter(photo => !hasLocalUrl(photo.url)).map(photo => ({ ...photo, thumbnail: hasLocalUrl(photo.thumbnail) ? undefined : photo.thumbnail }));
       const publicMedia = media.filter(item => !hasLocalUrl(item.src)).map(item => ({ ...item, cover: hasLocalUrl(item.cover) ? undefined : item.cover }));
       const publicProducts = products.map(product => ({ ...product, images: Array.isArray(product.images) ? product.images.filter(url => !hasLocalUrl(url)) : product.images }));
@@ -960,6 +990,148 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }, 900);
     return () => { if (siteContentTimeoutRef.current) clearTimeout(siteContentTimeoutRef.current); };
   }, [posts, books, photos, photoFolders, media, products, websites, systemSettings, themeMode, currentUser, siteContentNeedsSeed]);
+
+  const userMediaSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const userMediaLocalStateRef = useRef({ books, photos, media });
+  userMediaLocalStateRef.current = { books, photos, media };
+  useEffect(() => {
+    const user = currentUser?.role === 'user' ? currentUser : null;
+    const token = getUserSessionToken();
+    userMediaReadyRef.current = false;
+    userMediaLastSavedRef.current = '';
+    if (!user) return;
+    if (!token) {
+      setSyncState(prev => ({ ...prev, status: 'error', message: '当前为本机用户会话，个人文件列表暂不能跨设备同步' }));
+      return;
+    }
+    let cancelled = false;
+    const own = <T extends { ownerId?: string; ownerUsername?: string }>(items: T[]) => items.filter(item => item.ownerId === user.id || (!item.ownerId && item.ownerUsername?.toLowerCase() === user.username.toLowerCase()));
+    const isLocalFile = (value: unknown) => typeof value === 'string' && /^(?:idb_file_|data:|blob:)/i.test(value);
+    const makeShareable = (data: { books: Book[]; photos: Photo[]; media: MediaItem[] }) => ({
+      books: data.books.filter(item => !isLocalFile(item.fileUrl)),
+      photos: data.photos.filter(item => !isLocalFile(item.url)),
+      media: data.media.filter(item => !isLocalFile(item.src)),
+    });
+    const mergeUserItems = <T extends { id: string; ownerId?: string; ownerUsername?: string; [key: string]: any }>(previous: T[], incoming: T[], initialized: boolean) => {
+      const isOwner = (item: T) => item.ownerId === user.id || (!item.ownerId && item.ownerUsername?.toLowerCase() === user.username.toLowerCase());
+      const isBrowserOnly = (item: T) => ['url', 'src', 'fileUrl'].some(key => isLocalFile(item[key]));
+      const retained = previous.filter(item => !isOwner(item) || isBrowserOnly(item));
+      const ownIncoming = initialized ? incoming : own(previous);
+      const all = [...retained, ...ownIncoming];
+      const seen = new Set<string>();
+      return all.filter(item => !seen.has(item.id) && Boolean(seen.add(item.id)));
+    };
+    void fetch('/api/user-media', { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' }, cache: 'no-store' })
+      .then(async response => {
+        const envelope = await response.json().catch(() => null);
+        if (!response.ok || envelope?.success !== true) throw new Error(envelope?.error || '用户媒体读取失败');
+        if (cancelled) return;
+        const initialized = Boolean(envelope.initialized);
+        const data = envelope.data || { books: [], photos: [], media: [] };
+        setBooks(prev => mergeUserItems(prev, Array.isArray(data.books) ? data.books : [], initialized));
+        setPhotos(prev => mergeUserItems(prev, Array.isArray(data.photos) ? data.photos : [], initialized));
+        setMedia(prev => mergeUserItems(prev, Array.isArray(data.media) ? data.media : [], initialized));
+        userMediaRevisionRef.current = Number(envelope.revision || 0);
+        const serverData = makeShareable({ books: own(data.books || []), photos: own(data.photos || []), media: own(data.media || []) });
+        userMediaBaseRef.current = initialized ? serverData : { books: [], photos: [], media: [] };
+        userMediaLastSavedRef.current = initialized ? JSON.stringify(serverData) : '';
+        userMediaReadyRef.current = true;
+      })
+      .catch(error => {
+        if (!cancelled) setSyncState(prev => ({ ...prev, status: 'error', message: error?.message || '个人文件读取失败；当前设备缓存仍保留' }));
+      });
+    return () => { cancelled = true; userMediaReadyRef.current = false; };
+  }, [currentUser?.id, currentUser?.username, currentUser?.role]);
+
+  useEffect(() => {
+    if (currentUser?.role !== 'user' || !getUserSessionToken() || !userMediaReadyRef.current) return;
+    const user = currentUser;
+    const isOwner = (item: { ownerId?: string; ownerUsername?: string }) => item.ownerId === user.id || (!item.ownerId && item.ownerUsername?.toLowerCase() === user.username.toLowerCase());
+    const isLocalFile = (value: unknown) => typeof value === 'string' && /^(?:idb_file_|data:|blob:)/i.test(value);
+    const data = {
+      books: books.filter(item => isOwner(item) && !isLocalFile(item.fileUrl)).map(({ content: _localText, ...book }) => book),
+      photos: photos.filter(item => isOwner(item) && !isLocalFile(item.url)),
+      media: media.filter(item => isOwner(item) && !isLocalFile(item.src)),
+    };
+    const serialized = JSON.stringify(data);
+    if (serialized === userMediaLastSavedRef.current) return;
+    if (userMediaSaveTimeoutRef.current) clearTimeout(userMediaSaveTimeoutRef.current);
+    userMediaSaveTimeoutRef.current = setTimeout(async () => {
+      const token = getUserSessionToken();
+      try {
+        const response = await fetch('/api/user-media', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ expectedRevision: userMediaRevisionRef.current, data }),
+        });
+        const result = await response.json().catch(() => null);
+        if (!response.ok || result?.success !== true) {
+          const syncError: any = new Error(result?.error || `个人文件同步失败 (HTTP ${response.status})`);
+          syncError.status = response.status;
+          throw syncError;
+        }
+        userMediaRevisionRef.current = Number(result.revision || userMediaRevisionRef.current + 1);
+        userMediaLastSavedRef.current = serialized;
+        userMediaBaseRef.current = data;
+        setSyncState({ isSyncing: false, lastSyncedAt: Number(result.updatedAt || Date.now()), status: 'synced', message: '个人文件目录已保存到 D1' });
+      } catch (error: any) {
+        if (error?.status === 409) {
+          try {
+            const latestResponse = await fetch('/api/user-media', { headers: { Authorization: `Bearer ${getUserSessionToken()}`, Accept: 'application/json' }, cache: 'no-store' });
+            const latestEnvelope = await latestResponse.json().catch(() => null);
+            if (latestResponse.ok && latestEnvelope?.success && latestEnvelope.initialized) {
+              const latest = {
+                books: (latestEnvelope.data?.books || []).filter(isOwner),
+                photos: (latestEnvelope.data?.photos || []).filter(isOwner),
+                media: (latestEnvelope.data?.media || []).filter(isOwner),
+              };
+              const localNow = {
+                books: userMediaLocalStateRef.current.books.filter(isOwner),
+                photos: userMediaLocalStateRef.current.photos.filter(isOwner),
+                media: userMediaLocalStateRef.current.media.filter(isOwner),
+              };
+              const mergeChanges = <T extends { id: string }>(baseItems: T[], localItems: T[], remoteItems: T[]) => {
+                const base = new Map(baseItems.map(item => [item.id, item]));
+                const local = new Map(localItems.map(item => [item.id, item]));
+                const remote = new Map(remoteItems.map(item => [item.id, item]));
+                const ids = new Set([...base.keys(), ...local.keys(), ...remote.keys()]);
+                const merged: T[] = [];
+                for (const id of ids) {
+                  const before = base.get(id);
+                  const editedHere = JSON.stringify(local.get(id) ?? null) !== JSON.stringify(before ?? null);
+                  const chosen = editedHere ? local.get(id) : remote.get(id);
+                  if (chosen) merged.push(chosen);
+                }
+                return merged;
+              };
+              const baseline = userMediaBaseRef.current;
+              const rebased = {
+                books: mergeChanges(baseline.books, localNow.books, latest.books),
+                photos: mergeChanges(baseline.photos, localNow.photos, latest.photos),
+                media: mergeChanges(baseline.media, localNow.media, latest.media),
+              };
+              userMediaRevisionRef.current = Number(latestEnvelope.revision || userMediaRevisionRef.current);
+              userMediaBaseRef.current = latest;
+              userMediaLastSavedRef.current = JSON.stringify(latest);
+              const mergeState = <T extends { ownerId?: string; ownerUsername?: string; id: string }>(previous: T[], merged: T[]) => {
+                const localOnly = previous.filter(item => isOwner(item) && ['url', 'src', 'fileUrl'].some(key => isLocalFile((item as any)[key])));
+                const others = previous.filter(item => !isOwner(item));
+                const all = [...others, ...merged, ...localOnly];
+                return all.filter((item, index) => all.findIndex(other => other.id === item.id) === index);
+              };
+              setBooks(prev => mergeState(prev, rebased.books));
+              setPhotos(prev => mergeState(prev, rebased.photos));
+              setMedia(prev => mergeState(prev, rebased.media));
+              setSyncState(prev => ({ ...prev, status: 'syncing', message: '已合并其他设备的文件更新，正在重试保存' }));
+              return;
+            }
+          } catch {}
+        }
+        setSyncState(prev => ({ ...prev, isSyncing: false, status: 'error', message: error?.message || '个人文件同步失败；请刷新后重试' }));
+      }
+    }, 800);
+    return () => { if (userMediaSaveTimeoutRef.current) clearTimeout(userMediaSaveTimeoutRef.current); };
+  }, [books, photos, media, currentUser, userMediaRetryKey]);
 
   // Robust file upload with real XMLHttpRequest progress tracking & local fallback
   const uploadFile = async (file: File): Promise<{ url: string; size: number; name: string }> => {

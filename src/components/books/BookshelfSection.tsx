@@ -44,6 +44,8 @@ export const BookshelfSection: React.FC = () => {
   } = useApp();
 
   const [readingBook, setReadingBook] = useState<Book | null>(null);
+  const [loadingRemoteText, setLoadingRemoteText] = useState(false);
+  const [remoteTextError, setRemoteTextError] = useState('');
   const [isFullScreen, setIsFullScreen] = useState(false);
   const [fontSize, setFontSize] = useState<number>(18);
   const [isUploading, setIsUploading] = useState(false);
@@ -53,6 +55,42 @@ export const BookshelfSection: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const canManageBook = (book: Book) => currentUser?.role === 'admin' || (Boolean(systemSettings.allowUserMediaManagement) && Boolean(currentUser) && ((Boolean(book.ownerId) && book.ownerId === currentUser?.id) || (!book.ownerId && Boolean(book.ownerUsername) && book.ownerUsername === currentUser?.username)));
   const canUploadBooks = currentUser?.role === 'admin' || (Boolean(currentUser) && Boolean(systemSettings.allowUserMediaManagement));
+
+  useEffect(() => {
+    if (!readingBook || readingBook.content || readingBook.format === 'PDF' || !readingBook.fileUrl) return;
+    if (!['EPUB', 'TXT'].includes(String(readingBook.format).toUpperCase())) return;
+    let cancelled = false;
+    const loadRemoteText = async () => {
+      setLoadingRemoteText(true);
+      setRemoteTextError('');
+      try {
+        let blob: Blob;
+        if (readingBook.fileUrl.startsWith('idb_file_')) {
+          const local = await getFileFromIndexedDB(readingBook.fileUrl);
+          if (!local) throw new Error('当前设备找不到本地文件，请在原上传设备重新上传。');
+          blob = local instanceof Blob ? local : await (await fetch(local)).blob();
+        } else {
+          const response = await fetch(readingBook.fileUrl, { cache: 'no-store' });
+          if (!response.ok) throw new Error(`文件下载失败 (HTTP ${response.status})`);
+          blob = await response.blob();
+        }
+        let text = '';
+        if (String(readingBook.format).toUpperCase() === 'EPUB') {
+          const parsed = await parseEpubFile(blob);
+          text = parsed.fullText || '';
+        } else {
+          text = await blob.text();
+        }
+        if (!cancelled) setReadingBook(previous => previous?.id === readingBook.id ? { ...previous, content: text } : previous);
+      } catch (error: any) {
+        if (!cancelled) setRemoteTextError(error?.message || '无法从云端读取书籍正文');
+      } finally {
+        if (!cancelled) setLoadingRemoteText(false);
+      }
+    };
+    void loadRemoteText();
+    return () => { cancelled = true; };
+  }, [readingBook?.id, readingBook?.content, readingBook?.fileUrl, readingBook?.format]);
 
   const handleBookFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -356,6 +394,8 @@ export const BookshelfSection: React.FC = () => {
 
           {/* Reader Scrollable Content / PDF viewer / Direct Document Reader */}
           <div className="flex-1 overflow-y-auto p-4 sm:p-8 md:p-12 max-w-4xl mx-auto w-full h-full flex flex-col">
+            {loadingRemoteText && <div className="mb-4 rounded-xl bg-sky-50 dark:bg-sky-950/30 p-3 text-sm text-sky-700 dark:text-sky-300">正在从云端读取电子书正文…</div>}
+            {remoteTextError && <div className="mb-4 rounded-xl bg-amber-50 dark:bg-amber-950/30 p-3 text-sm text-amber-700 dark:text-amber-300">{remoteTextError}</div>}
             {readingBook.format === 'PDF' && readingBook.fileUrl ? (
               <div className="w-full h-full flex-1 min-h-[550px] flex flex-col rounded-xl overflow-hidden border border-stone-200 dark:border-stone-800 bg-white">
                 <iframe
