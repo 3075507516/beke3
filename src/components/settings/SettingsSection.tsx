@@ -31,6 +31,7 @@ import {
 } from 'lucide-react';
 import { GlobalThemeMode } from '../../types';
 import { translateInline } from '../../utils/i18n';
+import { getAdminSessionToken } from '../../utils/adminSession';
 
 export const SettingsSection: React.FC = () => {
   const {
@@ -80,6 +81,10 @@ export const SettingsSection: React.FC = () => {
 
   const [translateDraft, setTranslateDraft] = useState(translateConfig);
   const [isTranslateSaved, setIsTranslateSaved] = useState(false);
+  const [storageUsage, setStorageUsage] = useState<{ r2Bytes: number; r2Files: number; d1FallbackBytes: number; d1FallbackFiles: number; exact: boolean; note: string } | null>(null);
+  const [storageFiles, setStorageFiles] = useState<Array<{ key: string; name: string; size: number; uploadedAt?: number | null; contentType: string; url: string }>>([]);
+  const [storageCursor, setStorageCursor] = useState<string | null>(null);
+  const [storageLoading, setStorageLoading] = useState(false);
 
   const handleSaveTranslateConfig = () => {
     setTranslateConfig(translateDraft);
@@ -118,6 +123,40 @@ export const SettingsSection: React.FC = () => {
       saveLocalStorage('fox3_settings_collapsed_state', next);
       return next;
     });
+  };
+
+  const refreshStorage = async (append = false) => {
+    const token = getAdminSessionToken();
+    if (!token) return;
+    setStorageLoading(true);
+    try {
+      const headers = { Authorization: `Bearer ${token}` };
+      const [usageResponse, filesResponse] = await Promise.all([
+        fetch('/api/storage/usage', { headers, cache: 'no-store' }),
+        fetch(`/api/storage/files${append && storageCursor ? `?cursor=${encodeURIComponent(storageCursor)}` : ''}`, { headers, cache: 'no-store' }),
+      ]);
+      const [usage, files] = await Promise.all([usageResponse.json(), filesResponse.json()]);
+      if (!usageResponse.ok || usage.success === false) throw new Error(usage.error || '存储统计读取失败');
+      setStorageUsage(usage);
+      if (!filesResponse.ok || files.success === false) throw new Error(files.error || '文件目录读取失败');
+      setStorageFiles(previous => append ? [...previous, ...(files.objects || [])] : (files.objects || []));
+      setStorageCursor(files.truncated ? files.cursor : null);
+    } catch (error: any) {
+      showToast(error?.message || '无法读取真实存储数据', 'error');
+      if (!append) { setStorageUsage(null); setStorageFiles([]); setStorageCursor(null); }
+    } finally { setStorageLoading(false); }
+  };
+  useEffect(() => { if (currentUser?.role === 'admin') void refreshStorage(); }, [currentUser?.id]);
+
+  const removeStoredFile = async (file: { key: string; name: string }) => {
+    if (!window.confirm(`永久删除对象“${file.name}”？此操作会清理本站对应媒体记录，不能撤销。`)) return;
+    try {
+      const response = await fetch(`/api/files/${encodeURIComponent(file.key)}`, { method: 'DELETE', headers: { Authorization: `Bearer ${getAdminSessionToken()}` } });
+      const result = await response.json();
+      if (!response.ok || result.success === false) throw new Error(result.error || '文件删除失败');
+      showToast('对象已删除，媒体目录引用已清理。', 'success');
+      await refreshStorage();
+    } catch (error: any) { showToast(error?.message || '文件删除失败', 'error'); }
   };
 
   const handleQuickTranslate = async () => {
@@ -415,6 +454,14 @@ export const SettingsSection: React.FC = () => {
                   placeholder="fox3"
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500"
                 />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">{tx('页眉副标语')}（CLOUDFLARE NATIVE • FOX3）</label>
+                <input type="text" maxLength={80} value={systemSettings.headerTagline || 'CLOUDFLARE NATIVE • FOX3'}
+                  onChange={e => updateSystemSettings({ headerTagline: e.target.value })}
+                  placeholder="例如：数字资产管理与同步平台"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500" />
               </div>
 
               <div>
@@ -872,27 +919,43 @@ export const SettingsSection: React.FC = () => {
               </div>
             </div>
 
-            {/* Capacity Metres */}
+            {/* Capacity meters from server-side object enumeration */}
             <div className={`grid gap-4 ${deviceMode === 'mobile' ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2'}`}>
               <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700">
-                <span className="text-xs text-slate-400 block mb-1">系统已用容量 (零值起点计费计量)</span>
+                <span className="text-xs text-slate-400 block mb-1">Cloudflare R2 当前 Bucket 实际对象用量</span>
                 <span className="text-2xl font-bold font-mono text-sky-500">
-                  {((systemSettings.usedCapacityBytes || 0) / (1024 * 1024)).toFixed(2)} MB
+                  {storageUsage ? `${(storageUsage.r2Bytes / (1024 * 1024)).toFixed(2)} MB` : '尚未统计'}
                 </span>
                 <span className="text-xs text-slate-400 block mt-1">
-                  配额上限: {((systemSettings.totalCapacityBytes || 10737418240) / (1024 * 1024 * 1024)).toFixed(0)} GB
+                  {storageUsage ? `${storageUsage.r2Files.toLocaleString()} 个 R2 对象${storageUsage.exact ? ' · 已全量枚举' : ' · 统计未完成'}` : '请刷新真实云端统计'}
                 </span>
+                {storageUsage?.note && <span className="mt-1 block text-[10px] text-slate-400">{storageUsage.note}</span>}
               </div>
 
               <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700">
-                <span className="text-xs text-slate-400 block mb-1">本机数据与服务端能力边界</span>
+                <span className="text-xs text-slate-400 block mb-1">D1 回退文件（单独列示，不与 R2 重复相加）</span>
                 <span className="text-sm font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1.5 mt-1">
-                  <Check className="w-4 h-4" /> 本机内容保存在浏览器；云服务需单独配置
+                  <HardDrive className="w-4 h-4" /> {storageUsage ? `${(storageUsage.d1FallbackBytes / (1024 * 1024)).toFixed(2)} MB · ${storageUsage.d1FallbackFiles} 个文件` : '尚未统计'}
                 </span>
                 <span className="text-xs text-slate-400 block mt-1">
-                  注册、验证码邮件、共享同步和远程文件依赖 Cloudflare Functions 与相应 D1/R2 绑定；纯静态托管不提供这些 API。
+                  统计不虚构固定配额；外部 COS/OSS/S3、浏览器 IndexedDB 和本机临时文件未纳入 R2 桶用量。Cloudflare 账户计费配额请以控制台为准。
                 </span>
               </div>
+            </div>
+            <div className="rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/60">
+                <div><b className="text-sm">{tx('R2 文件管理')}</b><p className="text-[10px] text-slate-500">仅列出本站 Cloudflare R2 Bucket 中的原始对象；删除会清理本网站的媒体目录引用。</p></div>
+                <button onClick={() => void refreshStorage()} disabled={storageLoading} className="rounded-lg border px-3 py-1.5 text-xs disabled:opacity-50">{storageLoading ? '正在读取…' : tx('刷新统计与文件')}</button>
+              </div>
+              <div className="max-h-80 divide-y divide-slate-100 overflow-auto dark:divide-slate-800">
+                {storageFiles.map(file => <div key={file.key} className="flex flex-wrap items-center gap-2 px-3 py-2 text-xs">
+                  <div className="min-w-0 flex-1"><b className="block truncate" title={file.name}>{file.name}</b><span className="text-slate-500">{(file.size / (1024 * 1024)).toFixed(2)} MB · {file.contentType}</span></div>
+                  <a href={`${file.url}?download=1`} className="rounded border px-2 py-1">下载</a>
+                  <button onClick={() => void removeStoredFile(file)} className="rounded border border-rose-300 px-2 py-1 text-rose-600">{tx('删除文件')}</button>
+                </div>)}
+                {!storageFiles.length && <p className="p-4 text-xs text-slate-500">{storageLoading ? '正在加载…' : '无 R2 文件，或 R2 尚未绑定/无法枚举。'}</p>}
+              </div>
+              {storageCursor && <div className="border-t p-3 text-center"><button onClick={() => void refreshStorage(true)} disabled={storageLoading} className="rounded-lg border px-3 py-1.5 text-xs">{tx('加载更多文件')}</button></div>}
             </div>
           </div>
         )}

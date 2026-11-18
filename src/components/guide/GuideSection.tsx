@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { translateInline } from '../../utils/i18n';
+import { SiteOwnerChat } from './SiteOwnerChat';
 
 export const GuideSection: React.FC = () => {
   const { locale } = useApp();
@@ -30,16 +31,14 @@ export const GuideSection: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-2">
-        <h2 className="text-xl md:text-2xl font-bold font-serif-sc text-slate-900 dark:text-slate-100 flex items-center gap-2">
-          <HelpCircle className="w-6 h-6 text-rose-500" />
-          <span>{tx('fox3 博客全平台极速部署指引与 D1 / R2 / WebDAV 使用说明')}</span>
-        </h2>
-        <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-          {tx('部署存储概览：D1 保存博客、账户和媒体目录；R2/COS/OSS/S3 保存文件本体。成功上传到对象存储的图片和视频可跨设备查看；仅保存到 IndexedDB 的回退文件只在本机可用。电子书正文按需读取原文件，不写入 D1。')}
-          <p className="text-xs text-amber-700 dark:text-amber-300 leading-relaxed">Policies/法律页面内容为政策草稿，不是自动代写的有效法律意见；发布前请按主体、真实服务及适用法律审查。</p>
-        </p>
+      {/* Deployment guide intro and persistent site-owner support chat */}
+      <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="space-y-2 rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <h2 className="flex items-center gap-2 font-serif-sc text-xl font-bold text-slate-900 dark:text-slate-100 md:text-2xl"><HelpCircle className="h-6 w-6 text-rose-500"/><span>{tx('fox3 博客全平台极速部署指引与 D1 / R2 / WebDAV 使用说明')}</span></h2>
+          <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-400">{tx('部署存储概览：D1 保存博客、账户和媒体目录；R2/COS/OSS/S3 保存文件本体。成功上传到对象存储的图片和视频可跨设备查看；仅保存到 IndexedDB 的回退文件只在本机可用。电子书正文按需读取原文件，不写入 D1。')}</p>
+          <p className="text-xs leading-relaxed text-amber-700 dark:text-amber-300">Policies/法律页面内容为政策草稿，不是自动代写的有效法律意见；发布前请按主体、真实服务及适用法律审查。</p>
+        </div>
+        <SiteOwnerChat />
       </div>
 
       {/* Platform Switcher Tabs */}
@@ -448,6 +447,19 @@ export const GuideSection: React.FC = () => {
       )}
 
       {/* Commercial (Shop) & Mail Usage Guides */}
+      <section className="rounded-3xl border border-rose-200 bg-rose-50/70 p-5 shadow-sm dark:border-rose-900/60 dark:bg-rose-950/20">
+        <h3 className="mb-3 font-bold text-rose-800 dark:text-rose-200">{tx('支付接入：商户注册、服务端变量与回调验证（正式接入清单）')}</h3>
+        <div className="space-y-2 text-xs leading-relaxed text-slate-700 dark:text-slate-300">
+          <p>{tx('开始前准备：企业/个体户营业执照、法人身份证和结算账户。网站必须启用 HTTPS；中国大陆服务器需完成 ICP 备案，微信 PC 网站支付要求使用已备案域名。')}</p>
+          <p>{tx('支付宝：在支付宝开放平台/商家中心完成主体认证，开通电脑网站支付和手机网站支付，取得 APPID、设置应用私钥与支付宝公钥，并配置异步通知地址。')}</p>
+          <p>{tx('微信支付：在微信支付商户平台申请商户号，申请 Native（PC 扫码）或 H5 支付，准备 APIv3 密钥、商户 API 证书私钥、平台证书及 HTTPS 回调 URL。')}</p>
+          <p>{tx('Stripe：注册账户并取得 Secret Key；在 Stripe Dashboard 创建 Webhook，保存 signing secret，并订阅成功、异步失败/过期及退款事件。')}</p>
+          <p>{tx('PayPal：注册企业账户并创建 REST 应用，取得 Client ID、Secret 和 Webhook ID；先完整测试 Sandbox，再切换正式 API。')}</p>
+          <p>{tx('在 Cloudflare Pages → Settings → Variables and Secrets 中配置网关 Secrets，并绑定 D1（DB）；按顺序执行 migrations/0002_commerce.sql 和 migrations/0003_order_trash.sql 后重新部署。状态灯只表示服务端读到了变量，不代表密钥正确或商户已通过收款实测。')}</p>
+          <p>{tx('安全回调流程：用户付款 → 支付平台向 notify_url POST 订单号、金额、状态和签名 → 后端验签 → 核对订单与金额 → 更新 D1 并返回成功。验签失败必须返回错误且不更新订单；重复通知必须幂等，不能依据前端跳转判断到账。')}</p>
+          <p className="font-medium">{tx('本项目已实现支付宝、微信支付、Stripe 与 PayPal 的服务端支付/回调适配。万里汇（WorldFirst）目前没有接入本项目订单创建、回调验签和退款流程，不能只配置变量后启用。')}</p>
+        </div>
+      </section>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4">
         {/* Shop Guide */}
         <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl p-6 space-y-4 shadow-sm">

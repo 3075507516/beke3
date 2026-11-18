@@ -1,5 +1,5 @@
 import { createVerificationCode, dispatchEmail, escapeHtml, normalizeEmail, probeResendConnection, type MailProvider, type OutboundMailSettings } from '../mail';
-import { getExternalObjectStoreConfig, getExternalObject, putExternalObject, probeExternalObjectStore } from '../object-storage';
+import { getExternalObjectStoreConfig, getExternalObject, putExternalObject, deleteExternalObject, probeExternalObjectStore } from '../object-storage';
 import { handleWebDavAction } from '../webdav';
 import { handleCommerceRequest } from '../commerce';
 
@@ -1231,7 +1231,7 @@ export const onRequest = async (context: any) => {
       const expectedRevision = Number(body?.expectedRevision);
       if (!Number.isInteger(expectedRevision) || expectedRevision < 0) return Response.json({ success: false, error: '个人媒体版本号无效，请重新加载' }, { status: 400, headers });
       const definitions: Record<string, string[]> = {
-        books: ['id','title','author','format','cover','description','fileSize','fileUrl','createdAt','updatedAt'],
+        books: ['id','title','author','format','cover','description','fileSize','fileUrl','displayFilename','createdAt','updatedAt'],
         photos: ['id','title','url','thumbnail','category','folderId','folderName','width','height','description','createdAt','updatedAt'],
         media: ['id','type','title','artist','src','cover','duration','fileSize','uploadedAt','createdAt','updatedAt'],
       };
@@ -1288,7 +1288,7 @@ export const onRequest = async (context: any) => {
         updatedAt INTEGER NOT NULL
       )`).run();
       const publicFields = ['posts', 'books', 'photos', 'photoFolders', 'media', 'products', 'websites', 'systemSettings', 'themeMode'];
-      const publicSettings = ['siteName', 'themeColor', 'customPaletteBg', 'fullBackgroundUrl', 'avatarUrl', 'heroIntroImage', 'heroBadge', 'heroTitle', 'heroSubtitle', 'transparentCards', 'bottomButtonsEnabled', 'hideNonBlogForGuests', 'allowUserMediaManagement', 'globalTheme', 'deviceView', 'timezone'];
+      const publicSettings = ['siteName', 'headerTagline', 'shopCategories', 'themeColor', 'customPaletteBg', 'fullBackgroundUrl', 'avatarUrl', 'heroIntroImage', 'heroBadge', 'heroTitle', 'heroSubtitle', 'transparentCards', 'bottomButtonsEnabled', 'hideNonBlogForGuests', 'allowUserMediaManagement', 'globalTheme', 'deviceView', 'timezone'];
       const cleanRecords = (value: unknown, kind: string): any[] => {
         if (!Array.isArray(value)) return [];
         const adminUsername = String(env.ADMIN_USERNAME || 'fox').trim().toLowerCase();
@@ -1304,7 +1304,7 @@ export const onRequest = async (context: any) => {
         }).map((item: any) => {
           const allowed: Record<string, string[]> = {
             posts: ['id','title','summary','content','category','tags','cover','author','views','likes','createdAt','updatedAt'],
-            books: ['id','title','author','format','cover','description','fileSize','fileUrl','createdAt','updatedAt'],
+            books: ['id','title','author','format','cover','description','fileSize','fileUrl','displayFilename','createdAt','updatedAt'],
             photos: ['id','title','url','thumbnail','category','folderId','folderName','width','height','description','createdAt','updatedAt'],
             photoFolders: ['id','name','createdAt'],
             media: ['id','type','title','artist','src','cover','duration','fileSize','uploadedAt','createdAt','updatedAt'],
@@ -1455,7 +1455,7 @@ export const onRequest = async (context: any) => {
       if (data && typeof data === 'object') {
         for (const key of ['posts', 'books', 'photos', 'photoFolders', 'media', 'products', 'websites', 'themeMode', 'webDavBackups', 'webDavMeta', 'webDavConfig']) delete data[key];
         if (data.systemSettings && typeof data.systemSettings === 'object') {
-          for (const key of ['siteName','themeColor','customPaletteBg','fullBackgroundUrl','avatarUrl','heroIntroImage','heroBadge','heroTitle','heroSubtitle','transparentCards','bottomButtonsEnabled','hideNonBlogForGuests','globalTheme','deviceView','timezone']) delete data.systemSettings[key];
+          for (const key of ['siteName','headerTagline','shopCategories','themeColor','customPaletteBg','fullBackgroundUrl','avatarUrl','heroIntroImage','heroBadge','heroTitle','heroSubtitle','transparentCards','bottomButtonsEnabled','hideNonBlogForGuests','globalTheme','deviceView','timezone']) delete data.systemSettings[key];
         }
       }
       return new Response(JSON.stringify({
@@ -1474,7 +1474,7 @@ export const onRequest = async (context: any) => {
         // Keep the legacy authenticated/private channel separate from canonical public site content and WebDAV.
         for (const key of ['posts', 'books', 'photos', 'photoFolders', 'media', 'products', 'websites', 'themeMode', 'webDavBackups', 'webDavMeta', 'webDavConfig']) delete payload[key];
         if (payload.systemSettings && typeof payload.systemSettings === 'object') {
-          for (const key of ['siteName','themeColor','customPaletteBg','fullBackgroundUrl','avatarUrl','heroIntroImage','heroBadge','heroTitle','heroSubtitle','transparentCards','bottomButtonsEnabled','hideNonBlogForGuests','globalTheme','deviceView','timezone']) delete payload.systemSettings[key];
+          for (const key of ['siteName','headerTagline','shopCategories','themeColor','customPaletteBg','fullBackgroundUrl','avatarUrl','heroIntroImage','heroBadge','heroTitle','heroSubtitle','transparentCards','bottomButtonsEnabled','hideNonBlogForGuests','globalTheme','deviceView','timezone']) delete payload.systemSettings[key];
         }
         const stringified = JSON.stringify(payload);
         let syncedToCloud = false;
@@ -1674,10 +1674,114 @@ export const onRequest = async (context: any) => {
     }
   }
 
+  if ((path === '/storage/usage' || path === '/storage/files') && request.method === 'GET') {
+    if (!await hasAdminSession(request, env)) return Response.json({ success: false, error: '仅管理员可查看存储用量与文件' }, { status: 401, headers });
+    const bucket = env.R2_BUCKET || env.R2 || env.BUCKET;
+    try {
+      if (!bucket) {
+        let d1FallbackBytes = 0, d1FallbackFiles = 0;
+        if (env.DB) try {
+          const totals = await env.DB.prepare('SELECT COALESCE(SUM(size), 0) AS bytes, COUNT(*) AS files FROM fox3_files').first();
+          d1FallbackBytes = Number(totals?.bytes || 0); d1FallbackFiles = Number(totals?.files || 0);
+        } catch {}
+        if (path === '/storage/files') {
+          if (!env.DB) return Response.json({ success: false, error: '未绑定 R2 Bucket，也没有 D1 可列举回退文件' }, { status: 503, headers });
+          let rows: any[] = [];
+          try { const result = await env.DB.prepare('SELECT key,name,size,type,uploadedAt FROM fox3_files ORDER BY uploadedAt DESC LIMIT 500').all(); rows = result?.results || []; } catch {}
+          const objects = rows.map((row: any) => ({ key: String(row.key), name: String(row.name || row.key), size: Number(row.size || 0), uploadedAt: Number(row.uploadedAt || 0), contentType: String(row.type || 'application/octet-stream'), url: `/api/files/${encodeURIComponent(String(row.key))}` }));
+          return Response.json({ success: true, objects, truncated: false, cursor: null }, { headers: { ...Object.fromEntries(headers.entries()), 'Cache-Control': 'no-store' } });
+        }
+        return Response.json({ success: true, provider: 'none', r2Bytes: 0, r2Files: 0, d1FallbackBytes, d1FallbackFiles, exact: true,
+          note: '未绑定 R2；统计显示 D1 中的回退文件字节。外部 COS/OSS/S3 与浏览器临时文件不包含在此统计。' }, { headers: { ...Object.fromEntries(headers.entries()), 'Cache-Control': 'no-store' } });
+      }
+      if (path === '/storage/files') {
+        const cursor = url.searchParams.get('cursor') || undefined;
+        const result = await bucket.list({ limit: 100, ...(cursor ? { cursor } : {}) });
+        const objects = (result.objects || []).map((object: any) => {
+          const encoded = object.customMetadata?.originalName;
+          let originalName = String(encoded || object.key);
+          try { originalName = decodeURIComponent(originalName); } catch {}
+          return { key: String(object.key), name: originalName, size: Number(object.size || 0), uploadedAt: object.uploaded?.getTime?.() || null,
+            contentType: String(object.httpMetadata?.contentType || 'application/octet-stream'), url: `/api/files/${encodeURIComponent(String(object.key))}` };
+        });
+        return Response.json({ success: true, objects, truncated: Boolean(result.truncated), cursor: result.truncated ? result.cursor : null }, { headers: { ...Object.fromEntries(headers.entries()), 'Cache-Control': 'no-store' } });
+      }
+      let bytes = 0, objects = 0, pages = 0, cursor: string | undefined;
+      do {
+        const result = await bucket.list({ limit: 1000, ...(cursor ? { cursor } : {}) });
+        for (const object of result.objects || []) { bytes += Number(object.size || 0); objects++; }
+        pages++;
+        cursor = result.truncated ? result.cursor : undefined;
+      } while (cursor && pages < 100);
+      let d1FallbackBytes = 0, d1FallbackFiles = 0;
+      if (env.DB) try {
+        const totals = await env.DB.prepare('SELECT COALESCE(SUM(size), 0) AS bytes, COUNT(*) AS files FROM fox3_files').first();
+        d1FallbackBytes = Number(totals?.bytes || 0); d1FallbackFiles = Number(totals?.files || 0);
+      } catch { /* D1 fallback table may not exist on this deployment. */ }
+      return Response.json({ success: true, provider: 'R2', r2Bytes: bytes, r2Files: objects, d1FallbackBytes, d1FallbackFiles,
+        exact: !cursor, note: cursor ? '对象总量超过本次统计页数上限，当前结果为部分统计。' : 'R2 字节来自 Bucket 全量对象枚举；D1 回退文件单独计数，不与 R2 重复相加。' }, { headers: { ...Object.fromEntries(headers.entries()), 'Cache-Control': 'no-store' } });
+    } catch (error: any) {
+      console.error('[Storage] bucket listing failed:', String(error?.message || error).slice(0, 240));
+      return Response.json({ success: false, error: '无法枚举 R2 Bucket；请检查 R2 绑定权限与可用性。' }, { status: 503, headers });
+    }
+  }
+
   // Universal file stream from R2, configured external object storage, D1, KV, or memory.
   if (path.startsWith('/files/')) {
-    const key = path.replace('/files/', '');
+    let key = path.replace('/files/', '');
+    try { key = decodeURIComponent(key); } catch {}
     const isDownload = url.searchParams.get('download') === '1';
+
+    if (request.method === 'DELETE') {
+      if (!await hasAdminSession(request, env)) return Response.json({ success: false, error: '仅管理员可删除本站文件' }, { status: 401, headers });
+      let removed = false;
+      const bucket = env.R2_BUCKET || env.R2 || env.BUCKET;
+      if (bucket) try { await bucket.delete(key); removed = true; } catch (error: any) {
+        console.warn('[Storage] R2 object delete failed:', String(error?.message || error).slice(0, 180));
+        return Response.json({ success: false, error: 'R2 文件删除失败；未清理媒体目录' }, { status: 502, headers });
+      }
+      const external = getExternalObjectStoreConfig(env);
+      if (external) try { await deleteExternalObject(external, key); removed = true; } catch (error: any) {
+        console.warn('[Storage] external object delete failed:', String(error?.message || error).slice(0, 180));
+        return Response.json({ success: false, error: `${external.provider.toUpperCase()} 文件删除失败；请检查对象存储删除权限` }, { status: 502, headers });
+      }
+      if (env.DB) {
+        try { await env.DB.prepare('DELETE FROM fox3_files WHERE key = ?').bind(key).run(); removed = true; } catch {}
+        const pathRef = `/api/files/${encodeURIComponent(key)}`;
+        try {
+          const published = await env.DB.prepare('SELECT value FROM fox3_site_content WHERE id = ?').bind('published').first();
+          if (published?.value) {
+            const data = JSON.parse(String(published.value));
+            const clear = (value: any) => typeof value === 'string' ? value.split(pathRef).join('') : value;
+            for (const post of data.posts || []) { if (post.cover === pathRef) post.cover = ''; if (typeof post.content === 'string') post.content = clear(post.content); }
+            for (const book of data.books || []) { if (book.fileUrl === pathRef) book.fileUrl = ''; if (book.cover === pathRef) book.cover = ''; }
+            data.photos = (data.photos || []).filter((item: any) => item.url !== pathRef);
+            data.media = (data.media || []).filter((item: any) => item.src !== pathRef);
+            for (const product of data.products || []) product.images = (product.images || []).filter((image: string) => image !== pathRef);
+            for (const site of data.websites || []) if (site.poster === pathRef) site.poster = '';
+            await env.DB.prepare('UPDATE fox3_site_content SET value = ?, revision = revision + 1, updatedAt = ? WHERE id = ?').bind(JSON.stringify(data), Date.now(), 'published').run();
+          }
+          const users = await env.DB.prepare('SELECT userId, value FROM fox3_user_media').all();
+          for (const row of users?.results || []) {
+            try {
+              const data = JSON.parse(String(row.value || '{}'));
+              data.books = (data.books || []).filter((item: any) => item.fileUrl !== pathRef);
+              data.photos = (data.photos || []).filter((item: any) => item.url !== pathRef);
+              data.media = (data.media || []).filter((item: any) => item.src !== pathRef);
+              await env.DB.prepare('UPDATE fox3_user_media SET value = ?, revision = revision + 1, updatedAt = ? WHERE userId = ?').bind(JSON.stringify(data), Date.now(), row.userId).run();
+            } catch {}
+          }
+        } catch (error: any) {
+          console.warn('[Storage] metadata cleanup failed:', String(error?.message || error).slice(0, 180));
+        }
+      }
+      const kv = env.KV || env.FOX3_KV;
+      if (kv) try { await kv.delete(`fox3_file_${key}`); removed = true; } catch {}
+      const memory = (globalThis as any).__fox3_file_store;
+      if (memory?.[key]) { delete memory[key]; removed = true; }
+      return Response.json({ success: true, removed, key, message: '文件已从可用存储中删除，并清理了站点媒体目录中的引用。' }, { headers: { ...Object.fromEntries(headers.entries()), 'Cache-Control': 'no-store' } });
+    }
+    if (request.method !== 'GET' && request.method !== 'HEAD') return new Response('Method not allowed', { status: 405, headers });
 
     // 1. Try fetch from R2
     if (env.R2_BUCKET) {

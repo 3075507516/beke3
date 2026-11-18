@@ -62,6 +62,14 @@ async function ensureCommerceTables(db: any): Promise<void> {
     refundedAt INTEGER
   )`).run();
   await db.prepare('CREATE INDEX IF NOT EXISTS fox3_orders_user_created ON fox3_orders(userId, createdAt DESC)').run();
+  // Older D1 deployments may have run commerce migration 0002 but not 0003.
+  // Add the nullable soft-delete column idempotently so order, chat and policy
+  // requests remain usable while the formal migration is being applied.
+  const orderColumns = await db.prepare('PRAGMA table_info(fox3_orders)').all();
+  if (!(orderColumns?.results || []).some((column: any) => column.name === 'deletedAt')) {
+    await db.prepare('ALTER TABLE fox3_orders ADD COLUMN deletedAt INTEGER').run();
+  }
+  await db.prepare('CREATE INDEX IF NOT EXISTS fox3_orders_deleted ON fox3_orders(deletedAt, createdAt DESC)').run();
   await db.prepare(`CREATE TABLE IF NOT EXISTS fox3_payment_events (
     eventId TEXT NOT NULL,
     provider TEXT NOT NULL,
@@ -454,7 +462,16 @@ export async function handleCommerceRequest(
       const messages = await env.DB.prepare(`SELECT COUNT(*) AS count FROM fox3_chat_messages m JOIN fox3_conversations c ON c.id = m.conversationId
         WHERE m.readAt IS NULL AND m.senderRole <> ? AND (? = 1 OR c.userId = ?)`)
         .bind(isAdmin ? 'admin' : 'user', isAdmin ? 1 : 0, actorId).first();
-      return json({ success: true, count: Number(unread?.count || 0) + Number(messages?.count || 0) }, 200, headers);
+      const latest = await env.DB.prepare(`SELECT kind, refId, title FROM fox3_notifications
+        WHERE recipientRole = ? AND recipientId = ? AND readAt IS NULL ORDER BY createdAt DESC LIMIT 1`).bind(role, recipient).first();
+      const latestMessage = await env.DB.prepare(`SELECT c.id AS conversationId FROM fox3_chat_messages m JOIN fox3_conversations c ON c.id = m.conversationId
+        WHERE m.readAt IS NULL AND m.senderRole <> ? AND (? = 1 OR c.userId = ?) ORDER BY m.createdAt DESC LIMIT 1`)
+        .bind(isAdmin ? 'admin' : 'user', isAdmin ? 1 : 0, actorId).first();
+      const latestIsOrder = String(latest?.kind || '').startsWith('order_') || String(latest?.kind || '').startsWith('payment_');
+      const latestKind = latestIsOrder ? 'orders' : latest ? 'chat' : latestMessage ? 'chat' : 'orders';
+      return json({ success: true, count: Number(unread?.count || 0) + Number(messages?.count || 0), target: latestKind,
+        refId: latestKind === 'chat' ? String(latest?.refId || latestMessage?.conversationId || '') : String(latest?.refId || ''),
+        title: String(latest?.title || '') }, 200, headers);
     }
     if (path === '/notifications/read' && request.method === 'POST') {
       const role = isAdmin ? 'admin' : 'user';
@@ -559,7 +576,8 @@ export async function handleCommerceRequest(
     }
     return json({ success: false, error: 'Method not allowed' }, 405, headers);
   } catch (error: any) {
-    console.error('[Commerce] API failure:', String(error?.stack || error?.message || error).slice(0, 700));
-    return json({ success: false, error: '订单、对话或页面数据库操作失败；请检查 D1 绑定与迁移' }, 503, headers);
+    const detail = String(error?.message || error || 'unknown').replace(/[\r\n\t]+/g, ' ').slice(0, 240);
+    console.error('[Commerce] API failure:', String(error?.stack || detail).slice(0, 700));
+    return json({ success: false, error: `D1 数据库操作失败：${detail}。请确认 Pages 已绑定 DB，按顺序应用 migrations/0002_commerce.sql 与 migrations/0003_order_trash.sql。` }, 503, headers);
   }
 }

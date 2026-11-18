@@ -109,6 +109,8 @@ export const resolveFileUrl = async (urlOrKey: string): Promise<string> => {
 // Default initial data for fresh deployment
 export const DEFAULT_SETTINGS: SystemSettings = {
   siteName: 'fox3 博客',
+  headerTagline: 'CLOUDFLARE NATIVE • FOX3',
+  shopCategories: ['实体周边', '电子书', '数码配件', '服饰鞋包', '家居生活', '文创文具', '虚拟商品', '课程培训', '会员服务', '软件工具', '摄影器材', '礼品收藏', '食品饮品', '咨询服务'],
   themeColor: '#0ea5e9', // Sky blue modern accent
   customPaletteBg: '#f8fafc',
   fullBackgroundUrl: '',
