@@ -6,6 +6,7 @@ type CommerceAuth = {
   isAdmin: (request: Request) => Promise<boolean>;
   getUser: (request: Request) => Promise<UserIdentity | null>;
   sendMail: MailSender;
+  defaultAdminEmail?: string;
 };
 
 const PAGE_KEYS = ['refund', 'privacy', 'terms', 'contact'] as const;
@@ -143,17 +144,26 @@ function rowToOrder(row: any, admin = false): any {
 async function loadOrder(db: any, id: string): Promise<any | null> {
   return db.prepare('SELECT * FROM fox3_orders WHERE id = ? LIMIT 1').bind(id).first();
 }
-async function notifyPaid(db: any, row: any, sendMail: MailSender): Promise<void> {
+async function notifyPaid(db: any, row: any, sendMail: MailSender, defaultEmail = ''): Promise<void> {
   await addNotification(db, 'admin', '', 'payment_succeeded', '新订单已支付', `${row.username} 已支付订单 ${row.id}，金额 ${(Number(row.amountMinor) / 100).toFixed(2)} ${row.currency}。`, String(row.id), `payment-paid:${row.id}`);
   const prefs = await db.prepare('SELECT adminEmail, notifyEmail FROM fox3_payment_preferences WHERE id = ?').bind('default').first();
-  const to = text(prefs?.adminEmail, 254);
-  if (Number(prefs?.notifyEmail) === 1 && to) {
+  const to = text(prefs?.adminEmail, 254) || text(defaultEmail, 254);
+  if (to) {
     const subject = `订单已支付：${row.id}`;
     const body = `用户 ${row.username} 的订单 ${row.id} 已由支付服务端验证为到账。\n商品：${row.productName}\n数量：${row.quantity}\n金额：${(Number(row.amountMinor) / 100).toFixed(2)} ${row.currency}\n请登录管理页面处理发货。`;
     try { await sendMail(to, subject, body, `<div style="white-space:pre-wrap">${body.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>`); } catch {}
   }
 }
-async function applyWebhook(db: any, provider: string, event: any, sendMail: MailSender): Promise<Response> {
+async function notifyOrderCreated(db: any, row: any, sendMail: MailSender, defaultEmail = ''): Promise<void> {
+  const pending = row.status === 'pending';
+  const title = pending ? '新订单待支付' : '新订单未支付';
+  const body = `订单状态：${pending ? '未支付 / 待支付' : '未支付 / 支付初始化失败'}\n订单号：${row.id}\n用户：${row.username}\n商品：${row.productName}\n数量：${row.quantity}\n金额：${(Number(row.amountMinor) / 100).toFixed(2)} ${row.currency}\n请登录管理页面查看订单。`;
+  await addNotification(db, 'admin', '', pending ? 'order_unpaid' : 'order_payment_failed', title, body, String(row.id), `order-created:${row.id}`);
+  const prefs = await db.prepare('SELECT adminEmail FROM fox3_payment_preferences WHERE id = ?').bind('default').first();
+  const to = text(prefs?.adminEmail, 254) || text(defaultEmail, 254);
+  if (to) try { await sendMail(to, `${title}：${row.id}`, body, `<div style="white-space:pre-wrap">${body.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>`); } catch (error) { console.warn('[Commerce] order email delivery failed:', String((error as any)?.message || error).slice(0, 160)); }
+}
+async function applyWebhook(db: any, provider: string, event: any, sendMail: MailSender, defaultEmail = ''): Promise<Response> {
   if (!event || !event.eventId || (!event.orderId && !event.paymentId)) return new Response('Invalid event', { status: 400 });
   const row = event.orderId ? await loadOrder(db, String(event.orderId)) : null;
   const mappedRow = row || await db.prepare('SELECT * FROM fox3_orders WHERE providerOrderId = ? OR providerPaymentId = ? LIMIT 1')
@@ -179,7 +189,7 @@ async function applyWebhook(db: any, provider: string, event: any, sendMail: Mai
     await db.prepare(`UPDATE fox3_orders SET status = 'paid', providerPaymentId = COALESCE(?, providerPaymentId), paidAt = COALESCE(paidAt, ?), updatedAt = ?
       WHERE id = ? AND status NOT IN ('refunded','refund_pending')`).bind(paymentId, now, now, order.id).run();
     const fresh = await loadOrder(db, String(order.id));
-    if (fresh?.status === 'paid' && !order.paidAt) await notifyPaid(db, fresh, sendMail);
+    if (fresh?.status === 'paid' && !order.paidAt) await notifyPaid(db, fresh, sendMail, defaultEmail);
   } else if (event.status === 'failed') {
     if (order.status === 'refund_pending') {
       await db.prepare(`UPDATE fox3_orders SET status = 'paid', updatedAt = ? WHERE id = ? AND status = 'refund_pending'`).bind(now, order.id).run();
@@ -205,8 +215,8 @@ export async function handleCommerceRequest(
   headers: Headers,
   auth: CommerceAuth,
 ): Promise<Response | null> {
-  const matchOrder = path.match(/^\/orders\/([^/]+)(?:\/(cancel|capture|ship|refund))?$/);
-  const isCommercePath = path === '/orders' || Boolean(matchOrder) || path.startsWith('/chat/') || path.startsWith('/notifications') || path === '/legal-pages' || path === '/payment-settings' || path.startsWith('/payments/webhook/');
+  const matchOrder = path.match(/^\/orders\/([^/]+)(?:\/(cancel|capture|ship|refund|restore))?$/);
+  const isCommercePath = path === '/orders' || path === '/orders/trash' || Boolean(matchOrder) || path.startsWith('/chat/') || path.startsWith('/notifications') || path === '/legal-pages' || path === '/payment-settings' || path === '/payment-config-status' || path.startsWith('/payments/webhook/');
   if (!isCommercePath) return null;
   if (!env.DB) return json({ success: false, error: '此功能需要已绑定且迁移成功的 Cloudflare D1（DB）数据库' }, 503, headers);
   try {
@@ -226,7 +236,7 @@ export async function handleCommerceRequest(
       if (event.status === 'ignored') return provider === 'wechat'
         ? json({ code: 'SUCCESS', message: '成功' }, 200, headers)
         : new Response(provider === 'alipay' ? 'success' : 'OK', { status: 200 });
-      const response = await applyWebhook(env.DB, provider, event, auth.sendMail);
+      const response = await applyWebhook(env.DB, provider, event, auth.sendMail, auth.defaultAdminEmail || '');
       if (response.ok && provider === 'wechat') return json({ code: 'SUCCESS', message: '成功' }, 200, headers);
       if (response.ok && provider === 'alipay') return new Response('success', { status: 200 });
       return response;
@@ -239,8 +249,15 @@ export async function handleCommerceRequest(
 
     if (path === '/orders' && request.method === 'GET') {
       const result = isAdmin
-        ? await env.DB.prepare('SELECT * FROM fox3_orders ORDER BY createdAt DESC LIMIT 500').all()
-        : await env.DB.prepare('SELECT * FROM fox3_orders WHERE userId = ? ORDER BY createdAt DESC LIMIT 100').bind(actorId).all();
+        ? await env.DB.prepare('SELECT * FROM fox3_orders WHERE deletedAt IS NULL ORDER BY createdAt DESC LIMIT 500').all()
+        : await env.DB.prepare('SELECT * FROM fox3_orders WHERE userId = ? AND deletedAt IS NULL ORDER BY createdAt DESC LIMIT 100').bind(actorId).all();
+      return json({ success: true, orders: (result?.results || []).map((row: any) => rowToOrder(row, isAdmin)) }, 200, headers);
+    }
+
+    if (path === '/orders/trash' && request.method === 'GET') {
+      const result = isAdmin
+        ? await env.DB.prepare('SELECT * FROM fox3_orders WHERE deletedAt IS NOT NULL ORDER BY deletedAt DESC LIMIT 500').all()
+        : await env.DB.prepare('SELECT * FROM fox3_orders WHERE userId = ? AND deletedAt IS NOT NULL ORDER BY deletedAt DESC LIMIT 100').bind(actorId).all();
       return json({ success: true, orders: (result?.results || []).map((row: any) => rowToOrder(row, isAdmin)) }, 200, headers);
     }
 
@@ -281,6 +298,7 @@ export async function handleCommerceRequest(
         VALUES (?,?,?,?,?,?,?,?,? ,?,'pending',?,?,?,?,?,?,?,?)`)
         .bind(id, user.id, user.username, productId, text(product.name, 250), quantity, priceCents, amountMinor, 'CNY', provider,
           customerName, customerPhone, customerEmail.toLowerCase(), shippingAddress, discountRate ? couponCode : '', discountMinor, now, now).run();
+      await notifyOrderCreated(env.DB, await loadOrder(env.DB, id), auth.sendMail, auth.defaultAdminEmail || '');
       const draft = { id, amountMinor, currency: 'CNY', productName: text(product.name, 250), quantity };
       try {
         const payment = await createPayment(provider as PaymentProvider, draft, env, new URL(request.url).origin);
@@ -291,7 +309,13 @@ export async function handleCommerceRequest(
       } catch (error: any) {
         await env.DB.prepare(`UPDATE fox3_orders SET status = 'failed', updatedAt = ? WHERE id = ? AND status = 'pending'`).bind(Date.now(), id).run();
         console.warn(`[Payment] ${provider} create payment failed for order ${id}: ${String(error?.message || error).slice(0, 180)}`);
-        return json({ success: false, error: String(error?.publicMessage || error?.message || '支付服务当前不可用；订单未付款，请检查服务端商户配置').slice(0, 300), orderId: id }, 502, headers);
+        const saved = await loadOrder(env.DB, id);
+        const body = `订单状态：未支付（支付初始化失败）\n订单号：${id}\n用户：${saved.username}\n商品：${saved.productName}\n数量：${saved.quantity}\n金额：${(Number(saved.amountMinor) / 100).toFixed(2)} ${saved.currency}\n订单已保存在回收站外的订单列表，可稍后处理。`;
+        await addNotification(env.DB, 'admin', '', 'order_payment_failed', '订单未支付（支付初始化失败）', body, id, `payment-start-failed:${id}`);
+        const prefs = await env.DB.prepare('SELECT adminEmail FROM fox3_payment_preferences WHERE id = ?').bind('default').first();
+        const recipient = text(prefs?.adminEmail, 254) || text(auth.defaultAdminEmail, 254);
+        if (recipient) try { await auth.sendMail(recipient, `订单未支付（支付初始化失败）：${id}`, body, `<div style="white-space:pre-wrap">${body.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>`); } catch {}
+        return json({ success: true, order: rowToOrder(saved), payment: null, paymentError: String(error?.publicMessage || error?.message || '支付服务当前不可用；订单已保存为未支付').slice(0, 300) }, 201, headers);
       }
     }
 
@@ -300,6 +324,15 @@ export async function handleCommerceRequest(
       const row = await loadOrder(env.DB, decodeURIComponent(orderId));
       if (!row) return json({ success: false, error: '订单不存在' }, 404, headers);
       if (!isAdmin && row.userId !== actorId) return json({ success: false, error: '无权访问此订单' }, 403, headers);
+      if (action === 'restore' && request.method === 'POST') {
+        await env.DB.prepare('UPDATE fox3_orders SET deletedAt = NULL, updatedAt = ? WHERE id = ?').bind(Date.now(), row.id).run();
+        return json({ success: true, order: rowToOrder(await loadOrder(env.DB, row.id), isAdmin) }, 200, headers);
+      }
+      if (!action && request.method === 'DELETE') {
+        const now = Date.now();
+        await env.DB.prepare('UPDATE fox3_orders SET deletedAt = ?, updatedAt = ? WHERE id = ? AND deletedAt IS NULL').bind(now, now, row.id).run();
+        return json({ success: true, message: '订单已移入回收站' }, 200, headers);
+      }
       if (!action && request.method === 'GET') return json({ success: true, order: rowToOrder(row, isAdmin) }, 200, headers);
       if (action === 'cancel' && request.method === 'POST') {
         if (isAdmin || row.status !== 'pending') return json({ success: false, error: '仅订单本人可取消尚未支付的订单' }, 409, headers);
@@ -358,6 +391,17 @@ export async function handleCommerceRequest(
       return json({ success: false, error: 'Method not allowed' }, 405, headers);
     }
 
+    if (path === '/payment-config-status' && request.method === 'GET') {
+      if (!isAdmin) return json({ success: false, error: '仅管理员可查看支付配置状态' }, 403, headers);
+      const groups: Record<string, string[]> = {
+        alipay: ['ALIPAY_APP_ID','ALIPAY_PRIVATE_KEY','ALIPAY_PUBLIC_KEY'],
+        wechat: ['WECHAT_MCHID','WECHAT_APPID','WECHAT_SERIAL_NO','WECHAT_PRIVATE_KEY','WECHAT_API_V3_KEY','WECHAT_PLATFORM_CERT','WECHAT_NOTIFY_URL'],
+        stripe: ['STRIPE_SECRET_KEY','STRIPE_WEBHOOK_SECRET'],
+        paypal: ['PAYPAL_CLIENT_ID','PAYPAL_CLIENT_SECRET','PAYPAL_WEBHOOK_ID'],
+      };
+      const providers = Object.fromEntries(Object.entries(groups).map(([provider, names]) => [provider, Object.fromEntries(names.map(name => [name, Boolean(String(env[name] || '').trim())]))]));
+      return json({ success: true, providers, note: '仅返回变量是否已配置，不返回密钥值；此状态不验证商户账号、权限或收款可用性。万里汇当前尚未接入支付适配器。' }, 200, headers);
+    }
     if (path === '/payment-settings') {
       if (!isAdmin) return json({ success: false, error: '仅管理员可查看和修改支付通知设置' }, 403, headers);
       if (request.method === 'GET') {
@@ -431,6 +475,21 @@ export async function handleCommerceRequest(
         env.DB.prepare('DELETE FROM fox3_conversations WHERE id = ?').bind(conversationId),
       ]);
       return json({ success: true }, 200, headers);
+    }
+    if (path === '/chat/conversations/ensure' && request.method === 'POST') {
+      if (!isAdmin) return json({ success: false, error: '仅管理员可从订单发起对话' }, 403, headers);
+      const body = await request.json() as any;
+      const userId = text(body?.userId, 200);
+      const username = text(body?.username, 120) || '用户';
+      if (!userId) return json({ success: false, error: '订单缺少用户标识，无法打开客服对话' }, 400, headers);
+      let conversation = await env.DB.prepare('SELECT id FROM fox3_conversations WHERE userId = ?').bind(userId).first();
+      if (!conversation) {
+        const id = uuid('chat');
+        const now = Date.now();
+        await env.DB.prepare('INSERT OR IGNORE INTO fox3_conversations (id,userId,username,createdAt,updatedAt) VALUES (?,?,?,?,?)').bind(id, userId, username, now, now).run();
+        conversation = await env.DB.prepare('SELECT id FROM fox3_conversations WHERE userId = ?').bind(userId).first();
+      }
+      return json({ success: true, conversationId: String(conversation?.id || '') }, 200, headers);
     }
     if (path === '/chat/conversations' && request.method === 'GET') {
       if (isAdmin) {
