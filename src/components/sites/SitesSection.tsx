@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { useApp } from '../../context/AppContext';
 import { WebSiteItem } from '../../types';
 import { SafeImage } from '../common/SafeImage';
+import { translateInline } from '../../utils/i18n';
 import {
   Globe,
   Plus,
@@ -13,6 +14,7 @@ import {
   FileText,
   Shield,
   Layers,
+  Download,
 } from 'lucide-react';
 
 export const SitesSection: React.FC = () => {
@@ -22,7 +24,9 @@ export const SitesSection: React.FC = () => {
     currentUser,
     systemSettings,
     uploadFile,
+    locale,
   } = useApp();
+  const tx = (source: string) => translateInline(locale, source);
 
   const isAdmin = currentUser?.role === 'admin';
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -31,8 +35,63 @@ export const SitesSection: React.FC = () => {
   const [sitePoster, setSitePoster] = useState('');
   const [siteDesc, setSiteDesc] = useState('');
   const [isUploadingPoster, setIsUploadingPoster] = useState(false);
+  const [selectedSites, setSelectedSites] = useState<string[]>([]);
 
   const posterInputRef = useRef<HTMLInputElement>(null);
+  const bookmarksInputRef = useRef<HTMLInputElement>(null);
+
+  const downloadText = (filename: string, content: string, type: string) => {
+    const blob = new Blob([content], { type });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a'); anchor.href = url; anchor.download = filename; anchor.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+  const exportSites = (items: WebSiteItem[], format: 'html' | 'txt') => {
+    const safe = items.filter(item => /^https?:\/\//i.test(item.url));
+    if (!safe.length) return;
+    if (format === 'txt') {
+      downloadText(`fox3-bookmarks-${Date.now()}.txt`, safe.map(item => `${item.title}\t${item.url}`).join('\n') + '\n', 'text/plain;charset=utf-8');
+      return;
+    }
+    const esc = (value: string) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    const rows = safe.map(item => `<DT><A HREF="${esc(item.url)}" ADD_DATE="${Math.floor((item.createdAt || Date.now()) / 1000)}">${esc(item.title)}</A>`).join('\n');
+    downloadText(`fox3-bookmarks-${Date.now()}.html`, `<!DOCTYPE NETSCAPE-Bookmark-file-1>\n<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">\n<TITLE>fox3 Bookmarks</TITLE><H1>Bookmarks</H1>\n<DL><p>\n${rows}\n</DL><p>\n`, 'text/html;charset=utf-8');
+  };
+  const importBookmarks = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || []);
+    if (!files.length) return;
+    const imported: Array<{ title: string; url: string; description?: string }> = [];
+    for (const file of files) {
+      const text = await file.text();
+      if (/\.json$/i.test(file.name)) {
+        try {
+          const parsed = JSON.parse(text);
+          const list = Array.isArray(parsed) ? parsed : Array.isArray(parsed.websites) ? parsed.websites : [];
+          for (const item of list) if (item && typeof item.url === 'string') imported.push({ title: String(item.title || item.name || item.url), url: item.url, description: String(item.description || '通过书签文件导入') });
+        } catch { /* Ignore malformed JSON files and continue with other files. */ }
+      } else if (/\.html?$/i.test(file.name) || /<a\b/i.test(text)) {
+        const doc = new DOMParser().parseFromString(text, 'text/html');
+        for (const anchor of Array.from(doc.querySelectorAll('a[href]'))) {
+          const url = anchor.getAttribute('href') || '';
+          if (/^https?:\/\//i.test(url)) imported.push({ title: anchor.textContent?.trim() || url, url, description: '通过浏览器书签 HTML 导入' });
+        }
+      } else {
+        for (const line of text.split(/\r?\n/)) {
+          const match = line.match(/https?:\/\/[^\s<>"']+/i); if (!match) continue;
+          const title = line.slice(0, match.index).replace(/[\t|,; -]+$/, '').trim() || match[0];
+          imported.push({ title, url: match[0], description: '通过 TXT 书签导入' });
+        }
+      }
+    }
+    const existing = new Set(websites.map(item => item.url.replace(/\/$/, '')));
+    const additions: WebSiteItem[] = imported.filter(item => !existing.has(item.url.replace(/\/$/, ''))).map((item, index) => ({
+      id: `site-import-${Date.now()}-${index}-${crypto.randomUUID().slice(0, 8)}`, title: item.title.slice(0, 160), url: item.url,
+      poster: 'https://images.unsplash.com/photo-1579783902614-a3fb3927b675?auto=format&fit=crop&w=800&q=80', description: item.description || '书签导入', createdAt: Date.now(), updatedAt: Date.now(),
+    }));
+    if (additions.length) setWebsites(prev => [...additions, ...prev]);
+    window.alert(`书签导入完成：新增 ${additions.length} 条，跳过/忽略 ${Math.max(0, imported.length - additions.length)} 条。`);
+    event.target.value = '';
+  };
 
   const handleUploadPoster = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -122,13 +181,16 @@ export const SitesSection: React.FC = () => {
           </p>
         </div>
 
-        <button
-          onClick={() => setIsModalOpen(true)}
-          className="flex items-center gap-1.5 px-4 py-2 bg-sky-500 hover:bg-sky-600 text-white text-xs font-semibold rounded-xl shadow-md transition shrink-0 cursor-pointer"
-        >
-          <Plus className="w-4 h-4" />
-          <span>添加新网站/图床</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button onClick={() => setIsModalOpen(true)} className="flex items-center gap-1.5 px-4 py-2 bg-sky-500 hover:bg-sky-600 text-white text-xs font-semibold rounded-xl shadow-md transition shrink-0 cursor-pointer">
+            <Plus className="w-4 h-4" /><span>添加新网站/图床</span>
+          </button>
+          <button onClick={() => exportSites(selectedSites.length ? websites.filter(site => selectedSites.includes(site.id)) : websites, 'html')} disabled={!websites.length} className="flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs disabled:opacity-40"><Download className="h-3.5 w-3.5"/>{tx('下载所选/全部书签 HTML')} ({selectedSites.length || websites.length})</button>
+          <button onClick={() => exportSites(selectedSites.length ? websites.filter(site => selectedSites.includes(site.id)) : websites, 'txt')} disabled={!websites.length} className="flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs disabled:opacity-40">{tx('下载所选/全部 TXT')}</button>
+          <button onClick={() => setSelectedSites(selectedSites.length === websites.length ? [] : websites.map(site => site.id))} className="rounded-xl border px-3 py-2 text-xs">{tx(selectedSites.length === websites.length ? '取消全选' : '全选书签')}</button>
+          <button onClick={() => bookmarksInputRef.current?.click()} className="flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs"><Upload className="h-3.5 w-3.5"/>{tx('上传/导入书签')}</button>
+          <input ref={bookmarksInputRef} type="file" accept=".html,.htm,.txt,.json,text/html,text/plain,application/json" multiple onChange={importBookmarks} className="hidden" />
+        </div>
       </div>
 
       {/* Sites Grid Display as Posters */}
@@ -153,6 +215,8 @@ export const SitesSection: React.FC = () => {
 
               {/* Action floating buttons */}
               <div className="absolute top-3 right-3 flex items-center gap-1.5">
+                <label title="选择此站点加入批量书签文件" className="flex h-8 w-8 cursor-pointer items-center justify-center rounded-xl bg-black/50 text-white"><input type="checkbox" checked={selectedSites.includes(site.id)} onChange={event => setSelectedSites(previous => event.target.checked ? [...previous, site.id] : previous.filter(id => id !== site.id))} className="h-4 w-4 accent-sky-500" aria-label={`选择${site.title}书签`} /></label>
+                <button onClick={() => exportSites([site], 'html')} title="下载此网站书签 HTML" className="rounded-xl bg-black/40 p-2 text-white transition hover:bg-sky-600"><Download className="h-3.5 w-3.5"/></button>
                 <a
                   href={site.url}
                   target="_blank"

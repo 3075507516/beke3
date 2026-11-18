@@ -111,11 +111,7 @@ export const HeroIntro: React.FC = () => {
           <div className="flex flex-wrap items-center gap-3 pt-2">
             <div className="flex items-center gap-1.5 text-xs font-medium text-white/90 bg-black/40 backdrop-blur-md px-3 py-1.5 rounded-xl border border-white/20 shadow-sm">
               <HardDrive className="w-3.5 h-3.5 text-sky-400" />
-              <span>
-                存储使用:{' '}
-                {((systemSettings.usedCapacityBytes || 0) / (1024 * 1024)).toFixed(2)} MB /{' '}
-                {((systemSettings.totalCapacityBytes || 10737418240) / (1024 * 1024 * 1024)).toFixed(0)} GB
-              </span>
+              <span>真实 R2 用量与文件管理请查看管理员设置</span>
             </div>
 
             <div className="flex items-center gap-1.5 text-xs font-medium text-white/90 bg-black/40 backdrop-blur-md px-3 py-1.5 rounded-xl border border-white/20 shadow-sm">

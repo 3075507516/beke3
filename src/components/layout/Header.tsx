@@ -58,6 +58,7 @@ export const Header: React.FC<HeaderProps> = ({
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [unreadTarget, setUnreadTarget] = useState<{ target: 'orders' | 'chat'; refId?: string }>({ target: 'chat' });
 
   // Check admin privileges
   const isAdmin = currentUser?.role === 'admin';
@@ -110,7 +111,10 @@ export const Header: React.FC<HeaderProps> = ({
       try {
         const response = await fetch('/api/notifications/unread', { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' });
         const result = await response.json();
-        if (active && response.ok && result.success) setUnreadCount(Math.max(0, Number(result.count) || 0));
+        if (active && response.ok && result.success) {
+          setUnreadCount(Math.max(0, Number(result.count) || 0));
+          setUnreadTarget({ target: result.target === 'orders' ? 'orders' : 'chat', refId: String(result.refId || '') });
+        }
       } catch {
         if (active) setUnreadCount(0);
       }
@@ -140,7 +144,7 @@ export const Header: React.FC<HeaderProps> = ({
                 {systemSettings.siteName}
               </span>
               <span className="block text-[10px] font-mono tracking-wider uppercase text-slate-400 mt-1">
-                Cloudflare Native • fox3
+                {systemSettings.headerTagline || 'CLOUDFLARE NATIVE • FOX3'}
               </span>
             </div>
           </div>
@@ -205,12 +209,18 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 onClick={() => {
                   setCurrentTab('shop');
-                  try { window.sessionStorage.setItem('fox3-open-messages', '1'); } catch {}
-                  window.dispatchEvent(new Event('fox3-open-messages'));
+                  try {
+                    if (unreadTarget.target === 'orders') window.sessionStorage.setItem('fox3-open-orders', '1');
+                    else {
+                      window.sessionStorage.setItem('fox3-open-messages', '1');
+                      if (unreadTarget.refId) window.sessionStorage.setItem('fox3-open-chat-id', unreadTarget.refId);
+                    }
+                  } catch {}
+                  window.dispatchEvent(new Event(unreadTarget.target === 'orders' ? 'fox3-open-orders' : 'fox3-open-messages'));
                   const token = isAdmin ? getAdminSessionToken() : getUserSessionToken();
                   if (token) void fetch('/api/notifications/read', { method: 'POST', headers: { Authorization: `Bearer ${token}` } }).catch(() => {});
                 }}
-                title={unreadCount ? `有 ${unreadCount} 条未读站内消息，打开商城/对话` : '打开商城与站内对话'}
+                title={unreadCount ? `有 ${unreadCount} 条未读消息，打开${unreadTarget.target === 'orders' ? '订单管理' : '对应客服对话'}` : '打开商城与站内对话'}
                 aria-label={unreadCount ? `${unreadCount} 条未读站内消息` : '站内消息'}
                 className="relative p-2 rounded-lg text-slate-500 hover:text-sky-600 dark:hover:text-sky-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
               >

@@ -92,7 +92,7 @@ function objectUrl(config: ExternalObjectStoreConfig, key: string): URL {
 async function signedHeaders(
   config: ExternalObjectStoreConfig,
   url: URL,
-  method: 'GET' | 'PUT' | 'HEAD',
+  method: 'GET' | 'PUT' | 'HEAD' | 'DELETE',
   contentType?: string,
   originalName?: string,
 ): Promise<Headers> {
@@ -171,6 +171,15 @@ export async function getExternalObject(config: ExternalObjectStoreConfig, key: 
     throw new Error(`${config.provider.toUpperCase()} GET failed (${response.status}): ${detail}`);
   }
   return response;
+}
+
+export async function deleteExternalObject(config: ExternalObjectStoreConfig, key: string): Promise<void> {
+  const url = objectUrl(config, key);
+  const headers = await signedHeaders(config, url, 'DELETE');
+  const response = await fetch(url, { method: 'DELETE', headers, redirect: 'manual' });
+  if (response.status === 404 || response.status === 204 || response.ok) return;
+  const detail = (await response.text()).replace(/\s+/g, ' ').slice(0, 220);
+  throw new Error(`${config.provider.toUpperCase()} DELETE failed (${response.status}): ${detail}`);
 }
 
 export async function probeExternalObjectStore(config: ExternalObjectStoreConfig): Promise<boolean> {

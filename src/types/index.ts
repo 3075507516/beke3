@@ -38,6 +38,7 @@ export interface Book {
   description: string;
   fileSize: number;
   fileUrl: string;
+  displayFilename?: string;
   content?: string; // Text content for in-browser reading
   progress?: number;
   createdAt: number;
@@ -237,6 +238,8 @@ export type DeviceViewMode = 'responsive' | 'mobile';
 
 export interface SystemSettings {
   siteName: string;
+  headerTagline?: string;
+  shopCategories?: string[];
   themeColor: string;
   customPaletteBg?: string;
   fullBackgroundUrl?: string;

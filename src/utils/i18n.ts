@@ -1322,6 +1322,9 @@ const baseI18nDict: Record<BaseLocale, Translations> = {
 };
 
 import { mainstreamPacks, inlineTranslations } from './localeContent';
+import { uiTranslations } from './uiTranslations';
+import { paymentGuideTranslations } from './paymentGuideTranslations';
+import { paymentVariableNotes } from './paymentVariableNotes';
 export const i18nDict: Record<Locale, Translations> = {
   ...baseI18nDict,
   ...Object.fromEntries(Object.entries(mainstreamPacks).map(([locale, pack]) => [locale, {
@@ -1333,7 +1336,7 @@ export const i18nDict: Record<Locale, Translations> = {
 };
 
 export function translateInline(locale: Locale, source: string): string {
-  return inlineTranslations[locale]?.[source] || source;
+  return inlineTranslations[locale]?.[source] || paymentGuideTranslations[locale]?.[source] || paymentVariableNotes[locale]?.[source] || uiTranslations[locale]?.[source] || source;
 }
 
 // Helper function to safely get nested translation key (e.g., 'nav.blog')

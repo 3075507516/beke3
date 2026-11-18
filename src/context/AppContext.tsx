@@ -954,7 +954,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!siteContentReadyRef.current || !getAdminSessionToken()) return;
     if (siteContentTimeoutRef.current) clearTimeout(siteContentTimeoutRef.current);
     siteContentTimeoutRef.current = setTimeout(async () => {
-      const publicSettingKeys = ['siteName', 'themeColor', 'customPaletteBg', 'fullBackgroundUrl', 'avatarUrl', 'heroIntroImage', 'heroBadge', 'heroTitle', 'heroSubtitle', 'transparentCards', 'bottomButtonsEnabled', 'hideNonBlogForGuests', 'allowUserMediaManagement', 'globalTheme', 'deviceView', 'timezone'];
+      const publicSettingKeys = ['siteName', 'headerTagline', 'shopCategories', 'themeColor', 'customPaletteBg', 'fullBackgroundUrl', 'avatarUrl', 'heroIntroImage', 'heroBadge', 'heroTitle', 'heroSubtitle', 'transparentCards', 'bottomButtonsEnabled', 'hideNonBlogForGuests', 'allowUserMediaManagement', 'globalTheme', 'deviceView', 'timezone'];
       const hasLocalUrl = (value: unknown) => typeof value === 'string' && /^(?:idb_file_|data:|blob:)/i.test(value);
       const removeLocalRefs = (value: string) => value.replace(/(?:idb_file_[\w.-]+|data:[^\s"'<>)]*)/gi, '');
       const publicSettings = Object.fromEntries(publicSettingKeys.filter(key => (systemSettings as any)[key] !== undefined && !hasLocalUrl((systemSettings as any)[key])).map(key => [key, (systemSettings as any)[key]]));

@@ -23,6 +23,7 @@ import {
   LayoutGrid,
   FileText,
   FileCode,
+  Pencil,
 } from 'lucide-react';
 
 const formatFileSize = (bytes: number) => {
@@ -32,6 +33,7 @@ const formatFileSize = (bytes: number) => {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MiB (${bytes.toLocaleString()} B)`;
 };
 const bookOriginalFilename = (book: Book) => {
+  if (book.displayFilename?.trim()) return book.displayFilename.trim();
   const fromDescription = book.description?.match(/原文件名[：:]\s*([^\s(]+\.[^\s(]+)/)?.[1];
   const candidate = fromDescription || book.title;
   const titleFilename = candidate.match(/^(.+?\.[a-z0-9]{1,8})(?:\s+\(.+\))?$/i)?.[1];
@@ -288,6 +290,15 @@ export const BookshelfSection: React.FC = () => {
       setBooks(prev => prev.filter(b => b.id !== id || !canManageBook(b)));
       if (readingBook?.id === id) setReadingBook(null);
     }
+  };
+
+  const handleRenameBook = (book: Book, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const nextName = window.prompt('设置书架显示文件名（不会重命名底层云存储对象）：', book.displayFilename || bookOriginalFilename(book))?.trim();
+    if (!nextName) return;
+    const extension = `.${String(book.format || 'txt').toLowerCase()}`;
+    const displayFilename = /\.[a-z0-9]{1,8}$/i.test(nextName) ? nextName : `${nextName}${extension}`;
+    setBooks(previous => previous.map(item => item.id === book.id && canManageBook(item) ? { ...item, displayFilename, updatedAt: Date.now() } : item));
   };
 
   const handleDownload = async (book: Book, e: React.MouseEvent) => {
@@ -646,6 +657,7 @@ export const BookshelfSection: React.FC = () => {
                   >
                     <Download className="w-4 h-4" />
                   </button>
+                  {canManageBook(book) && <button onClick={e => handleRenameBook(book, e)} className="p-2 text-slate-400 hover:text-sky-500" title="重命名电子书显示文件名"><Pencil className="w-4 h-4" /></button>}
                   {canManageBook(book) && (
                     <button
                       onClick={e => handleDeleteBook(book.id, e)}
@@ -692,6 +704,7 @@ export const BookshelfSection: React.FC = () => {
                   >
                     <Download className="w-3.5 h-3.5" />
                   </button>
+                  {canManageBook(book) && <button onClick={e => handleRenameBook(book, e)} className="rounded bg-black/60 p-1 text-white transition hover:bg-sky-600" title="重命名电子书显示文件名"><Pencil className="h-3.5 w-3.5" /></button>}
 
                   {canManageBook(book) && (
                     <button
