@@ -22,6 +22,8 @@ interface Env {
   RESEND_WEBHOOK_SECRET?: string;
   BREVO_API_KEY?: string;
   SENDGRID_API_KEY?: string;
+  SENDCLOUD_API_USER?: string;
+  SENDCLOUD_API_KEY?: string;
   OBJECT_STORAGE_PROVIDER?: string;
   COS_SECRET_ID?: string;
   COS_SECRET_KEY?: string;
@@ -56,11 +58,13 @@ function getOutboundSettings(client: any, env: any): OutboundMailSettings {
       ? 'brevo'
       : env.SENDGRID_API_KEY
         ? 'sendgrid'
-        : smtpHost
-          ? 'smtp'
-          : 'resend';
+        : env.SENDCLOUD_API_KEY
+          ? 'sendcloud'
+          : smtpHost
+            ? 'smtp'
+            : 'resend';
   const providerValue = (explicitProvider || inferredProvider).toLowerCase();
-  const supportedProviders: MailProvider[] = ['smtp', 'resend', 'brevo', 'sendgrid'];
+  const supportedProviders: MailProvider[] = ['smtp', 'resend', 'brevo', 'sendgrid', 'sendcloud'];
   const provider = (supportedProviders.includes(providerValue as MailProvider) ? providerValue : 'smtp') as MailProvider;
   const smtpPort = Number(env.SMTP_PORT || client?.smtpPort || 465);
   const smtpSecurityValue = String(env.SMTP_SECURITY || client?.smtpSecurity || (smtpPort === 465 ? 'ssl' : 'starttls')).toLowerCase();
@@ -69,12 +73,15 @@ function getOutboundSettings(client: any, env: any): OutboundMailSettings {
     ? env.BREVO_API_KEY || client?.apiKey
     : provider === 'sendgrid'
       ? env.SENDGRID_API_KEY || client?.apiKey
+      : provider === 'sendcloud'
+        ? env.SENDCLOUD_API_KEY || client?.apiKey
       : env.RESEND_API_KEY || env.MAIL_API_KEY || client?.apiKey;
   const smtpPass = env.SMTP_PASS || client?.smtpPass || (smtpHost === 'smtp.resend.com' ? (env.RESEND_API_KEY || env.MAIL_API_KEY) : '');
 
   return {
     provider,
     apiKey: typeof apiKey === 'string' ? apiKey : '',
+    apiUser: typeof (env.SENDCLOUD_API_USER || client?.apiUser) === 'string' ? (env.SENDCLOUD_API_USER || client?.apiUser).trim() : '',
     smtpHost,
     smtpPort,
     smtpSecurity,
@@ -1232,7 +1239,7 @@ export const onRequest = async (context: any) => {
       if (!Number.isInteger(expectedRevision) || expectedRevision < 0) return Response.json({ success: false, error: '个人媒体版本号无效，请重新加载' }, { status: 400, headers });
       const definitions: Record<string, string[]> = {
         books: ['id','title','author','format','cover','description','fileSize','fileUrl','displayFilename','createdAt','updatedAt'],
-        photos: ['id','title','url','thumbnail','category','folderId','folderName','width','height','description','createdAt','updatedAt'],
+        photos: ['id','title','url','originalFilename','thumbnail','category','folderId','folderName','width','height','description','createdAt','updatedAt'],
         media: ['id','type','title','artist','src','cover','duration','fileSize','uploadedAt','createdAt','updatedAt'],
       };
       const clean: Record<string, any[]> = {};
@@ -1305,7 +1312,7 @@ export const onRequest = async (context: any) => {
           const allowed: Record<string, string[]> = {
             posts: ['id','title','summary','content','category','tags','cover','author','views','likes','createdAt','updatedAt'],
             books: ['id','title','author','format','cover','description','fileSize','fileUrl','displayFilename','createdAt','updatedAt'],
-            photos: ['id','title','url','thumbnail','category','folderId','folderName','width','height','description','createdAt','updatedAt'],
+            photos: ['id','title','url','originalFilename','thumbnail','category','folderId','folderName','width','height','description','createdAt','updatedAt'],
             photoFolders: ['id','name','createdAt'],
             media: ['id','type','title','artist','src','cover','duration','fileSize','uploadedAt','createdAt','updatedAt'],
             products: ['id','name','description','price','images','category','stock','tags','showcaseId','createdAt','updatedAt'],
@@ -2072,7 +2079,7 @@ export const onRequest = async (context: any) => {
     const outboundSettings = getOutboundSettings({}, env);
     const outboundConfigured = outboundSettings.provider === 'smtp'
       ? Boolean(outboundSettings.smtpHost && outboundSettings.smtpUser && outboundSettings.smtpPass && outboundSettings.senderEmail)
-      : Boolean(outboundSettings.apiKey && outboundSettings.senderEmail);
+      : Boolean(outboundSettings.apiKey && outboundSettings.senderEmail && (outboundSettings.provider !== 'sendcloud' || outboundSettings.apiUser));
     const outboundApiKeyConfigured = outboundSettings.provider !== 'smtp' && Boolean(outboundSettings.apiKey);
     const inboundApiKeyAvailable = Boolean(env.RESEND_API_KEY);
     const inboundServerReady = Boolean(env.DB && env.RESEND_WEBHOOK_SECRET && inboundApiKeyAvailable);
@@ -2090,6 +2097,7 @@ export const onRequest = async (context: any) => {
       outbound: {
         configured: outboundConfigured,
         apiKeyConfigured: outboundApiKeyConfigured,
+        apiUserConfigured: outboundSettings.provider === 'sendcloud' && Boolean(outboundSettings.apiUser),
         senderConfigured: Boolean(outboundSettings.senderEmail),
         provider: outboundSettings.provider,
         connectionProbeSupported: outboundSettings.provider === 'resend',

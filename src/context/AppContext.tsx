@@ -19,7 +19,7 @@ import {
   GlobalThemeMode,
   DeviceViewMode,
 } from '../types';
-import { Locale, i18nDict, getTranslation } from '../utils/i18n';
+import { Locale, i18nDict, getTranslation, normalizeLocale } from '../utils/i18n';
 import { clearAdminSessionToken, getAdminSessionToken } from '../utils/adminSession';
 import { clearUserSessionToken, getUserSessionToken } from '../utils/userSession';
 import { deleteWebDavFile, downloadWebDavFile, listWebDavFiles, testWebDav, uploadWebDavFile } from '../utils/webdav';
@@ -487,18 +487,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   );
 
   const [locale, setLocaleState] = useState<Locale>(() =>
-    loadLocalStorage<Locale>(STORAGE_KEYS.LOCALE, 'zh-CN')
+    normalizeLocale(loadLocalStorage<unknown>(STORAGE_KEYS.LOCALE, 'zh-CN'))
   );
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
     document.documentElement.lang = locale;
-    document.documentElement.dir = locale === 'ar-SA' ? 'rtl' : 'ltr';
+    document.documentElement.dir = 'ltr';
   }, [locale]);
 
   const setLocale = (loc: Locale) => {
-    setLocaleState(loc);
-    saveLocalStorage(STORAGE_KEYS.LOCALE, loc);
+    const normalized = normalizeLocale(loc);
+    setLocaleState(normalized);
+    saveLocalStorage(STORAGE_KEYS.LOCALE, normalized);
   };
 
   const t = useCallback((path: string): string => {

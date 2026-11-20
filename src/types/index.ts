@@ -58,6 +58,7 @@ export interface Photo {
   ownerUsername?: string;
   title: string;
   url: string;
+  originalFilename?: string;
   thumbnail?: string;
   category: string;
   folderId?: string; // photo folder/album id
@@ -170,8 +171,9 @@ export interface WebDavConfig {
 
 export interface EmailSettings {
   enabled: boolean;
-  provider: 'resend' | 'sendgrid' | 'mailgun' | 'ses' | 'brevo' | 'postmark' | 'smtp' | 'custom';
+  provider: 'resend' | 'sendgrid' | 'sendcloud' | 'mailgun' | 'ses' | 'brevo' | 'postmark' | 'smtp' | 'custom';
   apiKey: string;
+  apiUser?: string;
   apiEndpoint: string;
   smtpHost: string;
   smtpPort: number;

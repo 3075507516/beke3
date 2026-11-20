@@ -201,7 +201,7 @@ export const Header: React.FC<HeaderProps> = ({
             <label className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300" title={`切换语言 (当前: ${locale})`}>
               <Globe className="w-3.5 h-3.5" />
               <select aria-label="界面语言" value={locale} onChange={event => setLocale(event.target.value as typeof locale)} className="max-w-[92px] bg-transparent text-[10px] uppercase font-mono focus:outline-none">
-                <option value="zh-CN">简体中文</option><option value="zh-TW">繁體中文</option><option value="en-US">English</option><option value="ja-JP">日本語</option><option value="fr-FR">Français</option><option value="es-ES">Español</option><option value="pt-BR">Português</option><option value="ko-KR">한국어</option><option value="ar-SA">العربية</option><option value="hi-IN">हिन्दी</option>
+                <option value="zh-CN">简体中文</option><option value="zh-TW">繁體中文</option><option value="en-US">English</option>
               </select>
             </label>
 

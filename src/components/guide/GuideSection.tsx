@@ -88,7 +88,7 @@ export const GuideSection: React.FC = () => {
           }`}
         >
           <Server className="w-4 h-4" />
-          <span>{tx('阿里云 ESA / ECS 静态部署（OSS 未接入）')}</span>
+          <span>{tx('阿里云 ESA Pages GitHub 自动部署')}</span>
         </button>
 
         <button
@@ -363,11 +363,27 @@ export const GuideSection: React.FC = () => {
           <div className="space-y-2">
             <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
               <Server className="w-5 h-5 text-orange-500" />
-              <span>阿里云部署说明（OSS 服务端对象存储后备）</span>
+              <span>{tx('阿里云部署说明（ESA Pages GitHub 自动构建 + OSS 后备）')}</span>
             </h3>
             <p className="text-xs text-slate-500">
-              可将前端静态页面放到 OSS/ESA 或 ECS；纯静态托管不会自动运行 Cloudflare Pages Functions、D1/R2/KV，也不会执行下方 OSS 适配器。账户、验证码发信及云同步 API 仍需 Pages Functions 运行环境。
+              {tx('阿里云 ESA Pages 可从 GitHub 拉取仓库并自动构建、发布 Vite 前端静态文件；纯静态托管不会自动运行 Cloudflare Pages Functions、D1/R2/KV，也不会执行下方 OSS 适配器。账户、验证码发信及云同步 API 仍需兼容的服务端运行环境。')}
             </p>
+          </div>
+
+          <div className="space-y-3 rounded-2xl border border-orange-200 bg-orange-50/70 p-4 dark:border-orange-900 dark:bg-orange-950/20">
+            <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200">{tx('阿里云 ESA Pages GitHub 仓库拉取部署')}</h4>
+            <p className="text-xs leading-relaxed text-slate-600 dark:text-slate-300">{tx('此配置运行 Vite 构建并发布 dist/，并为前端单页路由启用 index.html 回退。')}</p>
+            <ol className="list-decimal list-inside space-y-1.5 text-xs leading-relaxed text-slate-600 dark:text-slate-300">
+              <li>{tx('在阿里云控制台开通 ESA，进入 Pages，连接 GitHub 并选择本仓库和生产分支。')}</li>
+              <li>{tx('仓库根目录的 esa.jsonc 已提供 npm install、npm run build、dist 静态目录和单页应用回退配置；保存后推送即可触发自动构建。')}</li>
+              <li>{tx('首次可在 ESA Pages 控制台检查构建日志和预览；之后向所选生产分支推送代码，ESA 会重新拉取构建。')}</li>
+            </ol>
+            <p className="text-xs font-semibold leading-relaxed text-rose-700 dark:text-rose-300">{tx('重要限制：阿里云 ESA 静态 Pages 只负责构建和提供前端文件，不会自动运行本项目的 Cloudflare Pages Functions、D1、R2 或 KV。')}</p>
+            <p className="text-xs leading-relaxed text-slate-600 dark:text-slate-300">{tx('如需账户、跨设备同步、订单支付、收件 Webhook、文件上传和管理员 API，必须另行部署兼容的服务端 API 与数据库；仅静态部署这些功能不会工作。')}</p>
+            <div className="flex flex-wrap gap-3 text-xs">
+              <a className="inline-flex items-center gap-1 text-sky-600 hover:underline dark:text-sky-400" href="https://help.aliyun.com/zh/edge-security-acceleration/esa/user-guide/connect-pages-to-github" target="_blank" rel="noreferrer">ESA 从 GitHub 连接 Pages <ExternalLink className="h-3 w-3" /></a>
+              <a className="inline-flex items-center gap-1 text-sky-600 hover:underline dark:text-sky-400" href="https://help.aliyun.com/document_detail/2980182.html" target="_blank" rel="noreferrer">esa.jsonc 配置说明 <ExternalLink className="h-3 w-3" /></a>
+            </div>
           </div>
 
           <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/70 dark:border-slate-700 space-y-3">
@@ -486,13 +502,15 @@ export const GuideSection: React.FC = () => {
             <span>邮箱区 (邮件中枢与 Resend Receiving) 使用说明</span>
           </div>
           <div className="space-y-2 text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-            <p><b>1. 发信通道：</b>推荐 Resend API（HTTPS），也支持 SMTP、Brevo API、SendGrid API；前台配置保存在本浏览器，验证码应使用 Cloudflare Pages 后台 Secret。Resend API 连接检查只读域名信息，不发邮件；真实测试投递需使用单独的测试邮件按钮。目前服务器收件箱入站 webhook 使用 Resend Receiving，不要把其他发件服务商误认为也已配置入站接收。</p>
-            <p><b>2. 注册验证码：</b>验证码由服务端生成和验证；Cloudflare 部署需绑定 D1 并配置可用的后台邮件发送通道。后台配置状态与前台配置分开测试。</p>
-            <p><b>3. 获取 <code>RESEND_API_KEY</code>：</b>登录 resend.com，进入左侧菜单 API Keys，点 Create API Key，选好权限和域名，创建后立即复制。</p>
-            <p><b>4. 获取 <code>RESEND_WEBHOOK_SECRET</code> 和配置 Webhook URL：</b>进入 Webhooks，创建一个新的 Webhook。Endpoint / URL 填你的 Pages Functions 地址，例如 <code className="break-all">https://你的项目名.pages.dev/api/webhook</code>；选择监听事件 <code>email.received</code>。创建成功后，Resend 返回的 signing secret 就是 <code>RESEND_WEBHOOK_SECRET</code>。接口也兼容旧地址 <code className="break-all">/api/mail/webhook</code>。</p>
-            <p><b>5. 配置接收域名 / MX：</b>在 Domains 里添加你的域名，然后去域名 DNS 管理后台添加 Resend 给出的记录。如果要收邮件，需要在域名详情里开启 Receiving，并按 Resend 提示配置 MX 记录。</p>
-            <p><b>注意：</b>Webhook URL 不是 Resend 给你的，而是你自己 Pages Functions 的接口地址。<code>RESEND_API_KEY</code> 和 <code>RESEND_WEBHOOK_SECRET</code> 都只在创建时完整显示一次，丢了通常需要重新生成。这些密钥不要放到前端代码或公开仓库里，建议放在 Cloudflare Pages 的环境变量 / Secrets 中。收件正文会经 webhook 验签后由 Receiving API 拉取并保存到 D1；还需绑定名称为 <code>DB</code> 的 D1。仅把邮件转发到外部邮箱不会让来信进入本站。</p>
-            <p><b>6. 站内信：</b>管理员可在邮件中枢查看服务器收件箱、撰写和回复；发送及收件箱 API 需有效管理员会话。注册邮箱回信优先从 D1 用户记录解析；本机发件历史保存在浏览器，Resend 收件正文保存在 D1。</p>
+            <p>{tx('1. 发信通道：推荐 Resend API（HTTPS），也支持通用 SMTP、Brevo API、SendGrid API 和 SendCloud API。阿里云 DirectMail、腾讯云 SES 可在服务商已开通 SMTP、提供有效参数且部署网络可连通时，选择通用 SMTP 使用；本仓库没有为它们单独适配 HTTP API。SendCloud API 需要单独配置 SENDCLOUD_API_USER、SENDCLOUD_API_KEY，并将 MAIL_PROVIDER 设为 sendcloud；免费额度与发送权限以服务商实际账号状态为准。')}</p>
+            <p>{tx('2. 前台与后台配置：前台发信设置只保存在当前浏览器，不会配置全站服务器。注册验证码和后台自动邮件必须在 Cloudflare Pages 后台 Variables/Secrets 配置通道凭据及 MAIL_SENDER，并重新部署；前台配置与后台配置应分开测试。')}</p>
+            <p>{tx('3. 注册验证码：验证码由服务端生成并校验；Cloudflare 部署需绑定 D1，并配置可用的后台发信通道。可选设置 VERIFY_CODE_LENGTH、VERIFY_EMAIL_SUBJECT、VERIFY_EMAIL_TEMPLATE；模板变量为 {{code}}、{{username}}、{{email}}。')}</p>
+            <p>{tx('4. 获取 RESEND_API_KEY：登录 resend.com，进入左侧 API Keys，点击 Create API Key，选择所需权限和域名后创建并立即复制。不要将密钥放在前端代码或公开仓库。')}</p>
+            <p>{tx('5. 获取 RESEND_WEBHOOK_SECRET 并配置 Webhook：在 Resend Webhooks 创建 Webhook；Endpoint / URL 填写你自己的 Pages Functions 地址，例如 https://你的项目名.pages.dev/api/webhook，监听 email.received。创建后复制 signing secret，保存为 RESEND_WEBHOOK_SECRET；接口也兼容旧路径 /api/mail/webhook。')}</p>
+            <p>{tx('6. 配置收件域名和 MX：在 Domains 添加域名；如需接收邮件，在域名详情启用 Receiving，并按 Resend 指示在域名 DNS 后台配置 MX 记录。')}</p>
+            <p>{tx('重要：Webhook URL 是你自己的 Pages Functions 接口，不是 Resend 提供的地址。RESEND_API_KEY 与 RESEND_WEBHOOK_SECRET 通常只在创建时完整显示一次，丢失后需重新生成。Webhook 验签通过后，服务端用 RESEND_API_KEY 调 Receiving API 取回正文并存入绑定名为 DB 的 D1；普通转发到个人邮箱不会把来信导入本站。')}</p>
+            <p>{tx('7. 站内邮件：管理员可在邮件中枢查看服务器收件箱、撰写和回复；发送及收件箱 API 需有效管理员会话。回复注册邮箱时优先从 D1 用户记录解析地址；前台/本机发件历史保存在浏览器，Resend 来信正文保存在 D1。')}</p>
+            <p>{tx('Resend API 域名连接检查只读域名信息，不会发送邮件；本页不显示独立的 Resend 检查按钮。要验证真实投递，请使用单独的测试邮件按钮。')}</p>
           </div>
         </div>
       </div>

@@ -6,6 +6,7 @@ interface SafeImageProps extends React.ImgHTMLAttributes<HTMLImageElement> {
   fallbackSrc?: string;
   alt?: string;
   className?: string;
+  imageClassName?: string;
 }
 
 // Built-in high-quality SVG gradient avatars and card backgrounds so even without internet they render beautifully
@@ -16,6 +17,7 @@ export const SafeImage: React.FC<SafeImageProps> = ({
   fallbackSrc = DEFAULT_FALLBACK,
   alt = 'fox3 Image',
   className = '',
+  imageClassName = 'object-cover',
   ...props
 }) => {
   const [currentSrc, setCurrentSrc] = useState<string>(src || fallbackSrc);
@@ -94,7 +96,7 @@ export const SafeImage: React.FC<SafeImageProps> = ({
         decoding="async"
         onError={handleError}
         onLoad={handleLoad}
-        className={`w-full h-full object-cover transition-opacity duration-200 ${
+        className={`w-full h-full ${imageClassName} transition-opacity duration-200 ${
           isLoaded ? 'opacity-100' : 'opacity-0'
         }`}
       />
