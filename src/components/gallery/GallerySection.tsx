@@ -20,8 +20,11 @@ import {
   FolderPlus,
   MoveRight,
   FolderOpen,
+  Maximize2,
 } from 'lucide-react';
 import JSZip from 'jszip';
+import { ZoomableImage } from './ZoomableImage';
+import { translateInline } from '../../utils/i18n';
 
 export const GallerySection: React.FC = () => {
   const {
@@ -39,14 +42,18 @@ export const GallerySection: React.FC = () => {
     systemSettings,
     deviceMode,
     t,
+    locale,
   } = useApp();
+  const tx = (source: string) => translateInline(locale, source);
 
   const [selectedPhoto, setSelectedPhoto] = useState<Photo | null>(null);
+  const [previewDimensions, setPreviewDimensions] = useState<{ id: string; width: number; height: number } | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [activeFolderId, setActiveFolderId] = useState<string>('all');
   const [newFolderName, setNewFolderName] = useState<string>('');
   const [isCreatingFolder, setIsCreatingFolder] = useState<boolean>(false);
   const [targetFolderMove, setTargetFolderMove] = useState<string>('');
+  const [listImageFitContain, setListImageFitContain] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const currentViewMode: ViewMode = viewModes['gallery'] || 'original';
   const canManagePhoto = (photo: Photo) => currentUser?.role === 'admin' || (Boolean(systemSettings.allowUserMediaManagement) && Boolean(currentUser) && ((Boolean(photo.ownerId) && photo.ownerId === currentUser?.id) || (!photo.ownerId && Boolean(photo.ownerUsername) && photo.ownerUsername === currentUser?.username)));
@@ -112,10 +119,37 @@ export const GallerySection: React.FC = () => {
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
       const uploaded = await uploadFile(file);
+      let thumbnail: string | undefined;
+      let width: number | undefined;
+      let height: number | undefined;
+      try {
+        const bitmap = await createImageBitmap(file);
+        width = bitmap.width;
+        height = bitmap.height;
+        const ratio = Math.min(1, 480 / Math.max(bitmap.width, bitmap.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(bitmap.width * ratio));
+        canvas.height = Math.max(1, Math.round(bitmap.height * ratio));
+        const context = canvas.getContext('2d');
+        context?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+        bitmap.close();
+        const thumbBlob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/webp', 0.68));
+        if (thumbBlob && thumbBlob.size < file.size) {
+          const thumbnailFile = new File([thumbBlob], `${file.name.replace(/\.[^/.]+$/, '')}-thumb.webp`, { type: thumbBlob.type || 'image/webp' });
+          const uploadedThumbnail = await uploadFile(thumbnailFile);
+          if (!uploaded.url.startsWith('idb_file_') && !uploadedThumbnail.url.startsWith('idb_file_')) thumbnail = uploadedThumbnail.url;
+        }
+      } catch (error) {
+        console.warn('Photo thumbnail/dimension processing unavailable; retaining original only:', error);
+      }
       const newPhoto: Photo = {
         id: `photo-${Date.now()}-${i}`,
         title: file.name.replace(/\.[^/.]+$/, ''),
+        originalFilename: file.name,
         url: uploaded.url,
+        thumbnail,
+        width,
+        height,
         ownerId: currentUser?.id,
         ownerUsername: currentUser?.username,
         category: currentFolder ? currentFolder.name : '相册精选',
@@ -163,7 +197,7 @@ export const GallerySection: React.FC = () => {
     e.stopPropagation();
     const a = document.createElement('a');
     a.href = photo.url;
-    a.download = `${photo.title}.jpg`;
+    a.download = photo.originalFilename || `${photo.title}.jpg`;
     a.target = '_blank';
     a.click();
   };
@@ -274,6 +308,17 @@ export const GallerySection: React.FC = () => {
             >
               <LayoutGrid className="w-3.5 h-3.5" />
             </button>
+            {currentViewMode === 'small' && (
+              <button
+                onClick={() => setListImageFitContain(value => !value)}
+                title={tx(listImageFitContain ? '列表缩略图：完整显示' : '列表缩略图：填满画幅')}
+                aria-label={tx(listImageFitContain ? '切换为裁切填满画幅' : '切换为完整自适应画幅')}
+                aria-pressed={listImageFitContain}
+                className={`p-1.5 rounded-lg transition ${listImageFitContain ? 'bg-white dark:bg-slate-700 text-rose-500 shadow-xs' : 'text-slate-400'}`}
+              >
+                <Maximize2 className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
 
           {canUploadPhotos && (
@@ -461,24 +506,24 @@ export const GallerySection: React.FC = () => {
                       <Square className="w-4 h-4" />
                     )}
                   </button>
-                  <div className="w-16 h-12 rounded-lg overflow-hidden shrink-0">
-                    <SafeImage src={photo.url} alt={photo.title} className="w-full h-full object-cover" />
+                  <div className="w-16 h-12 rounded-lg overflow-hidden shrink-0 bg-slate-100 dark:bg-slate-800">
+                    <SafeImage src={photo.thumbnail || photo.url} alt={photo.title} className="w-full h-full" imageClassName={listImageFitContain ? 'object-contain' : 'object-cover'} />
                   </div>
                   <div className="min-w-0">
                     <h4 className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">
-                      {photo.title}
+                      {photo.originalFilename || photo.title}
                     </h4>
                     <span className="text-[10px] text-slate-400">
-                      {new Date(photo.createdAt).toLocaleDateString()}
+                      {photo.width && photo.height ? `${photo.width.toLocaleString()} × ${photo.height.toLocaleString()} px · ` : ''}{new Date(photo.createdAt).toLocaleDateString()}
                     </span>
                   </div>
                 </div>
 
                 <div className="flex items-center gap-1.5 shrink-0">
-                  <button
+                    <button
                     onClick={e => handleDownloadSingle(photo, e)}
                     className="p-1.5 text-slate-400 hover:text-sky-500"
-                    title="下载原图"
+                    title={tx('下载原图')}
                   >
                     <Download className="w-4 h-4" />
                   </button>
@@ -506,7 +551,7 @@ export const GallerySection: React.FC = () => {
               }`}
             >
               <SafeImage
-                src={photo.url}
+                src={photo.thumbnail || photo.url}
                 alt={photo.title}
                 className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
               />
@@ -534,7 +579,7 @@ export const GallerySection: React.FC = () => {
                 <button
                   onClick={e => handleDownloadSingle(photo, e)}
                   className="p-1.5 bg-black/60 hover:bg-sky-600 text-white rounded-lg transition"
-                  title="下载原图"
+                  title={tx('下载原图')}
                 >
                   <Download className="w-4 h-4" />
                 </button>
@@ -595,15 +640,22 @@ export const GallerySection: React.FC = () => {
             onClick={e => e.stopPropagation()}
             className="max-w-5xl max-h-[85vh] overflow-hidden rounded-2xl flex flex-col items-center justify-center cursor-default"
           >
-            <SafeImage
+            <ZoomableImage
+              key={selectedPhoto.id}
               src={selectedPhoto.url}
               alt={selectedPhoto.title}
-              className="max-w-full max-h-[75vh] object-contain rounded-xl shadow-2xl"
+              locale={locale}
+              onNaturalSize={(width, height) => {
+                setPreviewDimensions({ id: selectedPhoto.id, width, height });
+                if ((!selectedPhoto.width || !selectedPhoto.height) && width > 0 && height > 0) {
+                  setPhotos(previous => previous.map(photo => photo.id === selectedPhoto.id ? { ...photo, width, height } : photo));
+                }
+              }}
             />
             <div className="mt-4 text-center text-white space-y-1">
               <h3 className="text-base font-bold font-serif-sc">{selectedPhoto.title}</h3>
               <p className="text-xs text-white/70">
-                {selectedPhoto.category} • {new Date(selectedPhoto.createdAt).toLocaleDateString()}
+                {selectedPhoto.category}{(selectedPhoto.width && selectedPhoto.height) || previewDimensions?.id === selectedPhoto.id ? ` · ${(selectedPhoto.width || previewDimensions?.width)?.toLocaleString()} × ${(selectedPhoto.height || previewDimensions?.height)?.toLocaleString()} px` : ''} • {new Date(selectedPhoto.createdAt).toLocaleDateString()}
               </p>
             </div>
           </div>

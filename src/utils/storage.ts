@@ -492,6 +492,7 @@ export const DEFAULT_EMAIL_SETTINGS: EmailSettings = {
   enabled: true,
   provider: 'resend',
   apiKey: '',
+  apiUser: '',
   apiEndpoint: 'https://api.resend.com/emails',
   smtpHost: 'smtp.resend.com',
   smtpPort: 465,

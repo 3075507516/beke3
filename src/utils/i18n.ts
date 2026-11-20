@@ -1,5 +1,9 @@
-export type BaseLocale = 'zh-CN' | 'zh-TW' | 'en-US' | 'ko-KR' | 'ar-SA' | 'hi-IN';
-export type Locale = BaseLocale | 'ja-JP' | 'fr-FR' | 'es-ES' | 'pt-BR';
+export type Locale = 'zh-CN' | 'zh-TW' | 'en-US';
+type BaseLocale = Locale | 'ko-KR' | 'ar-SA' | 'hi-IN';
+export const SUPPORTED_LOCALES: readonly Locale[] = ['zh-CN', 'zh-TW', 'en-US'];
+export function normalizeLocale(value: unknown): Locale {
+  return SUPPORTED_LOCALES.includes(value as Locale) ? value as Locale : 'zh-CN';
+}
 
 export interface Translations {
   common: {
@@ -1321,22 +1325,19 @@ const baseI18nDict: Record<BaseLocale, Translations> = {
   },
 };
 
-import { mainstreamPacks, inlineTranslations } from './localeContent';
+import { inlineTranslations } from './localeContent';
 import { uiTranslations } from './uiTranslations';
 import { paymentGuideTranslations } from './paymentGuideTranslations';
 import { paymentVariableNotes } from './paymentVariableNotes';
+import { mailGuideTranslations } from './mailGuideTranslations';
 export const i18nDict: Record<Locale, Translations> = {
-  ...baseI18nDict,
-  ...Object.fromEntries(Object.entries(mainstreamPacks).map(([locale, pack]) => [locale, {
-    ...baseI18nDict['en-US'], ...pack,
-    common: { ...baseI18nDict['en-US'].common, ...(pack.common || {}) },
-    header: { ...baseI18nDict['en-US'].header, ...(pack.header || {}) },
-    nav: { ...baseI18nDict['en-US'].nav, ...(pack.nav || {}) },
-  }])) as Record<Exclude<Locale, BaseLocale>, Translations>,
+  'zh-CN': baseI18nDict['zh-CN'],
+  'zh-TW': baseI18nDict['zh-TW'],
+  'en-US': baseI18nDict['en-US'],
 };
 
 export function translateInline(locale: Locale, source: string): string {
-  return inlineTranslations[locale]?.[source] || paymentGuideTranslations[locale]?.[source] || paymentVariableNotes[locale]?.[source] || uiTranslations[locale]?.[source] || source;
+  return inlineTranslations[locale]?.[source] || paymentGuideTranslations[locale]?.[source] || paymentVariableNotes[locale]?.[source] || mailGuideTranslations[locale]?.[source] || uiTranslations[locale]?.[source] || source;
 }
 
 // Helper function to safely get nested translation key (e.g., 'nav.blog')

@@ -15,6 +15,8 @@ import {
   Shield,
   Layers,
   Download,
+  List,
+  LayoutGrid,
 } from 'lucide-react';
 
 export const SitesSection: React.FC = () => {
@@ -36,6 +38,7 @@ export const SitesSection: React.FC = () => {
   const [siteDesc, setSiteDesc] = useState('');
   const [isUploadingPoster, setIsUploadingPoster] = useState(false);
   const [selectedSites, setSelectedSites] = useState<string[]>([]);
+  const [siteViewMode, setSiteViewMode] = useState<'cards' | 'details'>('cards');
 
   const posterInputRef = useRef<HTMLInputElement>(null);
   const bookmarksInputRef = useRef<HTMLInputElement>(null);
@@ -182,6 +185,10 @@ export const SitesSection: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center rounded-xl border bg-white/70 p-1 dark:bg-slate-900/70" aria-label="网站显示方式">
+            <button type="button" onClick={() => setSiteViewMode('cards')} title={tx('海报卡片视图')} aria-label={tx('海报卡片视图')} aria-pressed={siteViewMode === 'cards'} className={`rounded-lg p-1.5 ${siteViewMode === 'cards' ? 'bg-sky-500 text-white' : 'text-slate-500'}`}><LayoutGrid className="h-4 w-4" /></button>
+            <button type="button" onClick={() => setSiteViewMode('details')} title={tx('网址详细列表')} aria-label={tx('网址详细列表')} aria-pressed={siteViewMode === 'details'} className={`rounded-lg p-1.5 ${siteViewMode === 'details' ? 'bg-sky-500 text-white' : 'text-slate-500'}`}><List className="h-4 w-4" /></button>
+          </div>
           <button onClick={() => setIsModalOpen(true)} className="flex items-center gap-1.5 px-4 py-2 bg-sky-500 hover:bg-sky-600 text-white text-xs font-semibold rounded-xl shadow-md transition shrink-0 cursor-pointer">
             <Plus className="w-4 h-4" /><span>添加新网站/图床</span>
           </button>
@@ -193,8 +200,8 @@ export const SitesSection: React.FC = () => {
         </div>
       </div>
 
-      {/* Sites Grid Display as Posters */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      {/* Websites: poster cards or detailed URL list */}
+      {siteViewMode === 'cards' ? <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {websites.map(site => (
           <div
             key={site.id}
@@ -280,7 +287,25 @@ export const SitesSection: React.FC = () => {
             </div>
           </div>
         ))}
-      </div>
+      </div> : <div className="space-y-3">
+        {websites.map(site => (
+          <div key={site.id} className="flex flex-col gap-3 rounded-2xl border border-slate-200/80 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900 sm:flex-row sm:items-center">
+            <SafeImage src={site.poster} alt={site.title} className="h-20 w-full shrink-0 rounded-xl sm:w-32" imageClassName="object-cover" />
+            <div className="min-w-0 flex-1 space-y-1">
+              <h3 className="truncate text-sm font-bold text-slate-800 dark:text-slate-100">{site.title}</h3>
+              <a href={site.url} target="_blank" rel="noopener noreferrer" className="block break-all font-mono text-xs text-sky-600 hover:underline dark:text-sky-400">{site.url}</a>
+              <p className="whitespace-pre-wrap break-words text-xs text-slate-500 dark:text-slate-400">{site.description || '—'}</p>
+              <span className="text-[10px] text-slate-400">{tx('添加时间')}：{new Date(site.createdAt).toLocaleDateString()}</span>
+            </div>
+            <div className="flex shrink-0 items-center gap-2 self-end sm:self-center">
+              <input type="checkbox" checked={selectedSites.includes(site.id)} onChange={event => setSelectedSites(previous => event.target.checked ? [...previous, site.id] : previous.filter(id => id !== site.id))} aria-label={`选择${site.title}书签`} className="h-4 w-4 accent-sky-500" />
+              <button type="button" onClick={() => exportSites([site], 'html')} title={tx('下载书签')} aria-label={tx('下载书签')} className="rounded-lg p-2 text-slate-500 hover:bg-sky-50 hover:text-sky-600"><Download className="h-4 w-4" /></button>
+              <a href={site.url} target="_blank" rel="noopener noreferrer" title={tx('打开站点')} aria-label={tx('打开站点')} className="rounded-lg p-2 text-slate-500 hover:bg-sky-50 hover:text-sky-600"><ExternalLink className="h-4 w-4" /></a>
+              {isAdmin && <button type="button" onClick={event => handleDeleteSite(site.id, site.title, event)} title="删除站点" className="rounded-lg p-2 text-rose-500 hover:bg-rose-50"><Trash2 className="h-4 w-4" /></button>}
+            </div>
+          </div>
+        ))}
+      </div>}
 
       {/* Add Website Modal */}
       {isModalOpen && (

@@ -1,11 +1,12 @@
 import { connect } from 'cloudflare:sockets';
 
 export type SmtpSecurity = 'ssl' | 'starttls';
-export type MailProvider = 'smtp' | 'resend' | 'brevo' | 'sendgrid' | 'mailgun' | 'ses' | 'postmark' | 'custom';
+export type MailProvider = 'smtp' | 'resend' | 'brevo' | 'sendgrid' | 'sendcloud' | 'mailgun' | 'ses' | 'postmark' | 'custom';
 
 export interface OutboundMailSettings {
   provider: MailProvider;
   apiKey?: string;
+  apiUser?: string;
   smtpHost?: string;
   smtpPort?: number;
   smtpSecurity?: SmtpSecurity;
@@ -235,7 +236,21 @@ async function providerApiSend(settings: OutboundMailSettings, mail: OutboundMai
   let endpoint: string;
   let headers: Record<string, string>;
   let payload: unknown;
-  if (settings.provider === 'brevo') {
+  if (settings.provider === 'sendcloud') {
+    const apiUser = (settings.apiUser || '').trim();
+    if (!apiUser) throw new Error('SendCloud API_USER 尚未配置');
+    endpoint = 'https://api.sendcloud.net/apiv2/mail/send';
+    headers = { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' };
+    const sender = settings.senderEmail || '';
+    const fromAddress = normalizeAddress(sender, '发件人');
+    const senderName = sender.match(/^\s*(.*?)\s*<[^<>]+>\s*$/)?.[1]?.trim();
+    const form = new URLSearchParams({ apiUser, apiKey, from: fromAddress, to, subject: safeHeaderValue(mail.subject) });
+    if (senderName) form.set('fromName', senderName);
+    if (mail.html) form.set('html', mail.html);
+    if (mail.text) form.set('plain', mail.text);
+    if (!mail.html && !mail.text) form.set('plain', '');
+    payload = form;
+  } else if (settings.provider === 'brevo') {
     endpoint = 'https://api.brevo.com/v3/smtp/email';
     headers = { 'api-key': apiKey, 'Content-Type': 'application/json' };
     payload = {
@@ -272,8 +287,18 @@ async function providerApiSend(settings: OutboundMailSettings, mail: OutboundMai
   const response = await fetch(endpoint, {
     method: 'POST',
     headers,
-    body: JSON.stringify(payload),
+    body: payload instanceof URLSearchParams ? payload : JSON.stringify(payload),
   });
+  if (settings.provider === 'sendcloud') {
+    const responseText = await response.text();
+    let responseJson: any = {};
+    try { responseJson = JSON.parse(responseText); } catch {}
+    if (!response.ok || responseJson?.result !== true) {
+      const detail = String(responseJson?.message || '请检查 API_USER、API_KEY、发件域名与账户额度').replace(/[\r\n]+/g, ' ').slice(0, 180);
+      throw new Error(`SendCloud 发信失败（HTTP ${response.status}）：${detail}`);
+    }
+    return 'sendcloud';
+  }
   if (!response.ok) {
     const responseText = await response.text();
     let providerMessage = '';

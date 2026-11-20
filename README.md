@@ -18,11 +18,17 @@
   * 内置 16 款主题：微软 Windows 98 怀旧、麦金塔 Classic Platinum、赛博朋克霓虹、北欧极简原木、复古皮质笔记本、工程架构蓝图、现代流体玻璃、极光玻璃、新野兽派、柔雾粉彩、编辑部留白，以及珍珠雾白、鼠尾草工坊、陶土暖意、海岸蓝调、丝绒梅紫。
   * 彻底移除夜间深色模式强制覆盖。
 * **网站图床与网址导航中枢 (Sites & Image Host Hub)**：
-  * 管理员专属板块，支持快捷添加和管理网站与图床，默认集成高速公共图床 (`https://img.001315.xyz/`)，支持海报预览与一键跳转。
+  * 管理员专属板块，支持快捷添加和管理网站与图床，默认集成高速公共图床 (`https://img.001315.xyz/`)，提供海报卡片和完整网址详细列表两种查看方式。
+  * 支持单个/批量导入导出书签，导出 Netscape HTML（浏览器可导入）或 TXT，支持浏览器书签 HTML、TXT、JSON 文件导入。
+* **低流量图片图库**：
+  * 新上传图片生成最长边 480px 的 WebP 缩略图供列表加载；原始图片单独保留，点开预览才加载原图。
+  * 预览支持触摸屏双指缩放和拖动，也提供放大、缩小、重置按钮；详细列表显示真实像素尺寸，旧图在首次打开原图预览时自动补录尺寸。
+  * 小列表可切换“完整显示/填满画幅”；如果对象存储不可用、仅在本机 IndexedDB 回退，则不能跨设备读取原图或缩略图。
 * **站内邮件发信与注册验证码**：
-  * 默认优先使用 Resend Email API（HTTPS）发信，也兼容 SMTP、Brevo API、SendGrid API；实际投递仍取决于服务商账户、发件域名 DNS 和收件方策略。
-  * Resend `email.received` webhook 经签名验证后会取回来信正文并写入 D1；需要在 Resend 配置 Receiving 域名/MX 与 webhook，并绑定 D1。
-  * 前台邮件设置（含密钥）保存在当前浏览器本机且未加密，只适合本机/手动邮件测试与显式选择前台配置的手动发信；它不会配置生产服务端。验证码及由后端触发的业务发信依赖 Pages Functions 的邮件环境变量/Secrets。后台 API 连接检查不发信，后台“发送测试邮件”才会真实投递。
+  * 后台可选择 Resend API、SendCloud API、Brevo API、SendGrid API 或通用 SMTP。阿里云 DirectMail、腾讯云 SES 等服务只有在你的账户开放 SMTP、提供正确服务器参数并允许 Cloudflare 出站时，才能通过 SMTP 通道使用；它们不是本项目已单独适配的 HTTP API。
+  * SendCloud 的 API 发信使用 `SENDCLOUD_API_USER` 与 `SENDCLOUD_API_KEY` 两个独立 Secret；服务商对免费账户公开的额度、初始试用额度和发件域名审核依账户状态而异，不能按固定免费额度保证送达。
+  * **只有 Resend Receiving webhook 已实现本站收件正文导入**：经 webhook 验签后通过 Resend API 拉取正文并写入 D1。其他发信商或发信状态回执不会自动把来信同步到本站。
+  * 前台邮件设置（含密钥）保存在当前浏览器本机且未加密，只适合本机/手动邮件测试与显式选择前台配置的手动发信；它不会配置生产服务端。验证码及由后端触发的业务发信依赖 Pages Functions 的邮件环境变量/Secrets。前台“Resend API 连接检查”（若配置工具提供）只读域名信息，不发送邮件；本站没有保留独立 Resend 检查按钮，真实投递需使用单独测试邮件功能。
 * **流量与上传性能极限优化**：
   * 全局图片采用懒加载 (`loading="lazy"`) 与异步解码 (`decoding="async"`)；
   * 标签页处于后台隐藏状态时（Page Visibility API）立即暂停网络长轮询与同步，彻底杜绝无操作流量浪费。
@@ -31,8 +37,9 @@
   * 快速在线互译助手自带独立的“保存外部翻译 API 配置”按键，配置即时生效并持久化。
 * **备份区 (WebDAV)**：
   * 浏览器端直接访问 WebDAV，适合小型结构化数据/文本备份；当前没有大型媒体的可靠分块续传保障，跨域、服务器限制和单次传输时限都会影响可用性。大型图片/视频可能超时、卡住或失败，不应视为可靠的大文件灾备通道。
-* **深层国际化多语言支持**：
-  * 提供 10 种语言的下拉切换；翻译覆盖范围依各页面字典实现而异，并非保证每一处用户内容或所有文案均已翻译。
+* **三语界面**：
+  * 语言选择限定为简体中文、繁體中文与 English；旧版保存的其它语言值会自动归一化到简体中文。
+  * 导航、常用表单与本轮部署/图片/邮件新增控件按语言切换。系统界面翻译不翻译用户撰写的博客、商品、政策或邮件正文；仍有未接入字典的旧版硬编码说明可能保留中文。
   * 可在顶部导航下拉选择语言，不是循环切换。
 
 ---
@@ -51,11 +58,24 @@
      * **D1 Database 绑定**：名称填写 `DB`；用于公开站点内容主库、用户账户/密码重置、验证码及限流记录、Resend webhook 收件。跨设备博客内容必须可用 D1；KV 不作为公开站点内容的回退主库。
    * **R2 Bucket 绑定**：变量名称填写 `R2_BUCKET`，用于应用文件上传；无 R2 时可回退 D1 文件表，超大/不适用场景不保证。
    * **KV Namespace 绑定**：名称填写 `KV`，作为验证码/旧私有同步的兼容回退与临时数据层；公开站点内容严格使用 D1，不回退 KV，避免把临时存储误当权威数据。KV 有日写入额度。
-   * **环境变量设置 (Environment Variables)**：
+     * **环境变量设置 (Environment Variables)**：
      * `ADMIN_USERNAME`：自定义管理员账号名（默认 `fox`）。
      * `ADMIN_PASSWORD`：管理员自行选择的生产登录密码，至少 6 个字符，可用数字、字母、符号或组合；未设置时管理员登录被拒绝。仅在 Cloudflare Pages 的 Variables and Secrets 中设置或修改。
      * `ADMIN_SESSION_SECRET`：必须独立设置至少 32 个字符的高熵随机 Secret，用于签发/验证最长 7 天的 API 会话；它不是登录密码，不能用 `ADMIN_PASSWORD` 替代，缺少或过短会 fail closed。
      * 邮件与收件变量：按下方“邮件配置”设置所用服务端 provider、凭据和发件地址；Resend 收件另需 D1、Resend Receiving 域及 webhook 签名 Secret。
+
+### 2. 阿里云 ESA Pages 从 GitHub 拉取部署（前端静态版）
+
+仓库根目录已提交 [`esa.jsonc`](./esa.jsonc)：运行 `npm install`、`npm run build`，发布 `dist/`，并使用 `index.html` 作为单页应用路由回退。
+
+1. 在阿里云开通 **边缘安全加速 ESA** 和 Pages 服务，进入 ESA 控制台的 **Pages**。
+2. 选择从 **GitHub** 连接仓库并授权；选择本仓库 `3075507516/beke3`（私有仓库未显示时，可按 ESA 控制台说明手动输入仓库名），选择实际要作为生产分支的分支。生产分支推送后会触发拉取、构建和部署。
+3. 读取仓库根目录的 `esa.jsonc` 配置；如果控制台要求手动设置，构建命令为 `npm run build`，静态产物目录为 `dist`，单页应用未找到路由应回退 `index.html`。首次部署后检查构建日志和预览，并按需绑定 ESA 域名/HTTPS。
+4. 后续向所选分支提交并推送代码，检查 ESA 新构建状态；Node/npm 依赖安装与 Vite 构建必须成功，构建失败可在 ESA Pages 构建日志查看详细错误。
+
+**功能边界（重要）：**本项目的前端文件可以由 ESA Pages 构建和分发，但 [`esa.jsonc`](./esa.jsonc) 只配置前端静态资产，并未迁移 `functions/` 的 Cloudflare Pages Functions，也不会自动提供 Cloudflare D1、R2 或 KV。前端 API 使用 `/api/*` 相对路径；仅把前端部署到 ESA 时，登录/注册、D1 跨设备内容同步、下单支付、订单/客服、邮件 Webhook、服务端上传与管理员 API **不会自动工作**。要启用这些功能，必须把后端 API、数据库与对象存储另行部署到兼容运行环境，并为 ESA 配置可用的 API 路由/反向代理；本仓库没有声称提供完成后的 Cloudflare Functions→ESA 后端迁移。
+
+官方说明： [连接 Pages 到 GitHub](https://help.aliyun.com/zh/edge-security-acceleration/esa/user-guide/connect-pages-to-github) · [esa.jsonc 配置说明](https://help.aliyun.com/document_detail/2980182.html)。
 
 ---
 
@@ -136,12 +156,14 @@ http://<你的服务器IP>:8080
 | `ADMIN_USERNAME` | Pages Environment Variable | 管理员账号名，默认 `fox` | 推荐设置 |
 | `ADMIN_PASSWORD` | Pages Secret | 管理员自行设定的登录密码；至少 6 个字符，字符类型不限。未设置则管理员登录被拒绝 | 必须设置 |
 | `ADMIN_SESSION_SECRET` | Pages Secret | 独立 HMAC 会话签名密钥；至少 32 个字符；不以管理员密码回退 | 必须单独设置 |
-| `MAIL_PROVIDER` | Pages Environment Variable | `resend`（推荐）、`smtp`、`brevo` 或 `sendgrid` | 推荐明确设置为 `resend` |
+| `MAIL_PROVIDER` | Pages Environment Variable | `resend`、`sendcloud`、`smtp`、`brevo` 或 `sendgrid` | 按后端凭据选择；验证码和业务邮件以服务端配置为准 |
 | `RESEND_API_KEY` | Pages Secret | Resend HTTPS API 凭据；用于后端发信和取回收件正文 | Resend 主通道必填；权限需覆盖域名读取与 Receiving |
 | `MAIL_SENDER` | Pages Environment Variable | 后台发件人，例如 `Fox3 <no-reply@verified-domain>`；Resend 要求使用已验证且启用发送的域名 | 必填 |
 | `RESEND_WEBHOOK_SECRET` | Pages Secret | Resend `email.received` webhook 的 Signing Secret（`whsec_...`） | 启用站内收件必填 |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_SECURITY` / `SMTP_USER` / `SMTP_PASS` | Pages Variables/Secrets | 可选 SMTP 备用通道；Resend SMTP 示例：`smtp.resend.com` / `465` / `ssl` / `resend` / Resend API Key | 仅选择 SMTP 时使用；密码用 Secret |
-| `BREVO_API_KEY` / `SENDGRID_API_KEY` / `MAIL_API_KEY` | Pages Secret | 备用服务商 API 凭据；`MAIL_API_KEY` 可作兼容别名 | 仅选对应 API 通道时使用 |
+| `BREVO_API_KEY` / `SENDGRID_API_KEY` / `MAIL_API_KEY` | Pages Secret | Brevo、SendGrid API 凭据；`MAIL_API_KEY` 是 Resend 兼容别名 | 仅选对应 API 通道时使用 |
+| `SENDCLOUD_API_USER` | Pages Environment Variable / Secret | SendCloud 触发邮件账号 API_USER | 选择 `MAIL_PROVIDER=sendcloud` 时必填 |
+| `SENDCLOUD_API_KEY` | Pages Secret | SendCloud 发信 API_KEY | 选择 `MAIL_PROVIDER=sendcloud` 时必填；不要提交到仓库 |
 | `VERIFY_CODE_LENGTH` / `VERIFY_EMAIL_SUBJECT` / `VERIFY_EMAIL_TEMPLATE` | Pages Environment Variables | 后台注册验证码位数、主题和模板 | 可选 |
 | `OBJECT_STORAGE_PROVIDER` | Pages Environment Variable | 可选 `cos`、`oss` 或 `s3`；未设置时根据已完整配置的凭据选择 | R2 仍是文件主存储；外部对象存储仅作后备 |
 | `COS_SECRET_ID` / `COS_SECRET_KEY` / `COS_REGION` / `COS_BUCKET` | Pages Variables/Secrets | 腾讯 COS SecretId/SecretKey、地域（如 `ap-guangzhou`）、完整桶名（如 `mybucket-1250000000`） | 选择 COS 后配置；SecretId/SecretKey 设为 Secrets |
@@ -162,13 +184,39 @@ npx wrangler d1 execute <你的数据库名称> --remote --file=migrations/0001_
 
 顶部的刷新/同步按钮对所有人开放，执行的是公开站点内容读取，不会写入，也不会触碰 WebDAV 或管理员私有数据。设备前台时每分钟、重新聚焦/联网时会检查 D1 版本；若服务端版本没有改变，不会重载内容或额外写库。数据库不可用时界面会显示错误，不会把本机内容伪报为云端成功。
 
-### Resend 发信与收件配置
+### 邮件发信、注册验证码与收件配置
 
-在 Resend 中创建 API Key 并验证发件域名。Cloudflare Pages 的 Functions Variables/Secrets 至少设置 `MAIL_PROVIDER=resend`、`RESEND_API_KEY` 和 `MAIL_SENDER`。这些服务端变量用于验证码和后台触发的业务邮件；前端 provider/key 只保存在本机，不能代替后端配置。建议 API Key 至少具有发信和读取 inbound 内容所需权限；连接指示状态以已部署的 `/api/mail/status` 返回的服务端配置为准，不代表 Resend Dashboard 中的域名、MX、Receiving 或 webhook 已完成实际验证。
+#### 1. 发信通道与变量
 
-邮箱中枢已移除独立的“检查 Resend API 连接”按钮，避免将凭据格式检查误当作真实连通。页面后台状态灯读取 `/api/mail/status` 的服务端变量配置；“发送后台测试邮件”会实际向 `MAIL_SENDER` 投递测试邮件。Resend API 正式发送端点为 `POST https://api.resend.com/emails`。
+推荐使用 Resend API（HTTPS）。后端也支持 SMTP、Brevo API、SendGrid API 和 SendCloud API（HTTPS）。SendCloud 使用官方接口 `POST https://api.sendcloud.net/apiv2/mail/send`，需要两个独立变量 `SENDCLOUD_API_USER` 与 `SENDCLOUD_API_KEY`，并配置 `MAIL_PROVIDER=sendcloud` 及合规发件人 `MAIL_SENDER`。SendCloud FAQ 描述的免费帐号额度包含有限的每日试用发送量（新账户可能从很低额度起步，符合条件的认证账户可申请更高额度）；额度、验证要求、可发送域名和是否接受邮件都以你登录后的服务商控制台为准，不承诺“免费即保证送达”。[SendCloud API 文档](https://www.sendcloud.net/doc/email_v2/send_email/) · [SendCloud FAQ](https://www.sendcloud.net/doc/faq/)。
 
-收件配置步骤：登录 `resend.com`，进入左侧菜单 **API Keys**，点击 **Create API Key**，选好权限和域名后创建，并立即复制 `RESEND_API_KEY`。接着进入 **Webhooks** 创建新 Webhook，Endpoint / URL 填你自己的 Pages Functions 地址，例如 `https://你的项目名.pages.dev/api/webhook`，监听事件选择 `email.received`。创建成功后复制 Resend 返回的 signing secret，保存为 `RESEND_WEBHOOK_SECRET`。然后在 **Domains** 添加域名；要收邮件，需在域名详情开启 **Receiving**，并按 Resend 提示在域名 DNS 中配置 MX 记录。Webhook URL 不是 Resend 提供的，而是你自己的 Pages Functions 接口；`RESEND_API_KEY` 和 `RESEND_WEBHOOK_SECRET` 创建时通常只完整显示一次，遗失后需重新生成。不要把密钥写进前端代码或公开仓库，应保存到 Cloudflare Pages 环境变量/Secrets。当前接口同时兼容 `/api/webhook` 与旧路径 `/api/mail/webhook`。收到事件后，Functions 会验证 Svix 签名和时间戳，再通过 Resend Receiving API 获取邮件正文并保存进 D1；管理员邮件中枢读取 `/api/mail/inbox` 展示来信。收件指示灯读取 `/api/mail/status` 中 inbound 所需变量是否配置；它仅表示部署端配置就绪，不验证 Resend Dashboard 的 Receiving、域名 MX 或 webhook 是否真实生效，也不代表已收到邮件。D1 自动清理 180 天前的邮件并最多保留最近 500 封；当前只保留附件元数据，不下载附件文件。
+阿里云 DirectMail、腾讯云 SES 等服务可在服务商账户实际开通 SMTP 服务、提供有效 SMTP 主机/用户名/密码且 Cloudflare 部署能连通该服务器时，通过 `MAIL_PROVIDER=smtp` 使用。当前仓库没有为这些服务商单独编写 HTTP API 适配器；开户、域名验证、发送额度和 SMTP 参数按各服务商控制台为准。成功配置发信并不代表具备邮件入站能力；**只有下述 Resend Receiving webhook 实现了本站来信正文接收**。Tencent Cloud 邮件事件回调可能表示发送状态，不等同于收件正文接口。
+
+后端发信变量保存在 Cloudflare Pages → Settings → Variables and Secrets，具体变量见本 README 的环境变量表。`MAIL_SENDER` 必须是已验证且被所选服务商允许使用的发件地址；Resend 示例：`Fox3 <no-reply@你的已验证域名>`。前台邮件配置仅保存在当前浏览器，不会传给服务端作为站点配置；前台“发送测试邮件”只供当前浏览器配置测试。生产验证码和后台业务邮件必须配置 Pages Functions 后端变量/Secrets 并重新部署。邮件页的后台“发送测试邮件”会真实发送至 `MAIL_SENDER`。任何只读的 Resend 域名/API 探测仅能查看域名等配置，不发送邮件；此仓库已移除独立的“检查 Resend API 连接”按钮，不要把变量状态灯误当作真实投递验证。
+
+#### 2. 注册验证码
+
+验证码由服务端安全生成并由服务端校验，注册访客不能通过前端指定验证码值。Cloudflare 部署必须绑定名为 `DB` 的 D1，并配置一个能真实发信的后端服务商、`MAIL_SENDER` 及对应密钥。可选变量：`VERIFY_CODE_LENGTH`、`VERIFY_EMAIL_SUBJECT`、`VERIFY_EMAIL_TEMPLATE`；模板变量为 `{{code}}`、`{{username}}`、`{{email}}`。应分别测试前台配置与后台环境变量配置；前台本机发送成功不表示验证码后端已经配置。
+
+#### 3. 获取 Resend API Key
+
+1. 登录 [resend.com](https://resend.com)，进入左侧 **API Keys**。
+2. 点击 **Create API Key**，选择适当权限和域名，创建后立即复制 Key，保存为 Pages Secret `RESEND_API_KEY`；丢失时通常需要重新生成。
+3. 在 **Domains** 添加发信域名，按 Resend 要求配置 DNS 并完成验证。
+4. 在 Pages Functions 环境设置 `MAIL_PROVIDER=resend`、`RESEND_API_KEY` 和 `MAIL_SENDER`，重新部署后通过单独的“发送后台测试邮件”验证真实投递。Resend API 发信使用 `POST https://api.resend.com/emails`。
+
+#### 4. 获取 Webhook Secret 并配置 Receiving
+
+1. Resend Dashboard → **Webhooks** → 新建 Webhook。
+2. Endpoint / URL 要填写**你自己的 Cloudflare Pages Functions 公网 HTTPS 地址**，例如 `https://你的项目名.pages.dev/api/webhook`；也兼容 `/api/mail/webhook`。这个 URL 不是 Resend 替你提供的地址。
+3. 选择监听 `email.received`，创建后复制 Resend 返回的 signing secret 到 Cloudflare Pages Secret `RESEND_WEBHOOK_SECRET`；通常创建时完整显示一次，丢失需重新生成。
+4. 在 Resend **Domains** 中打开需要收件的域名详情并启用 **Receiving**；按服务商指引在 DNS 管理后台添加该域名对应的 MX 记录。只有普通的邮件转发到管理员个人邮箱、未启用 Resend Receiving/MX 或未创建 Webhook，都不会把来信正文写入本站。
+
+#### 5. 收件、权限和保密边界
+
+Webhook 收到事件后，后端先按原始请求体验证 Resend/Svix 签名与时间戳，再用 `RESEND_API_KEY` 调 Receiving API 拉取正文，最后写入 binding 名为 `DB` 的 D1 表 `fox3_inbound_emails`。因此 Resend 收件还必须绑定 D1。API Key 和 Webhook Secret 均只在创建时完整显示一次的情形较常见；不要将它们放到前端代码、浏览器 localStorage、截图或公开仓库，仅存入 Cloudflare Pages Secrets。收件指示灯只表示 `/api/mail/status` 看到服务端变量/D1 配置齐备，不检查 Dashboard 的 MX/Webhook 是否真实联通，也不代表已经收到邮件。本站收件保留最近最多 500 封、清理 180 天前数据；当前存储正文和附件元数据，不下载/展示附件本体。
+
+管理员可在邮件中枢查看成功接收的 Resend 来信、撰写和回复邮件；发信及服务器收件 API 需有效管理员会话。回复注册用户时优先从 D1 用户记录解析邮箱。收件正文由 Resend webhook 获取并保存 D1；本机发件历史和前台配置保存在浏览器本地，切换设备不会自动复制这些历史/凭据。邮件转发到外部个人邮箱不会自动进入本站，本站也不是通用 IMAP 邮箱客户端。
 
 ### 商户支付与部署指南（Cloudflare Pages + Functions + D1）
 
@@ -204,6 +252,8 @@ npx wrangler d1 execute <你的数据库名称> --remote --file=migrations/0001_
 最终到账/支付成功以验签通过的服务端异步回调为准，不能依据前端跳转或用户返回页面判定。订单只能由后端数据库创建；支付 credentials 未配置或支付创建失败时，订单仍持久化并标为未支付/失败，提示检查配置，不会伪造成功。用户取消只取消未支付订单。PayPal 回跳后由服务端执行 capture，但订单仍须等 Webhook 才标记 paid；Stripe/PayPal 均可能异步完成。重复回调幂等；订单删除进入回收站并可恢复，支付审计记录保留；用户可对每笔订单发起客服对话。管理员订单视图每个订单均显示确认发货按钮，只有支付验签成功订单可发货，发货确认后用户看到已发货；管理员可原路退款，退款处理中等待渠道通知更新状态。每笔新订单会生成管理员站内通知并通过服务端验证码邮件共用的 `MAIL_SENDER` 默认发送邮件；付款验签后另发已支付通知/邮件。可选设置专用收件地址；邮件是否送达取决于配置的服务端 Secrets 和邮箱服务。
 
 **建议上线检查：**先分别使用各平台沙箱/测试密钥完成下单、成功、失败、取消、重复通知及退款测试，检查签名验证、D1 状态、幂等和通知结果；确认回调公网可达、HTTPS 和密钥正确后，再按平台规则切换正式密钥并再次核实商户资格、币种和结算设置。本文不声称已经完成商户生产实测。
+
+**代码审查记录：**支付宝预创建二维码使用 `FACE_TO_FACE_PAYMENT` 产品码；微信退款优先使用已验签回调保存的微信支付交易号，缺少该号时才使用商户订单号，并按微信接口提交原订单总额。参考 [微信支付退款申请 API](https://pay.weixin.qq.com/doc/v3/merchant/4012810597)。代码审阅、TypeScript 检查和本地构建不等于真实商户联调；在未配置各家真实商户资料、HTTPS 公网回调和证书前，不能保证账户审核、交易受理、退款到账或邮件送达。
 
 **政策页：**站点提供主页/价格（商城）/退款/隐私/服务条款/联系方式页面；站长可在网站法律与联系页编辑并保存到 D1。当前内容是政策草稿，发布前须依据实际经营主体、真实服务和适用法律审查，不构成法律意见。
 

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import { MailMessage, User } from '../../types';
 import { getAdminSessionToken } from '../../utils/adminSession';
+import { translateInline } from '../../utils/i18n';
 import {
   Mail,
   Inbox,
@@ -48,7 +49,9 @@ export const MailSection: React.FC = () => {
     setUsers,
     moveToTrash,
     showToast,
+    locale,
   } = useApp();
+  const tx = (source: string) => translateInline(locale, source);
 
   const [activeFolder, setActiveFolder] = useState<'inbox' | 'sent' | 'trash'>('inbox');
   const [selectedMail, setSelectedMail] = useState<MailMessage | null>(null);
@@ -257,9 +260,9 @@ export const MailSection: React.FC = () => {
   // Filled parameters are never called connected until an actual test message succeeds.
   const frontendOutboundConfigured = Boolean(
     (formSettings.provider === 'smtp' && formSettings.smtpHost && formSettings.smtpUser && formSettings.smtpPass && formSettings.smtpPass !== '********') ||
-    (formSettings.provider !== 'smtp' && formSettings.apiKey && formSettings.apiKey !== '********' && !formSettings.apiKey.includes('demo') && formSettings.apiKey.length >= 8)
+    (formSettings.provider !== 'smtp' && formSettings.apiKey && formSettings.apiKey !== '********' && !formSettings.apiKey.includes('demo') && formSettings.apiKey.length >= 8 && (formSettings.provider !== 'sendcloud' || formSettings.apiUser?.trim()))
   ) && Boolean(formSettings.senderEmail);
-  const frontendFingerprint = [formSettings.provider, formSettings.smtpHost, formSettings.smtpPort, formSettings.smtpSecurity, formSettings.smtpUser, formSettings.smtpPass, formSettings.apiKey, formSettings.senderEmail].join('|');
+  const frontendFingerprint = [formSettings.provider, formSettings.smtpHost, formSettings.smtpPort, formSettings.smtpSecurity, formSettings.smtpUser, formSettings.smtpPass, formSettings.apiUser, formSettings.apiKey, formSettings.senderEmail].join('|');
   const isFrontendConnected = frontendOutboundConfigured && frontendTestFingerprint === frontendFingerprint;
   const isFrontendTestFailed = frontendOutboundConfigured && frontendTestFailedFingerprint === frontendFingerprint;
   const isBackendConnected = backendMailConfigured === true && backendTestResult === true;
@@ -513,20 +516,26 @@ export const MailSection: React.FC = () => {
           <div className="p-4 bg-sky-50/70 dark:bg-sky-950/40 border border-sky-200/80 dark:border-sky-900/60 rounded-2xl space-y-2 text-xs">
             <div className="flex items-center gap-2 font-bold text-sky-800 dark:text-sky-200 text-sm">
               <ShieldCheck className="w-4 h-4 text-sky-500 shrink-0" />
-              <span>站内发信与收信配置指南 & 后端环境变量说明</span>
+              <span>{tx('站内发信与收信配置指南 & 后端环境变量说明')}</span>
             </div>
             <div className="text-slate-600 dark:text-slate-300 leading-relaxed space-y-1">
-              <p><b>1. 推荐 Resend API (HTTPS)：</b>在 Resend 创建 API Key，并验证发件域名。Cloudflare Pages → Settings → Variables and Secrets 设置 <code>MAIL_PROVIDER=resend</code>、<code>RESEND_API_KEY</code> 与 <code>MAIL_SENDER</code>（例如 <code>Fox3 &lt;no-reply@你的已验证域名&gt;</code>）；此方式无需 SMTP 主机、端口、用户名或密码。新建配置默认选择 Resend API，已有 SMTP 配置仍可手动切换。</p>
-              <p><b>2. 前台配置与正式邮件：</b>前台填写的发信配置仅保存在当前浏览器，仅用于当前浏览器的手动发信/测试，不会提供给服务端作为全站配置。正式注册验证码和后台业务通知必须在 Cloudflare Pages Functions 环境配置所需后端变量/Secrets，并重新部署后才会生效；“发送后台测试邮件”会实际发送至 MAIL_SENDER。</p>
-              <p><b>3. 注册验证码：</b>验证码在服务端生成和验证。可在 Pages Variables/Secrets 设置 <code>VERIFY_CODE_LENGTH</code>、<code>VERIFY_EMAIL_SUBJECT</code>、<code>VERIFY_EMAIL_TEMPLATE</code>；模板变量为 {'{{code}}'}、{'{{username}}'}、{'{{email}}'}。验证码投递使用后台配置的 Resend API。</p>
-              <p><b>4. 管理员收信与可选事件留存：</b>管理员收信由邮件服务端规则转发至管理员个人邮箱；本站邮箱页不是管理员个人邮箱的真实收件箱。若启用 <code>email.received</code> Webhook（<code>/api/webhook</code>，兼容旧路径 <code>/api/mail/webhook</code>），并配置 <code>RESEND_WEBHOOK_SECRET</code>、<code>RESEND_API_KEY</code> 和 D1，则可将经验证并成功取回的邮件事件/正文可选留存到 D1，供本站查看；这不等同于个人邮箱收件箱。收件状态以 <code>/api/mail/status</code> 返回的 <code>inbound</code> 配置状态为准；变量正确并部署后显示服务端就绪，不表示已收到邮件。</p>
+              <p>{tx('1. 发信通道：推荐 Resend API（HTTPS），也支持通用 SMTP、Brevo API、SendGrid API 和 SendCloud API。阿里云 DirectMail、腾讯云 SES 可在服务商已开通 SMTP、提供有效参数且部署网络可连通时，选择通用 SMTP 使用；本仓库没有为它们单独适配 HTTP API。SendCloud API 需要单独配置 SENDCLOUD_API_USER、SENDCLOUD_API_KEY，并将 MAIL_PROVIDER 设为 sendcloud；免费额度与发送权限以服务商实际账号状态为准。')}</p>
+              <p>{tx('2. 前台与后台配置：前台发信设置只保存在当前浏览器，不会配置全站服务器。注册验证码和后台自动邮件必须在 Cloudflare Pages 后台 Variables/Secrets 配置通道凭据及 MAIL_SENDER，并重新部署；前台配置与后台配置应分开测试。')}</p>
+              <p>{tx('3. 注册验证码：验证码由服务端生成并校验；Cloudflare 部署需绑定 D1，并配置可用的后台发信通道。可选设置 VERIFY_CODE_LENGTH、VERIFY_EMAIL_SUBJECT、VERIFY_EMAIL_TEMPLATE；模板变量为 {{code}}、{{username}}、{{email}}。')}</p>
+              <p>{tx('4. 获取 RESEND_API_KEY：登录 resend.com，进入左侧 API Keys，点击 Create API Key，选择所需权限和域名后创建并立即复制。不要将密钥放在前端代码或公开仓库。')}</p>
+              <p>{tx('5. 获取 RESEND_WEBHOOK_SECRET 并配置 Webhook：在 Resend Webhooks 创建 Webhook；Endpoint / URL 填写你自己的 Pages Functions 地址，例如 https://你的项目名.pages.dev/api/webhook，监听 email.received。创建后复制 signing secret，保存为 RESEND_WEBHOOK_SECRET；接口也兼容旧路径 /api/mail/webhook。')}</p>
+              <p>{tx('6. 配置收件域名和 MX：在 Domains 添加域名；如需接收邮件，在域名详情启用 Receiving，并按 Resend 指示在域名 DNS 后台配置 MX 记录。')}</p>
+              <p>{tx('重要：Webhook URL 是你自己的 Pages Functions 接口，不是 Resend 提供的地址。RESEND_API_KEY 与 RESEND_WEBHOOK_SECRET 通常只在创建时完整显示一次，丢失后需重新生成。Webhook 验签通过后，服务端用 RESEND_API_KEY 调 Receiving API 取回正文并存入绑定名为 DB 的 D1；普通转发到个人邮箱不会把来信导入本站。')}</p>
+              <p>{tx('7. 站内邮件：管理员可在邮件中枢查看服务器收件箱、撰写和回复；发送及收件箱 API 需有效管理员会话。回复注册邮箱时优先从 D1 用户记录解析地址；前台/本机发件历史保存在浏览器，Resend 来信正文保存在 D1。')}</p>
+              <p>{tx('Resend API 域名连接检查只读域名信息，不会发送邮件；本页不显示独立的 Resend 检查按钮。要验证真实投递，请使用单独的测试邮件按钮。')}</p>
+              <p>{tx('目前只有 Resend Receiving 的 email.received webhook 会将经服务端验签并取回正文的来信保存到 D1；其他发信渠道不自动提供本站收件。状态灯只表示所需服务端变量已配置，不代表 MX/Webhook 实测成功或已经收到邮件。')}</p>
             </div>
           </div>
 
           <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
             <div className="flex items-center gap-2 text-rose-500 font-bold text-sm">
               <ShieldCheck className="w-4 h-4" />
-              <span>邮件服务提供商与收发限制参数设定</span>
+              <span>{tx('邮件服务提供商与收发限制参数设定')}</span>
             </div>
             <button
               onClick={() => setShowConfig(false)}
@@ -556,10 +565,10 @@ export const MailSection: React.FC = () => {
                 </select>
                 <div className="flex flex-wrap gap-2">
                   <button type="button" disabled={testingStatus || !frontendOutboundConfigured} onClick={() => handleTestMail('frontend')} className="px-3 py-1.5 rounded-lg bg-sky-600 disabled:opacity-40 text-white text-[11px] font-semibold">
-                    {testingStatus ? '测试中…' : '发送前台测试邮件'}
+                    {testingStatus ? tx('测试中…') : tx('发送前台测试邮件')}
                   </button>
                   <button type="button" disabled={testingStatus || !backendMailConfigured} onClick={() => handleTestMail('backend')} className="px-3 py-1.5 rounded-lg bg-indigo-600 disabled:opacity-40 text-white text-[11px] font-semibold">
-                    {testingStatus ? '测试中…' : '发送后台测试邮件'}
+                    {testingStatus ? tx('测试中…') : tx('发送后台测试邮件')}
                   </button>
                   <span className="self-center text-[10px] text-slate-500">测试邮件会真实发回发件地址；前台配置仅用于当前浏览器测试，正式验证码及后台通知需配置并部署后端环境变量。</span>
                 </div>
@@ -568,7 +577,7 @@ export const MailSection: React.FC = () => {
 
               <div>
                 <label className="block text-xs text-slate-500 mb-1">
-                  发信服务与加密方式 <span className="text-rose-500 font-bold">[必填]</span>
+                  {tx('发信服务与加密方式')} <span className="text-rose-500 font-bold">[必填]</span>
                 </label>
                 <select
                   value={formSettings.provider}
@@ -577,10 +586,19 @@ export const MailSection: React.FC = () => {
                 >
                   <option value="resend">Resend API (HTTPS，推荐)</option>
                   <option value="smtp">SMTP (SSL 465 / STARTTLS 587)</option>
+                  <option value="sendcloud">{tx('SendCloud API (国内服务，按账户额度)')}</option>
                   <option value="brevo">Brevo API (HTTPS)</option>
                   <option value="sendgrid">Twilio SendGrid API (HTTPS)</option>
                 </select>
               </div>
+
+              {formSettings.provider === 'sendcloud' && (
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">{tx('SendCloud API_USER（触发邮件账号）')}</label>
+                  <input type="text" value={formSettings.apiUser || ''} onChange={event => setFormSettings({ ...formSettings, apiUser: event.target.value })} placeholder={tx('从 SendCloud 控制台 API_USER 页面复制')} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-xs dark:border-slate-700 dark:bg-slate-800" />
+                  <p className="mt-1 text-[10px] text-slate-500">{tx('SendCloud API_USER 与 API_KEY 是两项独立凭据；免费额度、域名验证和发送权限由服务商账户决定。')}</p>
+                </div>
+              )}
 
               {formSettings.provider !== 'smtp' ? (
                 <div>
