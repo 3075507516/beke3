@@ -264,6 +264,8 @@ export interface SystemSettings {
   globalTheme: GlobalThemeMode; // 'modern' or 'retro'
   deviceView: DeviceViewMode; // 'responsive' or 'mobile'
   timezone?: string; // Timezone setting, e.g. 'Asia/Shanghai', 'UTC', 'America/New_York'
+  siteLayout?: 'airy' | 'compact' | 'editorial' | 'sidebar' | 'mobile-first';
+  uploadedThemeName?: string;
 }
 
 export interface PaymentSettings {

@@ -15,7 +15,6 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { translateInline } from '../../utils/i18n';
-import { SiteOwnerChat } from './SiteOwnerChat';
 
 export const GuideSection: React.FC = () => {
   const { locale } = useApp();
@@ -31,14 +30,14 @@ export const GuideSection: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {/* Deployment guide intro and persistent site-owner support chat */}
-      <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+      {/* Deployment guide intro */}
+      <div className="grid items-start gap-4">
         <div className="space-y-2 rounded-3xl border border-slate-200/80 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
           <h2 className="flex items-center gap-2 font-serif-sc text-xl font-bold text-slate-900 dark:text-slate-100 md:text-2xl"><HelpCircle className="h-6 w-6 text-rose-500"/><span>{tx('fox3 博客全平台极速部署指引与 D1 / R2 / WebDAV 使用说明')}</span></h2>
-          <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-400">{tx('部署存储概览：D1 保存博客、账户和媒体目录；R2/COS/OSS/S3 保存文件本体。成功上传到对象存储的图片和视频可跨设备查看；仅保存到 IndexedDB 的回退文件只在本机可用。电子书正文按需读取原文件，不写入 D1。')}</p>
+          <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-400">{tx('项目存储架构：D1 保存用户/订单/对话/站点结构化内容与文件索引；R2 保存原始图片、视频、电子书等二进制文件；KV 只用于验证码限流等短期数据，不应用作权威内容库。浏览器 localStorage/IndexedDB 仅作缓存和临时草稿。推荐绑定 DB=D1、R2_BUCKET=R2；大文件上传必须使用 R2。')}</p>
+          <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-400">{tx('大文件上传需要绑定 Cloudflare R2；本项目当前采用 8 MiB 分块、最多 10,000 块，应用有效上限为 78.125 GiB（约 83.9 GB）；R2 服务自身上限 5 TiB。断线后暂不支持续传，实际仍受对象存储配额、网络与浏览器限制。')}</p>
           <p className="text-xs leading-relaxed text-amber-700 dark:text-amber-300">Policies/法律页面内容为政策草稿，不是自动代写的有效法律意见；发布前请按主体、真实服务及适用法律审查。</p>
         </div>
-        <SiteOwnerChat />
       </div>
 
       {/* Platform Switcher Tabs */}
@@ -334,7 +333,7 @@ export const GuideSection: React.FC = () => {
               <p>设置 <code>OBJECT_STORAGE_PROVIDER=cos</code>、<code>COS_SECRET_ID</code>、<code>COS_SECRET_KEY</code>、<code>COS_REGION</code>（例如 <code>ap-guangzhou</code>）与 <code>COS_BUCKET</code>。</p>
               <p><code>COS_BUCKET</code> 必须填写带 APPID 的完整桶名（例如 <code>mybucket-1250000000</code>）。未单独适配的平台可选择 <code>OBJECT_STORAGE_PROVIDER=s3</code>，并提供 HTTPS <code>S3_ENDPOINT</code>、地域、桶名和 SigV4 凭据；通用接口要求兼容 path-style 请求。文件顺序为 R2 → 已选对象桶 → D1（≤1 MiB）/KV（≤18 MiB）/易失内存（≤4 MiB）；对象存储状态灯会执行只读连通探测。</p>
               <p>EdgeOne/OSS 静态部署仅提供前端，不会自动执行 Pages Functions；D1 中的账户和博客共享数据不会迁移到 COS。</p>
-              <p className="text-xs text-slate-600 dark:text-slate-300">{tx('普通文件上传接口允许单文件最大 90 MiB；浏览器上传等待上限约 10 分钟，不支持断点续传。大文件跨设备可用必须成功保存到 R2/COS/OSS/S3；若仅回退到 IndexedDB，只在原设备可访问。')}</p>
+              <p className="text-xs text-slate-600 dark:text-slate-300">{tx('超过 80 MiB 的文件使用 R2 分块上传；需绑定 R2_BUCKET。R2 服务单对象上限为 5 TiB；但本项目当前 8 MiB 分块最多 10,000 块，应用有效上限为 78.125 GiB（约 83.9 GB）。当前不支持断线自动续传。COS/OSS/S3 后备仍经过 Pages Functions 单请求上传，不能通过本分块功能上传超大文件；若文件只落入 IndexedDB，仅原设备可访问。')}</p>
             </div>
           </div>
 
@@ -409,7 +408,7 @@ export const GuideSection: React.FC = () => {
               <p>设置 <code>OBJECT_STORAGE_PROVIDER=oss</code>、<code>OSS_ACCESS_KEY_ID</code>、<code>OSS_ACCESS_KEY_SECRET</code>、<code>OSS_REGION</code>（例如 <code>cn-hangzhou</code>）与 <code>OSS_BUCKET</code>。</p>
               <p>文件顺序为 R2 → OSS → D1（≤1 MiB）/KV（≤18 MiB）/易失内存（≤4 MiB）。连通灯会发起只读 Bucket 请求；D1 账户、验证码和同步数据不会迁移到 OSS。</p>
               <p>OSS 静态托管只提供前端；请勿在浏览器客户端或公开静态资源中嵌入任何云存储密钥。</p>
-              <p className="text-xs text-slate-600 dark:text-slate-300">{tx('普通文件上传接口允许单文件最大 90 MiB；浏览器上传等待上限约 10 分钟，不支持断点续传。大文件跨设备可用必须成功保存到 R2/COS/OSS/S3；若仅回退到 IndexedDB，只在原设备可访问。')}</p>
+              <p className="text-xs text-slate-600 dark:text-slate-300">{tx('超过 80 MiB 的文件使用 R2 分块上传；需绑定 R2_BUCKET。R2 服务单对象上限为 5 TiB；但本项目当前 8 MiB 分块最多 10,000 块，应用有效上限为 78.125 GiB（约 83.9 GB）。当前不支持断线自动续传。COS/OSS/S3 后备仍经过 Pages Functions 单请求上传，不能通过本分块功能上传超大文件；若文件只落入 IndexedDB，仅原设备可访问。')}</p>
             </div>
           </div>
         </div>
@@ -486,7 +485,8 @@ export const GuideSection: React.FC = () => {
           <div className="space-y-2 text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
             <p><b>1. 展台与商品管理：</b>管理员可创建商品展台、管理商品图片与自定义分类；订单由后端数据库创建并持久化。支付生产部署必须使用 Cloudflare Pages + Pages Functions + D1（binding 名称 <code>DB</code>），按顺序执行 <code>migrations/0002_commerce.sql</code>、<code>migrations/0003_order_trash.sql</code>。已有 0002 的数据库只需在部署新版前运行 0003。D1 持久保存订单、站内会话、消息、通知和可编辑法律页面；订单删除进入回收站，付款记录不会物理删除；网站内容 D1 与 WebDAV 备份严格分离。</p>
             <p><b>2. 商户开户与资质：</b>准备企业/个体户营业执照、法人身份证、结算账户。支付宝申请电脑网站支付、手机网站支付；微信支付商户平台申请 PC 网站支付（Native/H5），PC 接入要求备案域名；Stripe 注册账户取得 Publishable/Secret Key（本项目仅由服务器使用 Secret，Publishable key 目前不参与结账）；PayPal 企业账户创建应用取得 Client ID/Secret。国内服务器须完成 ICP 备案；全程必须 HTTPS。商户资格、币种及结算以账户审核和实测为准，本代码不提供 FX，也不承诺审批或平台实际收款。</p>
-            <p><b>3. Pages Secrets（仅服务端）：</b>Alipay：<code>ALIPAY_APP_ID</code>、<code>ALIPAY_PRIVATE_KEY</code>（PKCS#8）、<code>ALIPAY_PUBLIC_KEY</code>，可选 <code>ALIPAY_PID</code>、<code>ALIPAY_GATEWAY</code>；WeChat：<code>WECHAT_MCHID</code>、<code>WECHAT_APPID</code>、<code>WECHAT_SERIAL_NO</code>、<code>WECHAT_PRIVATE_KEY</code>（PKCS#8）、<code>WECHAT_API_V3_KEY</code>（32 ASCII bytes）、<code>WECHAT_PLATFORM_CERT</code>、<code>WECHAT_NOTIFY_URL=https://你的域名/api/payments/webhook/wechat</code>；Stripe：<code>STRIPE_SECRET_KEY</code>、<code>STRIPE_WEBHOOK_SECRET</code>；PayPal：<code>PAYPAL_CLIENT_ID</code>、<code>PAYPAL_CLIENT_SECRET</code>、<code>PAYPAL_WEBHOOK_ID</code>、<code>PAYPAL_API_BASE</code>（默认 Sandbox，正式为 <code>https://api-m.paypal.com</code>）。付款密钥绝不写入前端、localStorage、D1 或仓库。</p>
+            <p>{tx('支付宝应用私钥支持 PEM 编码的 PKCS#8（BEGIN PRIVATE KEY，Java 常见）和 PKCS#1（BEGIN RSA PRIVATE KEY，非 Java 常见）；请勿粘贴 Java 源代码、引号或公钥。私钥需含完整 BEGIN/END 行；若平台 Secret 保存为字面量 \\n，代码会转换成真实换行。请同时核对 APPID 对应的应用公钥已上传、支付宝公钥来自当前应用，以及 RSA2 签名类型。')}</p>
+            <p><b>3. Pages Secrets（仅服务端）：</b>Alipay：<code>ALIPAY_APP_ID</code>、<code>ALIPAY_PRIVATE_KEY</code>（PEM PKCS#8 / PKCS#1，支持 BEGIN PRIVATE KEY 或 BEGIN RSA PRIVATE KEY）、<code>ALIPAY_PUBLIC_KEY</code>，可选 <code>ALIPAY_PID</code>（商户 PID，会传入 biz_content.seller_id）、<code>ALIPAY_NOTIFY_URL</code>、<code>ALIPAY_GATEWAY</code>；WeChat：<code>WECHAT_MCHID</code>、<code>WECHAT_APPID</code>、<code>WECHAT_SERIAL_NO</code>、<code>WECHAT_PRIVATE_KEY</code>（PKCS#8）、<code>WECHAT_API_V3_KEY</code>（32 ASCII bytes）、<code>WECHAT_PLATFORM_CERT</code>、<code>WECHAT_NOTIFY_URL=https://你的域名/api/payments/webhook/wechat</code>；Stripe：<code>STRIPE_SECRET_KEY</code>、<code>STRIPE_WEBHOOK_SECRET</code>；PayPal：<code>PAYPAL_CLIENT_ID</code>、<code>PAYPAL_CLIENT_SECRET</code>、<code>PAYPAL_WEBHOOK_ID</code>、<code>PAYPAL_API_BASE</code>（默认 Sandbox，正式为 <code>https://api-m.paypal.com</code>）。付款密钥绝不写入前端、localStorage、D1 或仓库。</p>
             <p><b>4. Webhook 配置：</b>服务端 endpoints：<code>/api/payments/webhook/alipay</code>、<code>/api/payments/webhook/wechat</code>、<code>/api/payments/webhook/stripe</code>、<code>/api/payments/webhook/paypal</code>。支付宝配置异步通知，微信配置回调。Stripe Dashboard 监听 <code>checkout.session.completed</code>、<code>checkout.session.async_payment_succeeded</code>、<code>checkout.session.async_payment_failed</code>、<code>checkout.session.expired</code>、<code>charge.refunded</code>、<code>refund.updated</code>；PayPal 至少订阅 <code>PAYMENT.CAPTURE.COMPLETED</code>、<code>PAYMENT.CAPTURE.DENIED</code>、<code>PAYMENT.CAPTURE.REFUNDED</code>。</p>
             <p><b>5. Webhook 六步：</b>①用户付款；②平台 POST 到 notify_url，提供订单号/金额/状态/签名；③后端验签；④验签通过后核订单与金额，更新订单/会员并持久化，再返回成功；⑤验签失败返回错误且不更新订单；⑥重复回调幂等。最终支付以验签的服务端异步回调为准，不依据前端跳转。</p>
             <p><b>6. 订单生命周期：</b>正常、失败、取消、重复回调、退款均由后端状态处理。订单先写入 D1；即使支付渠道创建失败，也会保留为未支付/失败状态。每笔订单创建时管理员都会收到明确标注未支付的站内通知和邮件，异步回调验签成功后再收到已支付通知和邮件；默认邮件收件人为验证码邮件通道的 <code>MAIL_SENDER</code>，也可设置独立接收地址。用户可删除自己的订单，管理员可管理所有订单；删除进入回收站，可恢复，不删除支付审计记录。用户取消只取消未支付订单；PayPal 回跳后服务端执行 capture，但 paid 仍等待 Webhook；Stripe/PayPal 支持异步结果。订单区的管理员确认发货按钮始终可见，但只有验签已支付订单才可发货；确认后用户看到已发货。管理员可原路退款并通过订单对话按钮快速联系客户。</p>

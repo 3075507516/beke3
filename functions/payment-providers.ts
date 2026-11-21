@@ -25,9 +25,30 @@ function assertOrder(o: PaymentOrder): void {
 function asBuffer(a: Uint8Array): ArrayBuffer { return a.slice().buffer as ArrayBuffer; }
 function b64bytes(s: string): Uint8Array { const b = atob(s.replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from(b, c => c.charCodeAt(0)); }
 function b64(a: ArrayBuffer | Uint8Array): string { const u = a instanceof Uint8Array ? a : new Uint8Array(a); let s=''; for (const x of u) s += String.fromCharCode(x); return btoa(s); }
-function pemBytes(pem: string): Uint8Array { const clean = pem.replace(/-----BEGIN [^-]+-----|-----END [^-]+-----|\s/g, ''); return b64bytes(clean); }
+function normalizePem(pem: string): string { return pem.replace(/\\n/g, '\n').trim(); }
+function pemBytes(pem: string): Uint8Array {
+  const clean = normalizePem(pem).replace(/-----BEGIN [^-]+-----|-----END [^-]+-----|\s/g, '');
+  return b64bytes(clean);
+}
+function pkcs1ToPkcs8(pkcs1: Uint8Array): Uint8Array {
+  // PrivateKeyInfo ::= SEQUENCE { version, rsaEncryption AlgorithmIdentifier, OCTET STRING RSAPrivateKey }
+  const prefix = Uint8Array.from([0x30,0x0d,0x06,0x09,0x2a,0x86,0x48,0x86,0xf7,0x0d,0x01,0x01,0x01,0x05,0x00]);
+  const len = (n: number): number[] => n < 128 ? [n] : n < 256 ? [0x81,n] : [0x82,(n >>> 8) & 255,n & 255];
+  const octet = [0x04, ...len(pkcs1.length), ...pkcs1];
+  const body = [0x02,0x01,0x00,...prefix,...octet];
+  return Uint8Array.from([0x30,...len(body.length),...body]);
+}
 async function importPrivate(pem: string, alg: 'RSASSA-PKCS1-v1_5'|'RSA-PSS' = 'RSASSA-PKCS1-v1_5'): Promise<CryptoKey> {
-  return crypto.subtle.importKey('pkcs8', asBuffer(pemBytes(pem)), { name: alg, hash: 'SHA-256' }, false, ['sign']);
+  const normalized = normalizePem(pem);
+  const isPkcs1 = /-----BEGIN RSA PRIVATE KEY-----/.test(normalized);
+  const isPkcs8 = /-----BEGIN PRIVATE KEY-----/.test(normalized);
+  if (!isPkcs1 && !isPkcs8) throw new Error('Invalid private key PEM: expected PKCS#8 (BEGIN PRIVATE KEY) or PKCS#1 (BEGIN RSA PRIVATE KEY)');
+  try {
+    const der = pemBytes(normalized);
+    return await crypto.subtle.importKey('pkcs8', asBuffer(isPkcs1 ? pkcs1ToPkcs8(der) : der), { name: alg, hash: 'SHA-256' }, false, ['sign']);
+  } catch {
+    throw new Error('Private key import failed: verify the complete PEM block, RSA key type, matching app public key, and absence of quotes/spaces altered by environment variables');
+  }
 }
 async function importPublic(pem: string): Promise<CryptoKey> {
   const der=pemBytes(pem);
@@ -53,7 +74,7 @@ async function hmacHex(keyBytes: Uint8Array, data: string): Promise<string> { co
 function equal(a:string,b:string):boolean { if(a.length!==b.length)return false;let x=0;for(let i=0;i<a.length;i++)x|=a.charCodeAt(i)^b.charCodeAt(i);return x===0; }
 async function request(url:string, init:RequestInit):Promise<Response>{const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),timeoutMs);try{return await fetch(url,{...init,signal:controller.signal});}catch(e){if((e as any)?.name==='AbortError')throw new Error('Payment provider request timed out');throw new Error('Payment provider request failed');}finally{clearTimeout(timer);}}
 async function responseJson(r:Response, provider:string):Promise<any>{const text=await r.text();if(text.length>MAX_BODY)throw new Error(`${provider} response too large`);let obj:any;try{obj=JSON.parse(text);}catch{throw new Error(`${provider} returned an invalid response`);}if(!r.ok)throw new Error(`${provider} request failed (${r.status}): ${safeMessage(obj)}`);return obj;}
-function safeMessage(o:any):string {const s=String(o?.error?.message||o?.message||o?.details?.[0]?.description||o?.msg||'provider error').replace(/[\r\n]/g,' ').slice(0,180);return s;}
+function safeMessage(o:any):string {const s=String(o?.error?.message||o?.message||o?.details?.[0]?.description||o?.sub_msg||o?.sub_code||o?.msg||'provider error').replace(/[\r\n]/g,' ').slice(0,180);return s;}
 async function readBody(request:Request,rawBody?:string):Promise<string>{if(rawBody!==undefined){if(rawBody.length>MAX_BODY)throw new Error('Webhook body exceeds size limit');return rawBody;}const n=Number(request.headers.get('content-length')||0);if(n>MAX_BODY)throw new Error('Webhook body exceeds size limit');const t=await request.text();if(t.length>MAX_BODY)throw new Error('Webhook body exceeds size limit');return t;}
 function minorToDecimal(minor:number,currency:string):string {const digits=['JPY','KRW','VND'].includes(currency.toUpperCase())?0:3; // provider amounts use currency exponent below
   const exp=currencyExponent(currency);return (minor/10**exp).toFixed(exp);}
@@ -74,7 +95,7 @@ export async function createPayment(provider:PaymentProvider, order:PaymentOrder
     const token=await paypalToken(env),api=paypalBase(env),currency=order.currency.toUpperCase();const j=await responseJson(await request(`${api}/v2/checkout/orders`,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json','PayPal-Request-Id':order.id},body:JSON.stringify({intent:'CAPTURE',purchase_units:[{reference_id:order.id,invoice_id:order.id,custom_id:order.id,description:order.productName,amount:{currency_code:currency,value:minorToDecimal(order.amountMinor,currency)}}],application_context:{return_url:new URL(`/?paymentOrder=${encodeURIComponent(order.id)}`,base).toString(),cancel_url:new URL(`/?paymentCancel=${encodeURIComponent(order.id)}`,base).toString()}})}),'PayPal');const approve=j.links?.find((x:any)=>x.rel==='approve'||x.rel==='payer-action')?.href;if(!j.id||!approve)throw new Error('PayPal response missing approval URL');return {redirectUrl:approve,providerOrderId:j.id};
   }
   if(provider==='alipay'){
-    const appId=required(env,'ALIPAY_APP_ID'),privateKey=await importPrivate(required(env,'ALIPAY_PRIVATE_KEY'));const params:Record<string,string>={app_id:appId,method:'alipay.trade.precreate',format:'JSON',charset:'utf-8',sign_type:'RSA2',timestamp:new Date().toISOString().replace('T',' ').slice(0,19),version:'1.0',biz_content:JSON.stringify({out_trade_no:order.id,total_amount:minorToDecimal(order.amountMinor,order.currency),subject:order.productName,product_code:'FACE_TO_FACE_PAYMENT'})};if(env.ALIPAY_PID)params.p_pid=env.ALIPAY_PID;params.sign=await rsaSign(Object.keys(params).sort().filter(k=>params[k]!==''&&params[k]!=null).map(k=>`${k}=${params[k]}`).join('&'),privateKey);const form=new URLSearchParams(params);const gateway=env.ALIPAY_GATEWAY||'https://openapi.alipay.com/gateway.do';if(!gateway.startsWith('https://'))throw new Error('Alipay gateway must use HTTPS');const j=await responseJson(await request(gateway,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=utf-8'},body:form}),'Alipay');const data=j.alipay_trade_precreate_response;if(data?.code!=='10000'||!data.qr_code)throw new Error(`Alipay precreate failed: ${safeMessage(data)}`);return {qrCode:data.qr_code,providerOrderId:order.id};
+    const appId=required(env,'ALIPAY_APP_ID'),privateKey=await importPrivate(required(env,'ALIPAY_PRIVATE_KEY'));const params:Record<string,string>={app_id:appId,method:'alipay.trade.precreate',format:'JSON',charset:'utf-8',sign_type:'RSA2',timestamp:new Date().toISOString().replace('T',' ').slice(0,19),version:'1.0',biz_content:JSON.stringify({out_trade_no:order.id,total_amount:minorToDecimal(order.amountMinor,order.currency),subject:order.productName,product_code:'FACE_TO_FACE_PAYMENT',...(env.ALIPAY_PID?.trim()?{seller_id:env.ALIPAY_PID.trim()}:{})})};if(env.ALIPAY_NOTIFY_URL?.trim())params.notify_url=env.ALIPAY_NOTIFY_URL.trim();params.sign=await rsaSign(Object.keys(params).sort().filter(k=>params[k]!==''&&params[k]!=null).map(k=>`${k}=${params[k]}`).join('&'),privateKey);const form=new URLSearchParams(params);const gateway=env.ALIPAY_GATEWAY||'https://openapi.alipay.com/gateway.do';if(!gateway.startsWith('https://'))throw new Error('Alipay gateway must use HTTPS');const j=await responseJson(await request(gateway,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded;charset=utf-8'},body:form}),'Alipay');const data=j.alipay_trade_precreate_response;if(data?.code!=='10000'||!data.qr_code)throw new Error(`Alipay precreate failed: ${safeMessage(data)}`);return {qrCode:data.qr_code,providerOrderId:order.id};
   }
   if(provider==='wechat'){
     const notify=required(env,'WECHAT_NOTIFY_URL');if(!notify.startsWith('https://'))throw new Error('WECHAT_NOTIFY_URL must be public HTTPS');const mch=required(env,'WECHAT_MCHID'),appid=required(env,'WECHAT_APPID'),serial=required(env,'WECHAT_SERIAL_NO'),key=await importPrivate(required(env,'WECHAT_PRIVATE_KEY'));const body=JSON.stringify({appid,mchid:mch,description:order.productName,out_trade_no:order.id,notify_url:notify,amount:{total:order.amountMinor,currency:order.currency.toUpperCase()}});const path='/v3/pay/transactions/native',ts=String(Math.floor(Date.now()/1000)),nonce=crypto.randomUUID().replace(/-/g,'');const signature=await rsaSign(`POST\n${path}\n${ts}\n${nonce}\n${body}\n`,key);const auth=`WECHATPAY2-SHA256-RSA2048 mchid="${mch}",nonce_str="${nonce}",timestamp="${ts}",serial_no="${serial}",signature="${signature}"`;const j=await responseJson(await request(`https://api.mch.weixin.qq.com${path}`,{method:'POST',headers:{Authorization:auth,'Accept':'application/json','Content-Type':'application/json'},body}),'WeChat Pay');if(!j.code_url)throw new Error('WeChat Pay response missing QR code URL');return {qrCode:j.code_url,providerOrderId:order.id};

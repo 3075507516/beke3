@@ -955,7 +955,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!siteContentReadyRef.current || !getAdminSessionToken()) return;
     if (siteContentTimeoutRef.current) clearTimeout(siteContentTimeoutRef.current);
     siteContentTimeoutRef.current = setTimeout(async () => {
-      const publicSettingKeys = ['siteName', 'headerTagline', 'shopCategories', 'themeColor', 'customPaletteBg', 'fullBackgroundUrl', 'avatarUrl', 'heroIntroImage', 'heroBadge', 'heroTitle', 'heroSubtitle', 'transparentCards', 'bottomButtonsEnabled', 'hideNonBlogForGuests', 'allowUserMediaManagement', 'globalTheme', 'deviceView', 'timezone'];
+      const publicSettingKeys = ['siteName', 'headerTagline', 'shopCategories', 'themeColor', 'customPaletteBg', 'fullBackgroundUrl', 'avatarUrl', 'heroIntroImage', 'heroBadge', 'heroTitle', 'heroSubtitle', 'transparentCards', 'bottomButtonsEnabled', 'hideNonBlogForGuests', 'allowUserMediaManagement', 'globalTheme', 'deviceView', 'timezone', 'siteLayout', 'uploadedThemeName'];
       const hasLocalUrl = (value: unknown) => typeof value === 'string' && /^(?:idb_file_|data:|blob:)/i.test(value);
       const removeLocalRefs = (value: string) => value.replace(/(?:idb_file_[\w.-]+|data:[^\s"'<>)]*)/gi, '');
       const publicSettings = Object.fromEntries(publicSettingKeys.filter(key => (systemSettings as any)[key] !== undefined && !hasLocalUrl((systemSettings as any)[key])).map(key => [key, (systemSettings as any)[key]]));
@@ -1136,12 +1136,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Robust file upload with real XMLHttpRequest progress tracking & local fallback
   const uploadFile = async (file: File): Promise<{ url: string; size: number; name: string }> => {
-    if (file.size > 90 * 1024 * 1024) {
-      const error = new Error('单个文件超过 90 MiB 上传上限；请压缩/拆分文件后重新上传。超过上限的文件不会回退到本机并伪装成跨设备成功。');
-      showToast(error.message, 'error');
-      throw error;
-    }
     startTransfer('upload', file.name);
+    // Cloudflare's default per-request body ceiling is 100 MB; large files must bypass
+    // it using small independently retryable R2 multipart requests.
+    if (file.size > 80 * 1024 * 1024) {
+      const chunkSize = 8 * 1024 * 1024;
+      let uploadId = '', key = '';
+      try {
+        const created = await fetch('/api/upload/multipart/create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: file.name, type: file.type || 'application/octet-stream', size: file.size }) });
+        const init = await created.json();
+        if (!created.ok || !init.success) throw new Error(init.error || `R2 分块上传初始化失败 (HTTP ${created.status})`);
+        uploadId = init.uploadId; key = init.key;
+        const parts: Array<{ partNumber: number; etag: string }> = [];
+        const count = Math.ceil(file.size / chunkSize);
+        for (let i = 0; i < count; i++) {
+          const partNumber = i + 1;
+          const response = await fetch(`/api/upload/multipart/part?key=${encodeURIComponent(key)}&uploadId=${encodeURIComponent(uploadId)}&partNumber=${partNumber}`, { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: file.slice(i * chunkSize, Math.min(file.size, (i + 1) * chunkSize)) });
+          const result = await response.json();
+          if (!response.ok || !result.success || !result.part?.etag) throw new Error(result.error || `第 ${partNumber} 个文件分块上传失败`);
+          parts.push(result.part);
+          updateTransferPercent(Math.min(96, Math.round(((i + 1) / count) * 96)));
+        }
+        const completed = await fetch('/api/upload/multipart/complete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, uploadId, parts, name: file.name, type: file.type || 'application/octet-stream', size: file.size }) });
+        const result = await completed.json();
+        if (!completed.ok || !result.success) throw new Error(result.error || 'R2 分块上传未完成');
+        addStorageUsage(file.size); updateTransferPercent(100); finishTransfer();
+        showToast(`文件《${file.name}》已分块上传至 Cloudflare R2。`, 'success');
+        return { url: result.url, size: file.size, name: file.name };
+      } catch (error: any) {
+        if (uploadId && key) void fetch('/api/upload/multipart/abort', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, uploadId }) }).catch(() => undefined);
+        finishTransfer(); showToast(`大文件上传失败：${error?.message || '请检查 R2_BUCKET、R2 访问权限和网络'}`, 'error'); throw error;
+      }
+    }
 
     return new Promise(async (resolve, reject) => {
       let isCompleted = false;

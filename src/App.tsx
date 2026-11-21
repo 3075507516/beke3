@@ -14,12 +14,14 @@ import { WebDavBackupSection } from './components/backup/WebDavBackupSection';
 import { SettingsSection } from './components/settings/SettingsSection';
 import { GuideSection } from './components/guide/GuideSection';
 import { LegalPagesSection } from './components/legal/LegalPagesSection';
+import { SiteOwnerChat } from './components/guide/SiteOwnerChat';
+import { translateInline } from './utils/i18n';
 import { AuthModal } from './components/modals/AuthModal';
 import { TransferProgressBar } from './components/common/TransferProgressBar';
 import { ArrowUp, Sparkles, Compass } from 'lucide-react';
 
 const MainLayout: React.FC = () => {
-  const { systemSettings, currentUser, deviceMode, darkMode, themeMode, t } = useApp();
+  const { systemSettings, currentUser, deviceMode, darkMode, themeMode, t, locale } = useApp();
   const [currentTab, setCurrentTab] = useState<string>('blog');
   const [isAuthOpen, setIsAuthOpen] = useState<boolean>(false);
 
@@ -31,12 +33,12 @@ const MainLayout: React.FC = () => {
     if (params.has('paymentOrder') || params.has('paymentCancel')) setCurrentTab('shop');
   }, []);
 
-  // If non-admin tries to access admin-only tabs (sites, mail, settings, backup), redirect safely to blog
+  // Keep admin controls protected; signed-in users may open Settings for the owner-chat panel only.
   useEffect(() => {
-    if (!isAdmin && ['sites', 'mail', 'settings', 'backup'].includes(currentTab)) {
+    if ((!isAdmin && ['sites', 'mail', 'backup'].includes(currentTab)) || (currentTab === 'settings' && !currentUser)) {
       setCurrentTab('blog');
     }
-  }, [isAdmin, currentTab]);
+  }, [isAdmin, currentUser, currentTab]);
 
   // Privacy protection: if guest and restricted, redirect to blog
   useEffect(() => {
@@ -54,12 +56,17 @@ const MainLayout: React.FC = () => {
     if (deviceMode === 'mobile') {
       return 'max-w-[420px] w-full mx-auto my-6 px-3 py-4 shadow-2xl rounded-[40px] overflow-hidden border-[10px] border-slate-800 bg-slate-50 dark:bg-slate-900 min-h-[844px] transition-all duration-300 flex flex-col';
     }
+    const layout = systemSettings.siteLayout || 'airy';
+    if (layout === 'compact') return 'max-w-5xl mx-auto px-3 sm:px-4 py-4 w-full';
+    if (layout === 'editorial') return 'max-w-6xl mx-auto px-4 sm:px-8 lg:px-12 py-8 w-full';
+    if (layout === 'sidebar') return 'max-w-[1440px] mx-auto px-3 sm:px-5 py-5 w-full';
+    if (layout === 'mobile-first') return 'max-w-5xl mx-auto px-2 sm:px-5 py-4 w-full';
     return 'max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 w-full';
   };
 
   return (
     <div
-      className={`min-h-screen transition-colors duration-300 relative flex flex-col justify-between theme-${themeMode}`}
+      className={`min-h-screen transition-colors duration-300 relative flex flex-col justify-between theme-${themeMode} layout-${systemSettings.siteLayout || 'airy'}`}
       style={{
         backgroundColor: systemSettings.customPaletteBg || '#f8fafc',
         backgroundImage: systemSettings.fullBackgroundUrl
@@ -102,6 +109,12 @@ const MainLayout: React.FC = () => {
           {currentTab === 'settings' && isAdmin && (
             <div className="space-y-6">
               <SettingsSection />
+            </div>
+          )}
+          {currentTab === 'settings' && currentUser?.role === 'user' && (
+            <div className="space-y-4">
+              <h2 className="text-lg font-bold">{translateInline(locale, '设置区中的站长沟通')}</h2>
+              <SiteOwnerChat />
             </div>
           )}
           {currentTab === 'guide' && <GuideSection />}

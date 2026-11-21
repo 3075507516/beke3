@@ -545,10 +545,10 @@ export const MailSection: React.FC = () => {
             </button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 gap-4">
             {/* Third party API configuration */}
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
+            <div className="space-y-4 rounded-2xl border border-slate-200 p-4 dark:border-slate-700">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
                   <span>发信通道设置 (Outbound)</span>
                 </h4>
@@ -615,8 +615,8 @@ export const MailSection: React.FC = () => {
                 </div>
               ) : (
                 <div className="space-y-2">
-                  <div className="grid grid-cols-3 gap-2">
-                    <div className="col-span-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <div className="sm:col-span-2">
                       <label className="block text-xs text-slate-500 mb-1">
                         SMTP 发件服务器地址 <span className="text-rose-500 font-bold">[必填]</span>
                       </label>
@@ -715,8 +715,8 @@ export const MailSection: React.FC = () => {
             </div>
 
             {/* Resend Receiving & Inbound Routing */}
-            <div className="space-y-4">
-              <div className="flex items-center justify-between gap-3">
+            <div className="space-y-4 rounded-2xl border border-slate-200 p-4 dark:border-slate-700">
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
                   Resend 收件通道 (Inbound)
                 </h4>

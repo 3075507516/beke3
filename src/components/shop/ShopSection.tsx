@@ -6,6 +6,7 @@ import { SafeImage } from '../common/SafeImage';
 import { getUserSessionToken } from '../../utils/userSession';
 import { getAdminSessionToken } from '../../utils/adminSession';
 import { translateInline } from '../../utils/i18n';
+import { LegalPagesSection } from '../legal/LegalPagesSection';
 import { CheckCircle, ChevronLeft, ChevronRight, Edit3, MessageCircle, Plus, Send, ShoppingBag, Trash2, Truck, X } from 'lucide-react';
 
 type Provider = 'alipay' | 'wechat' | 'stripe' | 'paypal';
@@ -46,7 +47,7 @@ export const ShopSection: React.FC = () => {
   };
 
   const [showcase, setShowcase] = useState('all');
-  const [activeShopTab, setActiveShopTab] = useState<'products'|'orders'|'chat'>('products');
+  const [activeShopTab, setActiveShopTab] = useState<'products'|'orders'|'chat'|'legal'>('products');
   const [dialogMode, setDialogMode] = useState<'orders'|'chat'>('orders');
   const [editing, setEditing] = useState<Partial<Product> | null>(null);
   const [checkout, setCheckout] = useState<Product | null>(null);
@@ -268,7 +269,7 @@ export const ShopSection: React.FC = () => {
     {isAdmin && manageCategoriesOpen && <section className={`${panel} space-y-3 p-4`}><div><h3 className="font-bold">{tx('实体周边与商品分类管理')}</h3><p className="text-xs text-slate-500">{tx('可在商品编辑表单中选择或输入分类名称；分类数据随公开商品设置跨设备同步。')}</p></div><form className="flex gap-2" onSubmit={event => { event.preventDefault(); const name = newCategoryName.trim().slice(0, 50); if (!name) return; updateSystemSettings({ shopCategories: Array.from(new Set([...(systemSettings.shopCategories || DEFAULT_SHOP_CATEGORIES), name])) }); setNewCategoryName(''); }}><input value={newCategoryName} onChange={event => setNewCategoryName(event.target.value)} placeholder={`${tx('输入自定义分类名称')}，例如：联名周边`} className="min-w-0 flex-1 rounded-xl border bg-transparent px-3 py-2 text-sm dark:border-slate-700"/><button className="rounded-xl bg-sky-500 px-4 py-2 text-xs text-white">{tx('添加分类')}</button></form><div className="flex flex-wrap gap-2">{categoryNames.map(category => <span key={category} className="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-2.5 py-1.5 text-xs dark:bg-slate-800">{tx(category)}{!DEFAULT_SHOP_CATEGORIES.includes(category) && <button type="button" aria-label={`移除分类 ${category}`} onClick={() => { if (products.some(product => product.category === category)) { setError(`分类“${category}”仍被商品使用，请先编辑商品分类。`); return; } updateSystemSettings({ shopCategories: (systemSettings.shopCategories || []).filter(item => item !== category) }); }} className="ml-1 text-rose-600">×</button>}</span>)}</div></section>}
 
     <nav className={`${panel} flex flex-wrap gap-2 p-3`} aria-label="商品专区与对话区">
-      {([['products','商品专区'],['chat','对话区']] as const).map(([id,label]) => <button key={id} onClick={() => { setActiveShopTab(id); if (id === 'chat') setChatOpen(true); }} className={`rounded-xl px-4 py-2 text-sm ${activeShopTab === id ? 'bg-sky-500 text-white' : 'bg-slate-100 dark:bg-slate-800'}`}>{tx(label)}{id === 'chat' && currentUser ? ` (${orders.length})` : ''}</button>)}
+      {([['products','商品专区'],['chat','对话区'],['legal','政策与联系']] as const).map(([id,label]) => <button key={id} onClick={() => { setActiveShopTab(id); if (id === 'chat') setChatOpen(true); }} className={`rounded-xl px-4 py-2 text-sm ${activeShopTab === id ? 'bg-sky-500 text-white' : 'bg-slate-100 dark:bg-slate-800'}`}>{tx(label)}{id === 'chat' && currentUser ? ` (${orders.length})` : ''}</button>)}
     </nav>
 
     {activeShopTab === 'chat' && currentUser && <nav className={`${panel} flex flex-wrap gap-2 p-3`} aria-label="对话区子栏目"><button onClick={() => { setDialogMode('orders'); setChatOpen(false); }} className={`rounded-xl px-3 py-2 text-xs ${dialogMode === 'orders' ? 'bg-sky-500 text-white' : 'bg-slate-100 dark:bg-slate-800'}`}>{tx('订单管理与回收站')} ({orders.length})</button><button onClick={() => { setDialogMode('chat'); setChatOpen(true); void loadConversations(); }} className={`rounded-xl px-3 py-2 text-xs ${dialogMode === 'chat' ? 'bg-sky-500 text-white' : 'bg-slate-100 dark:bg-slate-800'}`}>{tx('站内客服对话')}</button></nav>}
@@ -295,6 +296,7 @@ export const ShopSection: React.FC = () => {
       {isAdmin && <p className="text-[11px] text-slate-500">每笔订单创建时都会发管理员站内通知与订单邮件，并明确标注未支付/已支付；支付到账后会再发已支付通知。默认使用后台验证码发信配置（MAIL_SENDER 与同一邮件服务）发送到上方已保存的收件邮箱；收件地址留空时发送到验证码发信邮箱本身。此处仅保存收件地址，不保存任何支付密钥。</p>}
     </section>}
 
+    {activeShopTab === 'legal' && <LegalPagesSection />}
     {activeShopTab === 'products' && <div className={`grid gap-6 ${deviceMode === 'mobile' ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3'}`}>
       {filteredProducts.map(product => <article key={product.id} className={`${panel} flex flex-col overflow-hidden`}>
         <div className="relative aspect-[4/3] bg-slate-100 dark:bg-slate-800"><SafeImage src={product.images[imageIndex[product.id] || 0] || ''} alt={product.name} className="h-full w-full object-cover"/>{(product.images?.length || 0) > 1 && <><button aria-label="上一张商品图片" onClick={() => setImageIndex(value => ({ ...value, [product.id]: ((value[product.id] || 0) - 1 + product.images.length) % product.images.length }))} className="absolute left-2 top-1/2 rounded-full bg-black/60 p-2 text-white"><ChevronLeft className="h-4 w-4"/></button><button aria-label="下一张商品图片" onClick={() => setImageIndex(value => ({ ...value, [product.id]: ((value[product.id] || 0) + 1) % product.images.length }))} className="absolute right-2 top-1/2 rounded-full bg-black/60 p-2 text-white"><ChevronRight className="h-4 w-4"/></button><span className="absolute bottom-2 right-2 rounded-full bg-black/60 px-2 py-1 text-[10px] text-white">{(imageIndex[product.id] || 0) + 1}/{product.images.length}</span></>}{isAdmin && <div className="absolute right-2 top-2 flex gap-2"><button aria-label="编辑商品" onClick={() => setEditing({ ...product })} className="rounded bg-black/70 p-2 text-white"><Edit3 className="h-4 w-4"/></button><button aria-label="删除商品" onClick={() => { if (window.confirm('确认删除此商品展示？已创建订单不会被删除。')) setProducts(items => items.filter(item => item.id !== product.id)); }} className="rounded bg-rose-600 p-2 text-white"><Trash2 className="h-4 w-4"/></button></div>}</div>
