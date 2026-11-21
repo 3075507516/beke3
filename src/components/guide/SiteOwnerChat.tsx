@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { MessageCircle, Send } from 'lucide-react';
+import { ChevronDown, ChevronUp, MessageCircle, Send } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { getAdminSessionToken } from '../../utils/adminSession';
 import { getUserSessionToken } from '../../utils/userSession';
@@ -8,11 +8,24 @@ import { translateInline } from '../../utils/i18n';
 type Conversation = { id: string; username?: string; lastMessage?: string; unread?: number };
 type Message = { id: string; senderRole: 'admin' | 'user'; senderName: string; message: string; createdAt: number };
 
-export const SiteOwnerChat: React.FC = () => {
+interface SiteOwnerChatProps {
+  open?: boolean;
+  onToggle?: () => void;
+  defaultOpen?: boolean;
+}
+
+export const SiteOwnerChat: React.FC<SiteOwnerChatProps> = ({ open, onToggle, defaultOpen = false }) => {
   const { currentUser, locale } = useApp();
   const tx = (source: string) => translateInline(locale, source);
   const admin = currentUser?.role === 'admin';
   const token = admin ? getAdminSessionToken() : getUserSessionToken();
+  const [internalOpen, setInternalOpen] = useState(defaultOpen);
+  const isOpen = open ?? internalOpen;
+  const handleToggle = () => {
+    if (onToggle) onToggle();
+    else setInternalOpen(value => !value);
+  };
+
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [conversationId, setConversationId] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
@@ -34,9 +47,9 @@ export const SiteOwnerChat: React.FC = () => {
       const data = await api('/api/chat/conversations');
       const list: Conversation[] = Array.isArray(data.conversations) ? data.conversations : [];
       setConversations(list);
-      setConversationId(previous => previous && list.some(item => item.id === previous) ? previous : (admin ? (list[0]?.id || '') : (list[0]?.id || '')));
+      setConversationId(previous => previous && list.some(item => item.id === previous) ? previous : (list[0]?.id || ''));
     } catch (e) { setError(e instanceof Error ? e.message : tx('无法读取站长对话')); }
-  }, [api, token, admin]);
+  }, [api, token]);
 
   const loadMessages = useCallback(async (id: string) => {
     if (!id) { setMessages([]); return; }
@@ -65,18 +78,39 @@ export const SiteOwnerChat: React.FC = () => {
     finally { setBusy(false); }
   };
 
-  return <aside className="rounded-3xl border border-sky-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900">
-    <h3 className="flex items-center gap-2 text-base font-bold"><MessageCircle className="h-5 w-5 text-sky-500"/>{tx('站长对话板')}</h3>
-    <p className="mt-1 text-xs leading-relaxed text-slate-500">{tx('消息保存于 D1 客服会话。普通用户发送后，管理员页眉消息灯会提醒；管理员可在此选择会话并回复。')}</p>
-    {!currentUser && <p className="mt-3 rounded-xl bg-amber-50 p-3 text-xs text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">{tx('请先登录或注册账户后发送消息。访客消息不会伪装成已送达。')}</p>}
-    {currentUser && <>
-      {admin && <label className="mt-3 block text-xs font-semibold">{tx('用户会话')}<select value={conversationId} onChange={event => setConversationId(event.target.value)} className="mt-1 w-full rounded-xl border bg-transparent p-2 text-sm dark:border-slate-700"><option value="">{tx('选择一个用户会话')}</option>{conversations.map(item => <option key={item.id} value={item.id}>{item.username || item.id}{item.unread ? ` · ${tx('未读')} ${item.unread}` : ''}</option>)}</select></label>}
-      <div className="mt-3 max-h-60 space-y-2 overflow-auto rounded-xl border-y border-slate-200 py-3 dark:border-slate-700">
-        {messages.map(message => <div key={message.id} className={`max-w-[90%] rounded-xl px-3 py-2 text-xs ${message.senderRole === 'admin' ? 'bg-slate-100 dark:bg-slate-800' : 'ml-auto bg-sky-50 dark:bg-sky-950/40'}`}><div className="mb-1 text-[10px] text-slate-500">{message.senderName} · {new Date(message.createdAt).toLocaleString()}</div><p className="whitespace-pre-wrap break-words">{message.message}</p></div>)}
-        {!messages.length && <p className="text-xs text-slate-400">{admin ? (conversationId ? tx('此会话暂无消息。') : tx('选择一个用户会话后即可查看或回复。')) : tx('还没有对话，发出第一条消息开始联系站长。')}</p>}
-      </div>
-      <form onSubmit={send} className="mt-3 flex gap-2"><input value={draft} onChange={event => setDraft(event.target.value)} maxLength={4000} placeholder={admin && !conversationId ? tx('先选择用户会话') : tx('输入消息…')} disabled={admin && !conversationId} className="min-w-0 flex-1 rounded-xl border bg-transparent px-3 py-2 text-sm disabled:opacity-50 dark:border-slate-700"/><button disabled={!draft.trim() || busy || (admin && !conversationId)} aria-label={tx('发送消息给站长')} className="rounded-xl bg-sky-500 px-3 text-white disabled:opacity-40"><Send className="h-4 w-4"/></button></form>
-    </>}
-    {error && <p role="alert" className="mt-2 break-words text-xs text-rose-600">{error}</p>}
-  </aside>;
+  return (
+    <aside className="rounded-3xl border border-slate-200/80 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900 overflow-hidden">
+      <button
+        type="button"
+        onClick={handleToggle}
+        aria-expanded={isOpen}
+        className="w-full flex items-center justify-between p-5 text-left hover:bg-slate-50/50 dark:hover:bg-slate-800/50 transition"
+      >
+        <span className="flex items-center gap-2 text-sm font-bold text-slate-900 dark:text-slate-100">
+          <MessageCircle className="h-5 w-5 text-sky-500" />
+          <span>{tx('站长对话板')}</span>
+        </span>
+        <span className="inline-flex items-center gap-1 text-xs font-semibold text-sky-600 dark:text-sky-400">
+          <span>{isOpen ? tx('收拢') : tx('展开')}</span>
+          {isOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+        </span>
+      </button>
+
+      {isOpen && (
+        <div className="px-5 pb-5 border-t border-slate-100 dark:border-slate-800 pt-3">
+          <p className="text-xs leading-relaxed text-slate-500">{tx('消息保存于 D1 客服会话。普通用户发送后，管理员页眉消息灯会提醒；管理员可在此选择会话并回复。')}</p>
+          {!currentUser && <p className="mt-3 rounded-xl bg-amber-50 p-3 text-xs text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">{tx('请先登录或注册账户后发送消息。访客消息不会伪装成已送达。')}</p>}
+          {currentUser && <>
+            {admin && <label className="mt-3 block text-xs font-semibold">{tx('用户会话')}<select value={conversationId} onChange={event => setConversationId(event.target.value)} className="mt-1 w-full rounded-xl border bg-transparent p-2 text-sm dark:border-slate-700"><option value="">{tx('选择一个用户会话')}</option>{conversations.map(item => <option key={item.id} value={item.id}>{item.username || item.id}{item.unread ? ` · ${tx('未读')} ${item.unread}` : ''}</option>)}</select></label>}
+            <div className="mt-3 max-h-60 space-y-2 overflow-auto rounded-xl border-y border-slate-200 py-3 dark:border-slate-700">
+              {messages.map(message => <div key={message.id} className={`max-w-[90%] rounded-xl px-3 py-2 text-xs ${message.senderRole === 'admin' ? 'bg-slate-100 dark:bg-slate-800' : 'ml-auto bg-sky-50 dark:bg-sky-950/40'}`}><div className="mb-1 text-[10px] text-slate-500">{message.senderName} · {new Date(message.createdAt).toLocaleString()}</div><p className="whitespace-pre-wrap break-words">{message.message}</p></div>)}
+              {!messages.length && <p className="text-xs text-slate-400">{admin ? (conversationId ? tx('此会话暂无消息。') : tx('选择一个用户会话后即可查看或回复。')) : tx('还没有对话，发出第一条消息开始联系站长。')}</p>}
+            </div>
+            <form onSubmit={send} className="mt-3 flex gap-2"><input value={draft} onChange={event => setDraft(event.target.value)} maxLength={4000} placeholder={admin && !conversationId ? tx('先选择用户会话') : tx('输入消息…')} disabled={admin && !conversationId} className="min-w-0 flex-1 rounded-xl border bg-transparent px-3 py-2 text-sm disabled:opacity-50 dark:border-slate-700"/><button disabled={!draft.trim() || busy || (admin && !conversationId)} aria-label={tx('发送消息给站长')} className="rounded-xl bg-sky-500 px-3 text-white disabled:opacity-40"><Send className="h-4 w-4"/></button></form>
+          </>}
+          {error && <p role="alert" className="mt-2 break-words text-xs text-rose-600">{error}</p>}
+        </div>
+      )}
+    </aside>
+  );
 };

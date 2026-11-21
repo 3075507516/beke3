@@ -18,7 +18,7 @@ type Order = {
 };
 type Conversation = { id: string; userId?: string; username?: string; userName?: string; lastMessage?: string; unread?: number; unreadCount?: number };
 type ChatMessage = { id: string; senderRole: 'admin' | 'user'; senderName: string; message: string; createdAt: number };
-type PaymentState = { orderId: string; payment?: { redirectUrl?: string; qrCode?: string }; order?: Order };
+type PaymentState = { orderId: string; payment?: { redirectUrl?: string; qrCode?: string; warning?: string }; order?: Order; error?: string };
 const DEFAULT_SHOP_CATEGORIES = ['实体周边', '电子书', '数码配件', '服饰鞋包', '家居生活', '文创文具', '虚拟商品', '课程培训', '会员服务', '软件工具', '摄影器材', '礼品收藏', '食品饮品', '咨询服务'];
 const PAYMENT_VARIABLE_NOTES: Record<string, string> = {
   ALIPAY_APP_ID: '支付宝开放平台给应用分配的编号', ALIPAY_PRIVATE_KEY: '你自己生成并保管的应用私钥', ALIPAY_PUBLIC_KEY: '支付宝平台提供的验签公钥',
@@ -211,18 +211,60 @@ export const ShopSection: React.FC = () => {
   const submitOrder = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!currentUser || !token) { setError('请先登录已注册账户，再创建订单。'); return; }
+    if (isAdmin) { setError('当前为管理员账号，请使用普通用户账号登录后下单。'); return; }
     if (!checkout) return;
     setBusy(true); setError('');
     try {
       const data = await api('/api/orders', { method: 'POST', body: JSON.stringify({ productId: checkout.id, quantity, paymentProvider: provider, customerName, customerPhone, customerEmail, shippingAddress, couponCode: couponCode.trim() || undefined }) });
       const paymentData = data.payment || {};
-      setPayment({ orderId: data.order.id, payment: paymentData, order: data.order });
-      if (data.paymentError) setError(`订单已保存为未支付：${data.paymentError}`);
+      const paymentNotice = data.paymentError || paymentData.warning || '';
+      setPayment({ orderId: data.order.id, payment: paymentData, order: data.order, error: paymentNotice });
       setCheckout(null);
       await loadOrders();
-      if (paymentData.redirectUrl) window.location.assign(paymentData.redirectUrl);
     } catch (e) { setError(e instanceof Error ? e.message : '订单创建失败；请检查登录和支付服务配置'); }
     finally { setBusy(false); }
+  };
+
+  const openOrderPayment = async (order: Order) => {
+    setBusy(true); setError('');
+    try {
+      const data = await api(`/api/orders/${encodeURIComponent(order.id)}/pay`, { method: 'POST', body: '{}' });
+      const paymentData = data.payment || {};
+      setPayment({
+        orderId: order.id,
+        payment: paymentData,
+        order: data.order || order,
+        error: data.paymentError || paymentData.warning || '',
+      });
+      await loadOrders();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '获取支付收款信息失败');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const verifyOrderPayment = async (orderId: string) => {
+    setBusy(true);
+    try {
+      const data = await api(`/api/orders/${encodeURIComponent(orderId)}/verify`, { method: 'POST', body: '{}' });
+      await loadOrders();
+      setPayment(current => current && current.orderId === orderId
+        ? {
+            ...current,
+            order: data.order || current.order,
+            error: data.verified ? '' : (data.error || '支付平台尚未返回已付款结果；如果您刚完成付款，请稍等几秒再试。'),
+          }
+        : current);
+      if (data.error && !data.verified && payment?.orderId !== orderId) {
+        setError(data.error);
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '核验支付状态失败';
+      setPayment(current => current && current.orderId === orderId ? { ...current, error: msg } : current);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const orderAction = async (orderId: string, action: string, body: Record<string, unknown> = {}) => {
@@ -281,9 +323,19 @@ export const ShopSection: React.FC = () => {
         <div className="flex flex-wrap items-center gap-2"><span className="font-semibold">{money(order)} · {statusLabels[order.status] || order.status}</span>
           {isAdmin && !showTrash && <><input value={tracking[order.id] || ''} onChange={event => setTracking(value => ({ ...value, [order.id]: event.target.value }))} placeholder="物流单号（选填）" aria-label="物流单号" className="w-32 rounded border bg-transparent p-1 text-xs dark:border-slate-700"/><button disabled={order.status !== 'paid'} title={order.status !== 'paid' ? '订单付款验签成功后方可发货' : '确认发货并通知用户'} onClick={() => void orderAction(order.id, 'ship', { trackingNumber: tracking[order.id] || '' })} className="rounded bg-sky-500 px-2 py-1 text-xs text-white disabled:cursor-not-allowed disabled:opacity-40">确认发货 <Truck className="inline h-3 w-3"/></button>{order.status === 'paid' && <button onClick={() => void orderAction(order.id, 'refund', { reason: '管理员发起退款' })} className="rounded bg-rose-500 px-2 py-1 text-xs text-white">原路退款</button>}<button onClick={async () => { try { const result = await api('/api/chat/conversations/ensure', { method: 'POST', body: JSON.stringify({ userId: order.userId, username: order.username || order.customerName }) }); await loadConversations(); setConversationId(result.conversationId); setActiveShopTab('chat'); setDialogMode('chat'); setChatOpen(true); await loadMessages(result.conversationId); } catch (e) { setError(e instanceof Error ? e.message : '打开用户对话失败'); } }} className="rounded border px-2 py-1 text-xs"><MessageCircle className="mr-1 inline h-3 w-3"/>订单对话</button><button onClick={async () => { if (!window.confirm('将订单移入回收站？付款记录不会删除。')) return; try { await api(`/api/orders/${encodeURIComponent(order.id)}`, { method: 'DELETE' }); await loadOrders(); } catch (e) { setError(e instanceof Error ? e.message : '移入回收站失败'); } }} className="rounded border border-rose-300 px-2 py-1 text-xs text-rose-600">移入回收站</button></>}
           {showTrash && <button onClick={async () => { try { await api(`/api/orders/${encodeURIComponent(order.id)}/restore`, { method: 'POST', body: '{}' }); await loadTrashOrders(); await loadOrders(); } catch (e) { setError(e instanceof Error ? e.message : '恢复订单失败'); } }} className="rounded border px-2 py-1 text-xs">恢复订单</button>}
+          {!isAdmin && !showTrash && (order.status === 'pending' || order.status === 'failed') && (
+            <>
+              <button disabled={busy} onClick={() => void openOrderPayment(order)} className="rounded bg-sky-500 px-2.5 py-1 text-xs font-semibold text-white disabled:opacity-50">
+                {order.paymentProvider === 'alipay' ? '扫码 / 支付宝网页付款' : '继续支付'}
+              </button>
+              <button disabled={busy} onClick={() => void verifyOrderPayment(order.id)} className="rounded border border-emerald-300 px-2 py-1 text-xs text-emerald-700 dark:text-emerald-300 disabled:opacity-50">
+                核验到账状态
+              </button>
+            </>
+          )}
           {!isAdmin && !showTrash && order.status === 'pending' && <button onClick={() => void orderAction(order.id, 'cancel')} className="text-xs text-rose-600">取消订单</button>}
           {!isAdmin && order.status === 'failed' && <button onClick={() => { const product = products.find(item => item.id === order.productId); if (product) { setCheckout(product); setQuantity(order.quantity || 1); setError(''); } }} className="text-xs text-sky-600">重新下单</button>}
-          {!isAdmin && order.paymentProvider === 'paypal' && order.status === 'pending' && <button onClick={() => void orderAction(order.id, 'capture')} className="text-xs text-sky-600">继续 PayPal 支付</button>}
+          {!isAdmin && order.paymentProvider === 'paypal' && order.status === 'pending' && <button onClick={() => void orderAction(order.id, 'capture')} className="text-xs text-sky-600">完成 PayPal 扣款</button>}
           {!isAdmin && !showTrash && <button onClick={() => { setActiveShopTab('chat'); setDialogMode('chat'); setChatOpen(true); void loadConversations(); }} className="rounded border px-2 py-1 text-xs"><MessageCircle className="mr-1 inline h-3 w-3"/>订单对话</button>}
           {!isAdmin && !showTrash && <button onClick={async () => { if (!window.confirm('将订单移入回收站？订单支付记录会保留。')) return; try { await api(`/api/orders/${encodeURIComponent(order.id)}`, { method: 'DELETE' }); await loadOrders(); } catch (e) { setError(e instanceof Error ? e.message : '移入回收站失败'); } }} className="text-xs text-rose-600">删除订单</button>}
         </div>
@@ -316,31 +368,107 @@ export const ShopSection: React.FC = () => {
 
     {checkout && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"><form onSubmit={submitOrder} className={`${panel} max-h-[90vh] w-full max-w-lg space-y-3 overflow-auto p-6`}>
       <div className="flex items-center justify-between"><h3 className="font-bold">订单信息：{checkout.name}</h3><button type="button" onClick={() => setCheckout(null)} aria-label="关闭"><X/></button></div>
-      {!currentUser && <p className="text-sm text-rose-600">请先登录注册账户。为了保存用户订单，游客不能付款。</p>}
-      <p className="text-sm">商品展示价：¥{Number(checkout.price).toFixed(2)} / 件。最终金额由服务端根据 D1 已发布商品目录核验。</p>
+      {!currentUser && <p className="rounded-xl bg-rose-50 p-2.5 text-xs text-rose-600 dark:bg-rose-950/30 dark:text-rose-300">请先登录注册账户。为了保存用户订单，游客不能付款。</p>}
+      {isAdmin && <p className="rounded-xl bg-amber-50 p-2.5 text-xs text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">当前为管理员账号，订单需由普通用户账号创建；如需自测下单请先注册或登录普通用户账号。</p>}
+      <p className="text-sm">商品展示价：¥{Number(checkout.price).toFixed(2)} / 件。最终金额由服务端根据已发布商品目录核验。</p>
       <label className="block text-sm font-semibold">购买数量（必填）<input required type="number" min={1} max={Math.max(1, Number(checkout.stock ?? 50))} value={quantity} onChange={event => setQuantity(Math.max(1, Math.min(Number(checkout.stock ?? 50), Number(event.target.value) || 1)))} className="mt-1 w-full rounded border bg-transparent p-2 font-normal dark:border-slate-700"/></label>
-      <div className="grid grid-cols-2 gap-2">{([['alipay','支付宝'],['wechat','微信支付'],['stripe','Stripe'],['paypal','PayPal']] as const).map(([id, label]) => <button type="button" key={id} onClick={() => setProvider(id)} className={`rounded-xl border p-2 text-sm ${provider === id ? 'border-sky-500 text-sky-600' : 'border-slate-200 dark:border-slate-700'}`}>{label}</button>)}</div>
+      <div className="grid grid-cols-2 gap-2">{([['alipay','支付宝（扫码 + 网页收银台）'],['wechat','微信支付（扫码）'],['stripe','Stripe（银行卡网页收银台）'],['paypal','PayPal（网页付款）']] as const).map(([id, label]) => <button type="button" key={id} onClick={() => setProvider(id)} className={`rounded-xl border p-2 text-xs sm:text-sm ${provider === id ? 'border-sky-500 bg-sky-50/50 text-sky-600 dark:bg-sky-950/30' : 'border-slate-200 dark:border-slate-700'}`}>{label}</button>)}</div>
       <label className="block text-xs font-semibold">联系人姓名（必填）<input required value={customerName} onChange={event => setCustomerName(event.target.value)} placeholder="请填写收件/服务联系人" className="mt-1 w-full rounded-xl border bg-transparent p-2 text-sm font-normal dark:border-slate-700"/></label>
       <label className="block text-xs font-semibold">联系电话（必填）<input required type="tel" value={customerPhone} onChange={event => setCustomerPhone(event.target.value)} placeholder="请填写可联系到您的电话" className="mt-1 w-full rounded-xl border bg-transparent p-2 text-sm font-normal dark:border-slate-700"/></label>
       <input required type="email" value={customerEmail} onChange={event => setCustomerEmail(event.target.value)} placeholder="联系邮箱" className="w-full rounded-xl border bg-transparent p-2 text-sm dark:border-slate-700"/>
       <label className="block text-xs font-semibold">收货/服务联系地址（必填）<textarea required rows={2} value={shippingAddress} onChange={event => setShippingAddress(event.target.value)} placeholder="请填写完整收货地址或服务联系地址" className="mt-1 w-full rounded-xl border bg-transparent p-2 text-sm font-normal dark:border-slate-700"/></label>
       <input value={couponCode} onChange={event => setCouponCode(event.target.value)} placeholder="优惠码（如有）—服务端核验" className="w-full rounded-xl border bg-transparent p-2 text-sm dark:border-slate-700"/>
-      <p className="rounded-xl bg-amber-50 p-3 text-xs leading-relaxed text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">付款跳转或二维码展示不代表订单已付款。真正到账以本站服务端验签并处理支付平台异步通知为准。</p>
-      <button disabled={busy || !currentUser} className="w-full rounded-xl bg-sky-500 p-3 text-sm font-semibold text-white disabled:opacity-50">{busy ? '正在创建订单…' : '创建订单并继续支付'}</button>
+      <p className="rounded-xl bg-amber-50 p-3 text-xs leading-relaxed text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">点击创建订单后将立即弹出支付窗口（支持扫码付款与跳转网页收银台）；最终到账状态由服务端异步回调或官方接口实时查单确认。</p>
+      <button disabled={busy || !currentUser || isAdmin} className="w-full rounded-xl bg-sky-500 p-3 text-sm font-semibold text-white disabled:opacity-50">{busy ? '正在创建订单…' : '创建订单并继续支付'}</button>
     </form></div>}
 
-    {paymentGuideOpen && <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4"><div className={`${panel} max-h-[90vh] w-full max-w-3xl space-y-4 overflow-auto p-6`}><div className="flex items-center justify-between"><h3 className="text-lg font-bold">支付网关接入指南与后台变量状态</h3><button onClick={() => setPaymentGuideOpen(false)} aria-label="关闭支付接入指南"><X/></button></div><p className="text-xs leading-relaxed text-slate-500">以下状态仅确认 Cloudflare Pages 服务端是否读到对应变量，并不代表商户已审核、私钥有效或真实收款测试通过。密钥只放 Pages → Settings → Variables and Secrets，不要放前端、本地存储或公开仓库。配置后需重新部署。</p><div className="grid gap-3 md:grid-cols-2">
-      {([['alipay','支付宝',['ALIPAY_APP_ID','ALIPAY_PRIVATE_KEY','ALIPAY_PUBLIC_KEY'],'申请电脑网站支付/手机网站支付；设置应用公私钥并配置异步回调 /api/payments/webhook/alipay。'],['wechat','微信支付',['WECHAT_MCHID','WECHAT_APPID','WECHAT_SERIAL_NO','WECHAT_PRIVATE_KEY','WECHAT_API_V3_KEY','WECHAT_PLATFORM_CERT','WECHAT_NOTIFY_URL'],'商户平台开通 Native/H5；准备商户证书、平台证书与 32 字节 APIv3 密钥，回调地址必须 HTTPS。'],['stripe','Stripe',['STRIPE_SECRET_KEY','STRIPE_WEBHOOK_SECRET'],'Stripe Dashboard 建 webhook，回调 /api/payments/webhook/stripe，并订阅支付成功、失败、过期、退款事件。'],['paypal','PayPal',['PAYPAL_CLIENT_ID','PAYPAL_CLIENT_SECRET','PAYPAL_WEBHOOK_ID'],'先用 Sandbox 凭据验证，再设置正式 API base https://api-m.paypal.com；Webhook 为 /api/payments/webhook/paypal。']] as const).map(([key,label,names,guide]) => <article key={key} className="rounded-2xl border p-4 dark:border-slate-700"><h4 className="font-bold">{label} {paymentConfig?.[key] && Object.values(paymentConfig[key]).every(Boolean) ? <span className="text-emerald-600">● 变量齐全</span> : <span className="text-amber-600">● 配置缺项/未检测</span>}</h4><p className="mt-2 text-xs leading-relaxed text-slate-600 dark:text-slate-300">{guide}</p><ul className="mt-3 space-y-2">{names.map(name => <li key={name} className="flex items-start gap-2 text-[11px]"><span className={`mt-0.5 ${paymentConfig?.[key]?.[name] ? 'text-emerald-500' : 'text-rose-500'}`}>{paymentConfig?.[key]?.[name] ? '●' : '○'}</span><span className="min-w-0"><code className="font-mono">{name}</code><span className="ml-2 block font-sans text-slate-500">{tx(PAYMENT_VARIABLE_NOTES[name] || '该网关在 Cloudflare Pages 后端读取的配置值')}</span></span></li>)}</ul></article>)}
+    {paymentGuideOpen && <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4"><div className={`${panel} max-h-[90vh] w-full max-w-3xl space-y-4 overflow-auto p-6`}><div className="flex items-center justify-between"><h3 className="text-lg font-bold">支付网关接入指南与后台变量状态</h3><button onClick={() => setPaymentGuideOpen(false)} aria-label="关闭支付接入指南"><X/></button></div><p className="text-xs leading-relaxed text-slate-500">以下状态仅确认服务端环境变量是否配置，并不代表商户已审核或测试通过。密钥请放置在服务端环境变量或 `.env` 中，不要放前端或公开仓库。</p><div className="grid gap-3 md:grid-cols-2">
+      {([['alipay','支付宝',['ALIPAY_APP_ID','ALIPAY_PRIVATE_KEY','ALIPAY_PUBLIC_KEY'],'支持电脑网站支付（网页收银台跳转 `alipay.trade.page.pay`）和当面付扫码（`alipay.trade.precreate`），并支持服务端主动查单及异步回调 `/api/payments/webhook/alipay`。'],['wechat','微信支付',['WECHAT_MCHID','WECHAT_APPID','WECHAT_SERIAL_NO','WECHAT_PRIVATE_KEY','WECHAT_API_V3_KEY','WECHAT_PLATFORM_CERT','WECHAT_NOTIFY_URL'],'商户平台开通 Native 扫码支付；准备商户证书、平台证书与 32 字节 APIv3 密钥，回调地址必须 HTTPS。'],['stripe','Stripe',['STRIPE_SECRET_KEY','STRIPE_WEBHOOK_SECRET'],'Stripe Dashboard 建 webhook，回调 /api/payments/webhook/stripe，或使用弹窗内“核验到账状态”向 Stripe 官方查单；可选设置 STRIPE_CURRENCY / STRIPE_CNY_RATE。'],['paypal','PayPal',['PAYPAL_CLIENT_ID','PAYPAL_CLIENT_SECRET','PAYPAL_WEBHOOK_ID'],'CNY 订单自动按 PAYPAL_CNY_RATE（默认 0.14）换算为 PAYPAL_CURRENCY（默认 USD），跳转 PayPal 审批后自动 Capture 扣款。']] as const).map(([key,label,names,guide]) => <article key={key} className="rounded-2xl border p-4 dark:border-slate-700"><h4 className="font-bold">{label} {paymentConfig?.[key] && Object.values(paymentConfig[key]).every(Boolean) ? <span className="text-emerald-600">● 变量齐全</span> : <span className="text-amber-600">● 配置缺项/未检测</span>}</h4><p className="mt-2 text-xs leading-relaxed text-slate-600 dark:text-slate-300">{guide}</p><ul className="mt-3 space-y-2">{names.map(name => <li key={name} className="flex items-start gap-2 text-[11px]"><span className={`mt-0.5 ${paymentConfig?.[key]?.[name] ? 'text-emerald-500' : 'text-rose-500'}`}>{paymentConfig?.[key]?.[name] ? '●' : '○'}</span><span className="min-w-0"><code className="font-mono">{name}</code><span className="ml-2 block font-sans text-slate-500">{tx(PAYMENT_VARIABLE_NOTES[name] || '该网关在服务端读取的配置值')}</span></span></li>)}</ul></article>)}
       <article className="rounded-2xl border p-4 dark:border-slate-700"><h4 className="font-bold">万里汇（WorldFirst）</h4><p className="mt-2 text-xs leading-relaxed text-amber-700 dark:text-amber-300">当前仓库没有万里汇支付创建、Webhook 验签及退款适配器，因此不显示虚假的“已接入”灯，也不能选择其完成真实支付。需要按万里汇开放平台 API 单独开发并经沙箱/生产验证后才能上线。</p></article></div>{isAdmin && <button onClick={() => void api('/api/payment-config-status').then(data => setPaymentConfig(data.providers || {})).catch(e => setError(e instanceof Error ? e.message : '读取变量状态失败'))} className="rounded-xl border px-3 py-2 text-xs">重新读取服务端变量状态</button>}</div></div>}
 
-    {payment && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"><div className={`${panel} w-full max-w-sm space-y-3 p-6`}>
-      <div className="flex items-center justify-between"><h3 className="font-bold">订单 {payment.orderId}</h3><button onClick={() => setPayment(null)} aria-label="关闭支付信息"><X/></button></div>
-      {payment.order && <p className="text-sm">当前状态：<b>{statusLabels[payment.order.status] || payment.order.status}</b> · {money(payment.order)}</p>}
-      <p className="text-xs text-amber-700 dark:text-amber-300">二维码/跳转成功不代表已到账；请等待服务端验签异步回调更新订单状态。</p>
-      {payment.payment?.redirectUrl && <a href={payment.payment.redirectUrl} className="block rounded-xl bg-sky-500 p-3 text-center text-sm text-white">前往支付平台</a>}
-      {payment.payment?.qrCode && <div className="mx-auto w-fit rounded-xl bg-white p-3"><QRCodeSVG value={payment.payment.qrCode} size={224} includeMargin/></div>}
-      {payment.payment?.qrCode && <p className="break-all text-center text-[10px] text-slate-500">二维码由本站本地生成，不会将支付码发送给第三方。</p>}
-      <button onClick={() => { void loadOrders(); if (payment.orderId) void api(`/api/orders/${encodeURIComponent(payment.orderId)}`).then(result => setPayment(current => current ? { ...current, order: result.order } : current)).catch(() => {}); }} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm dark:border-slate-700">刷新服务端订单状态</button>
+    {payment && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"><div className={`${panel} max-h-[90vh] w-full max-w-md space-y-4 overflow-auto p-6`}>
+      <div className="flex items-center justify-between">
+        <h3 className="font-bold">订单收款台 · {payment.orderId}</h3>
+        <button onClick={() => setPayment(null)} aria-label="关闭支付信息"><X/></button>
+      </div>
+      {payment.order && (
+        <div className="rounded-2xl bg-slate-50 p-3 text-sm dark:bg-slate-800/70">
+          <div className="flex items-center justify-between">
+            <span>当前状态：<b className={payment.order.status === 'paid' ? 'text-emerald-600' : 'text-amber-600'}>{statusLabels[payment.order.status] || payment.order.status}</b></span>
+            <span className="font-bold text-sky-600">{money(payment.order)}</span>
+          </div>
+          <p className="mt-1 text-xs text-slate-500">{payment.order.productName} × {payment.order.quantity}</p>
+        </div>
+      )}
+
+      {payment.order?.status === 'paid' && (
+        <div className="flex items-center gap-2 rounded-2xl bg-emerald-50 p-4 text-sm font-semibold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
+          <CheckCircle className="h-5 w-5 shrink-0" />
+          <span>付款已到账并完成服务端核验！感谢购买。</span>
+        </div>
+      )}
+
+      {payment.error && (
+        <div role="alert" className="rounded-2xl bg-amber-50 p-3 text-xs leading-relaxed text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+          <b>提示：</b>{payment.error}
+        </div>
+      )}
+
+      {payment.order?.status !== 'paid' && payment.payment?.qrCode && (
+        <div className="space-y-2 text-center">
+          <div className="mx-auto w-fit rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+            <QRCodeSVG value={payment.payment.qrCode} size={224} includeMargin/>
+          </div>
+          <p className="text-xs font-semibold text-slate-700 dark:text-slate-200">
+            {payment.order?.paymentProvider === 'wechat' ? '请打开微信扫一扫，扫描上方二维码确认付款' : '请打开手机支付宝扫一扫，扫描上方二维码确认付款'}
+          </p>
+          <p className="text-[10px] text-slate-400">收款二维码由本地安全渲染；扫码付款后将自动或点击下方按钮核验到账。</p>
+        </div>
+      )}
+
+      {payment.order?.status !== 'paid' && payment.payment?.redirectUrl && (
+        <a
+          href={payment.payment.redirectUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="block w-full rounded-xl bg-sky-500 hover:bg-sky-600 p-3 text-center text-sm font-semibold text-white shadow-sm transition"
+        >
+          {payment.order?.paymentProvider === 'alipay'
+            ? '前往支付宝网页收银台付款（新窗口打开）'
+            : payment.order?.paymentProvider === 'stripe'
+              ? '前往 Stripe 网页收银台付款（新窗口打开）'
+              : payment.order?.paymentProvider === 'paypal'
+                ? '前往 PayPal 网页付款（新窗口打开）'
+                : '前往支付平台网页付款'}
+        </a>
+      )}
+
+      {payment.order?.status !== 'paid' && !payment.payment?.qrCode && !payment.payment?.redirectUrl && (
+        <p className="text-xs text-slate-500">当前暂未生成可扫二维码或网页跳转链接，请核对服务端支付环境变量后重试“获取收款码”。</p>
+      )}
+
+      <div className="flex flex-col gap-2 pt-1">
+        {payment.order?.status !== 'paid' && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void verifyOrderPayment(payment.orderId)}
+            className="w-full rounded-xl bg-emerald-600 hover:bg-emerald-700 px-3 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+          >
+            {busy ? '正在核验…' : '我已完成支付，立即核验到账状态'}
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => {
+            void loadOrders();
+            if (payment.orderId) void api(`/api/orders/${encodeURIComponent(payment.orderId)}`).then(result => setPayment(current => current ? { ...current, order: result.order } : current)).catch(() => {});
+          }}
+          className="w-full rounded-xl border border-slate-300 px-3 py-2 text-xs dark:border-slate-700"
+        >
+          刷新订单状态
+        </button>
+      </div>
     </div></div>}
 
     {editing && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"><form onSubmit={saveProduct} className={`${panel} max-h-[90vh] w-full max-w-lg space-y-3 overflow-auto p-6`}>

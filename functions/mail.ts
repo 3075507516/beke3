@@ -1,4 +1,6 @@
-import { connect } from 'cloudflare:sockets';
+import net from 'node:net';
+import tls from 'node:tls';
+import dns from 'node:dns/promises';
 
 export type SmtpSecurity = 'ssl' | 'starttls';
 export type MailProvider = 'smtp' | 'resend' | 'brevo' | 'sendgrid' | 'sendcloud' | 'mailgun' | 'ses' | 'postmark' | 'custom';
@@ -43,10 +45,7 @@ function normalizeAddress(value: string, fieldName: string): string {
 }
 
 function base64Utf8(value: string): string {
-  const bytes = encoder.encode(value);
-  let binary = '';
-  for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
-  return btoa(binary);
+  return Buffer.from(value, 'utf8').toString('base64');
 }
 
 function base64Lines(value: string): string {
@@ -59,43 +58,213 @@ function encodeSubject(value: string): string {
   return /^[\x20-\x7E]*$/.test(subject) ? subject : `=?UTF-8?B?${base64Utf8(subject)}?=`;
 }
 
-interface SmtpChannel {
-  socket: ReturnType<typeof connect>;
-  reader: ReadableStreamDefaultReader<Uint8Array>;
-  writer: WritableStreamDefaultWriter<Uint8Array>;
-  pending: string;
-  decoder: TextDecoder;
+function isPrivateOrDisallowedIp(address: string): boolean {
+  const clean = address.trim().toLowerCase();
+  if (!clean) return true;
+  if (clean.startsWith('::ffff:')) {
+    return isPrivateOrDisallowedIp(clean.slice(7));
+  }
+  if (net.isIPv4(clean)) {
+    const parts = clean.split('.').map(Number);
+    if (parts.length !== 4 || parts.some(p => Number.isNaN(p) || p < 0 || p > 255)) return true;
+    const [a, b] = parts;
+    if (a === 0 || a === 10 || a === 127) return true;
+    if (a === 100 && b >= 64 && b <= 127) return true;
+    if (a === 169 && b === 254) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 192 && b === 0) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 198 && (b === 18 || b === 19)) return true;
+    if (a >= 224) return true;
+    return false;
+  }
+  if (net.isIPv6(clean)) {
+    if (clean === '::' || clean === '::1') return true;
+    if (clean.startsWith('fe80:') || clean.startsWith('fec0:')) return true;
+    if (clean.startsWith('fc') || clean.startsWith('fd')) return true;
+    if (clean.startsWith('ff')) return true;
+    return false;
+  }
+  return true;
 }
 
-function createChannel(socket: ReturnType<typeof connect>): SmtpChannel {
-  return {
-    socket,
-    reader: socket.readable.getReader(),
-    writer: socket.writable.getWriter(),
-    pending: '',
-    decoder: new TextDecoder(),
+export async function assertPublicMailHost(host: string, serviceLabel = '邮件'): Promise<string> {
+  const hostname = host.trim().toLowerCase();
+  const isIpLiteral = net.isIP(hostname) !== 0 || /^\d{1,3}(\.\d{1,3}){3}$/.test(hostname);
+  const isValidHostname = /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/i.test(hostname);
+  if (!isValidHostname || isIpLiteral || /(^|\.)(localhost|local|internal|test|invalid|home\.arpa)$/.test(hostname)) {
+    throw new Error(`${serviceLabel}服务器必须是有效的公网邮件域名（例如 smtp.qiye.aliyun.com / smtp.exmail.qq.com）`);
+  }
+  const records = await dns.lookup(hostname, { all: true }).catch(() => null);
+  if (!records || records.length === 0) {
+    throw new Error(`无法解析${serviceLabel}服务器域名：${hostname}`);
+  }
+  if (records.some(record => isPrivateOrDisallowedIp(record.address))) {
+    throw new Error(`${serviceLabel}服务器域名解析到了受限或内网 IP 地址，已拒绝连接`);
+  }
+  return hostname;
+}
+
+class NodeSmtpChannel {
+  socket: net.Socket | tls.TLSSocket;
+  private buffer = '';
+  private waiters: Array<{ resolve: (line: string) => void; reject: (err: Error) => void }> = [];
+  private closedError: Error | null = null;
+
+  constructor(socket: net.Socket | tls.TLSSocket) {
+    this.socket = socket;
+    this.attachListeners(socket);
+  }
+
+  private onData = (chunk: Buffer) => {
+    this.buffer += chunk.toString('utf8');
+    this.drainLines();
   };
-}
 
-async function readLine(channel: SmtpChannel): Promise<string> {
-  while (true) {
-    const newlineIndex = channel.pending.indexOf('\n');
-    if (newlineIndex >= 0) {
-      const line = channel.pending.slice(0, newlineIndex).replace(/\r$/, '');
-      channel.pending = channel.pending.slice(newlineIndex + 1);
-      return line;
+  private onError = (err: Error) => {
+    this.failAll(err instanceof Error ? err : new Error(String(err || 'SMTP 连接错误')));
+  };
+
+  private onClose = () => {
+    this.failAll(new Error('SMTP 连接已关闭'));
+  };
+
+  private onTimeout = () => {
+    this.failAll(new Error('SMTP 通信超时（15 秒无响应）'));
+  };
+
+  private attachListeners(socket: net.Socket | tls.TLSSocket) {
+    socket.setTimeout(15000);
+    socket.on('data', this.onData);
+    socket.on('error', this.onError);
+    socket.on('close', this.onClose);
+    socket.on('timeout', this.onTimeout);
+  }
+
+  private detachListeners(socket: net.Socket | tls.TLSSocket) {
+    socket.off('data', this.onData);
+    socket.off('error', this.onError);
+    socket.off('close', this.onClose);
+    socket.off('timeout', this.onTimeout);
+  }
+
+  replaceSocket(nextSocket: tls.TLSSocket) {
+    this.detachListeners(this.socket);
+    this.buffer = '';
+    this.socket = nextSocket;
+    this.attachListeners(nextSocket);
+  }
+
+  private failAll(err: Error) {
+    if (!this.closedError) this.closedError = err;
+    while (this.waiters.length > 0) {
+      const waiter = this.waiters.shift();
+      waiter?.reject(err);
     }
-    const { value, done } = await channel.reader.read();
-    if (done) throw new Error('SMTP 连接已关闭');
-    channel.pending += channel.decoder.decode(value, { stream: true });
+  }
+
+  private drainLines() {
+    while (this.waiters.length > 0) {
+      const newlineIndex = this.buffer.indexOf('\n');
+      if (newlineIndex < 0) break;
+      const line = this.buffer.slice(0, newlineIndex).replace(/\r$/, '');
+      this.buffer = this.buffer.slice(newlineIndex + 1);
+      const waiter = this.waiters.shift();
+      waiter?.resolve(line);
+    }
+  }
+
+  readLine(): Promise<string> {
+    const newlineIndex = this.buffer.indexOf('\n');
+    if (newlineIndex >= 0) {
+      const line = this.buffer.slice(0, newlineIndex).replace(/\r$/, '');
+      this.buffer = this.buffer.slice(newlineIndex + 1);
+      return Promise.resolve(line);
+    }
+    if (this.closedError) return Promise.reject(this.closedError);
+    return new Promise((resolve, reject) => {
+      this.waiters.push({ resolve, reject });
+    });
+  }
+
+  write(data: string | Uint8Array): Promise<void> {
+    return new Promise((resolve, reject) => {
+      this.socket.write(data, (err?: Error | null) => {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+  }
+
+  close() {
+    this.detachListeners(this.socket);
+    try { this.socket.end(); } catch {}
+    try { this.socket.destroy(); } catch {}
   }
 }
 
-async function readResponse(channel: SmtpChannel): Promise<{ code: number; lines: string[] }> {
+function connectPlainSocket(host: string, port: number): Promise<net.Socket> {
+  return new Promise((resolve, reject) => {
+    const socket = net.connect({ host, port });
+    const onError = (err: Error) => {
+      socket.destroy();
+      reject(new Error(`SMTP TCP 连接失败 (${host}:${port}): ${err.message}`));
+    };
+    socket.setTimeout(15000);
+    socket.once('error', onError);
+    socket.once('connect', () => {
+      socket.off('error', onError);
+      resolve(socket);
+    });
+  });
+}
+
+function connectTlsSocket(host: string, port: number): Promise<tls.TLSSocket> {
+  return new Promise((resolve, reject) => {
+    const socket = tls.connect({
+      host,
+      port,
+      servername: host,
+      rejectUnauthorized: true,
+    });
+    const onError = (err: Error) => {
+      socket.destroy();
+      reject(new Error(`SMTP TLS 连接失败 (${host}:${port}): ${err.message}`));
+    };
+    socket.setTimeout(15000);
+    socket.once('error', onError);
+    socket.once('secureConnect', () => {
+      socket.off('error', onError);
+      resolve(socket);
+    });
+  });
+}
+
+function upgradeToStartTls(plainSocket: net.Socket, host: string): Promise<tls.TLSSocket> {
+  return new Promise((resolve, reject) => {
+    const tlsSocket = tls.connect({
+      socket: plainSocket,
+      servername: host,
+      rejectUnauthorized: true,
+    });
+    const onError = (err: Error) => {
+      tlsSocket.destroy();
+      reject(new Error(`SMTP STARTTLS 握手失败: ${err.message}`));
+    };
+    tlsSocket.setTimeout(15000);
+    tlsSocket.once('error', onError);
+    tlsSocket.once('secureConnect', () => {
+      tlsSocket.off('error', onError);
+      resolve(tlsSocket);
+    });
+  });
+}
+
+async function readResponse(channel: NodeSmtpChannel): Promise<{ code: number; lines: string[] }> {
   const lines: string[] = [];
   let code = 0;
   while (true) {
-    const line = await readLine(channel);
+    const line = await channel.readLine();
     const match = line.match(/^(\d{3})([ -])(.*)$/);
     if (!match) throw new Error(`SMTP 返回了无法识别的响应: ${line.slice(0, 160)}`);
     code = Number(match[1]);
@@ -105,7 +274,7 @@ async function readResponse(channel: SmtpChannel): Promise<{ code: number; lines
   return { code, lines };
 }
 
-async function expectResponse(channel: SmtpChannel, expected: number | number[]): Promise<string[]> {
+async function expectResponse(channel: NodeSmtpChannel, expected: number | number[]): Promise<string[]> {
   const response = await readResponse(channel);
   const codes = Array.isArray(expected) ? expected : [expected];
   if (!codes.includes(response.code)) {
@@ -115,22 +284,35 @@ async function expectResponse(channel: SmtpChannel, expected: number | number[])
   return response.lines;
 }
 
-async function command(channel: SmtpChannel, value: string, expected: number | number[]): Promise<string[]> {
-  await channel.writer.write(encoder.encode(`${value}\r\n`));
+async function command(channel: NodeSmtpChannel, value: string, expected: number | number[]): Promise<string[]> {
+  await channel.write(encoder.encode(`${value}\r\n`));
   return expectResponse(channel, expected);
+}
+
+async function authenticateSmtp(channel: NodeSmtpChannel, ehloLines: string[], username: string, password: string): Promise<void> {
+  const ehloText = ehloLines.join(' ').toUpperCase();
+  const supportsPlain = ehloText.includes('PLAIN') && !ehloText.includes('LOGIN');
+  if (supportsPlain) {
+    const token = Buffer.from(`\u0000${username}\u0000${password}`, 'utf8').toString('base64');
+    await command(channel, `AUTH PLAIN ${token}`, 235);
+    return;
+  }
+  await command(channel, 'AUTH LOGIN', 334);
+  await command(channel, base64Utf8(username), 334);
+  await command(channel, base64Utf8(password), 235);
 }
 
 async function smtpSend(settings: OutboundMailSettings, mail: OutboundMail): Promise<void> {
   const host = (settings.smtpHost || '').trim();
   const port = Number(settings.smtpPort || 465);
-  const security = settings.smtpSecurity || (port === 465 ? 'ssl' : 'starttls');
+  const security = settings.smtpSecurity || (port === 465 || port === 2465 ? 'ssl' : 'starttls');
   const username = (settings.smtpUser || '').trim();
   const password = settings.smtpPass || '';
   const from = normalizeAddress(settings.senderEmail || username, '发件人');
   const to = normalizeAddress(mail.to, '收件人');
 
   if (!host || !username || !password || password === '********') {
-    throw new Error('SMTP 服务器、用户名和密码/API Key 均为必填项');
+    throw new Error('SMTP 服务器、用户名和密码/授权码均为必填项');
   }
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw new Error('SMTP 端口无效');
@@ -138,42 +320,33 @@ async function smtpSend(settings: OutboundMailSettings, mail: OutboundMail): Pro
   if (security !== 'ssl' && security !== 'starttls') {
     throw new Error('SMTP 加密方式必须是 SSL 或 STARTTLS');
   }
-  const hostname = host.toLowerCase();
-  const isIpv4Literal = /^\d{1,3}(\.\d{1,3}){3}$/.test(hostname);
-  const isValidHostname = /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/i.test(hostname);
-  if (!isValidHostname || isIpv4Literal || /(^|\.)(localhost|local|internal|test)$/.test(hostname)) {
-    throw new Error('SMTP 服务器必须是有效的公网邮件主机名');
-  }
+  const validatedHost = await assertPublicMailHost(host, 'SMTP');
   const securePorts = security === 'ssl' ? [465, 2465] : [587, 2587];
   if (!securePorts.includes(port)) {
     throw new Error(security === 'ssl' ? 'SSL 加密请使用端口 465 或 2465' : 'STARTTLS 加密请使用端口 587 或 2587');
   }
 
-  let socket: ReturnType<typeof connect> | null = null;
-  let channel: SmtpChannel | null = null;
+  let channel: NodeSmtpChannel | null = null;
   try {
-    socket = connect(
-      { hostname: host, port },
-      { secureTransport: security === 'ssl' ? 'on' : 'starttls' },
-    );
-    await socket.opened;
-    channel = createChannel(socket);
+    if (security === 'ssl') {
+      const tlsSocket = await connectTlsSocket(validatedHost, port);
+      channel = new NodeSmtpChannel(tlsSocket);
+    } else {
+      const plainSocket = await connectPlainSocket(validatedHost, port);
+      channel = new NodeSmtpChannel(plainSocket);
+    }
+
     await expectResponse(channel, 220);
-    await command(channel, 'EHLO fox3.local', 250);
+    let ehloLines = await command(channel, 'EHLO fox3.blog', 250);
 
     if (security === 'starttls') {
       await command(channel, 'STARTTLS', 220);
-      channel.reader.releaseLock();
-      channel.writer.releaseLock();
-      socket = socket.startTls();
-      await socket.opened;
-      channel = createChannel(socket);
-      await command(channel, 'EHLO fox3.local', 250);
+      const nextTlsSocket = await upgradeToStartTls(channel.socket as net.Socket, validatedHost);
+      channel.replaceSocket(nextTlsSocket);
+      ehloLines = await command(channel, 'EHLO fox3.blog', 250);
     }
 
-    await command(channel, 'AUTH LOGIN', 334);
-    await command(channel, base64Utf8(username), 334);
-    await command(channel, base64Utf8(password), 235);
+    await authenticateSmtp(channel, ehloLines, username, password);
     await command(channel, `MAIL FROM:<${from}>`, 250);
     await command(channel, `RCPT TO:<${to}>`, [250, 251]);
     await command(channel, 'DATA', 354);
@@ -184,6 +357,7 @@ async function smtpSend(settings: OutboundMailSettings, mail: OutboundMail): Pro
       `To: <${to}>`,
       `Subject: ${subject}`,
       `Date: ${new Date().toUTCString()}`,
+      `Message-ID: <${crypto.randomUUID()}@${from.split('@')[1] || 'fox3.blog'}>`,
       'MIME-Version: 1.0',
     ];
     let body: string;
@@ -211,17 +385,15 @@ async function smtpSend(settings: OutboundMailSettings, mail: OutboundMail): Pro
       body = base64Lines(mail.text || '');
     }
 
-    await channel.writer.write(encoder.encode(`${headers.join('\r\n')}\r\n\r\n${body}\r\n.\r\n`));
+    await channel.write(encoder.encode(`${headers.join('\r\n')}\r\n\r\n${body}\r\n.\r\n`));
     await expectResponse(channel, 250);
-    await command(channel, 'QUIT', 221);
+    try {
+      await command(channel, 'QUIT', [221, 250]);
+    } catch {
+      // Some providers (including enterprise mail gateways) close connection immediately after accepting DATA.
+    }
   } finally {
-    if (channel) {
-      try { channel.reader.releaseLock(); } catch {}
-      try { channel.writer.releaseLock(); } catch {}
-    }
-    if (socket) {
-      try { await socket.close(); } catch {}
-    }
+    channel?.close();
   }
 }
 

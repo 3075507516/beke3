@@ -71,6 +71,8 @@ export const MailSection: React.FC = () => {
   const [inboundServerStatus, setInboundServerStatus] = useState<any>(null);
   const [inboxLoadError, setInboxLoadError] = useState('');
   const [isRefreshingInbox, setIsRefreshingInbox] = useState(false);
+  const [imapTesting, setImapTesting] = useState(false);
+  const [imapSyncing, setImapSyncing] = useState(false);
   const [registeredUsers, setRegisteredUsers] = useState<User[]>([]);
   const [registeredUsersLoading, setRegisteredUsersLoading] = useState(true);
   const [registeredUsersError, setRegisteredUsersError] = useState('');
@@ -125,7 +127,7 @@ export const MailSection: React.FC = () => {
           const local = previousById.get(mail.id);
           return local ? { ...mail, folder: local.folder, read: local.read, isStarred: local.isStarred, deleted: local.deleted } : mail;
         });
-        return [...fromServer, ...previous.filter(mail => !mail.id.startsWith('resend-inbound-'))];
+        return [...fromServer, ...previous.filter(mail => !mail.id.startsWith('resend-inbound-') && !mail.id.startsWith('imap-inbound-'))];
       });
       const statusResponse = await fetch('/api/mail/status', { headers: { Accept: 'application/json' } });
       if (statusResponse.ok && (statusResponse.headers.get('content-type') || '').includes('application/json')) {
@@ -306,6 +308,107 @@ export const MailSection: React.FC = () => {
     }
   };
 
+  const applyMailPreset = (preset: 'aliyun-qiye' | 'aliyun-personal' | 'tencent-exmail') => {
+    const configs = {
+      'aliyun-qiye': {
+        label: '阿里云企业邮箱免费版',
+        smtpHost: 'smtp.qiye.aliyun.com',
+        smtpPort: 465,
+        smtpSecurity: 'ssl' as const,
+        imapHost: 'imap.qiye.aliyun.com',
+        imapPort: 993,
+      },
+      'aliyun-personal': {
+        label: '阿里云个人邮箱 (@aliyun.com)',
+        smtpHost: 'smtp.aliyun.com',
+        smtpPort: 465,
+        smtpSecurity: 'ssl' as const,
+        imapHost: 'imap.aliyun.com',
+        imapPort: 993,
+      },
+      'tencent-exmail': {
+        label: '腾讯企业邮箱免费版',
+        smtpHost: 'smtp.exmail.qq.com',
+        smtpPort: 465,
+        smtpSecurity: 'ssl' as const,
+        imapHost: 'imap.exmail.qq.com',
+        imapPort: 993,
+      },
+    }[preset];
+
+    setFormSettings(prev => ({
+      ...prev,
+      provider: 'smtp',
+      smtpHost: configs.smtpHost,
+      smtpPort: configs.smtpPort,
+      smtpSecurity: configs.smtpSecurity,
+      inboundMethod: 'imap_pop3',
+      imapConfig: {
+        host: configs.imapHost,
+        port: configs.imapPort,
+        user: prev.imapConfig?.user || prev.smtpUser || prev.senderEmail || '',
+        pass: prev.imapConfig?.pass || prev.smtpPass || '',
+        tls: true,
+      },
+    }));
+    showToast(`已填入「${configs.label}」SMTP 发信与 IMAP 收信服务器参数，请补充邮箱账号和授权码。`, 'info');
+  };
+
+  const handleTestImap = async (source: 'frontend' | 'backend') => {
+    const token = getAdminSessionToken();
+    if (!token) {
+      showToast('IMAP 测试需要管理员会话。', 'error');
+      return;
+    }
+    setImapTesting(true);
+    try {
+      const response = await fetch('/api/mail/imap-test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          source,
+          imapConfig: source === 'frontend' ? formSettings.imapConfig : undefined,
+        }),
+      });
+      const result = await readMailApiJson(response, 'IMAP 连接测试接口');
+      if (!response.ok || !result?.success) throw new Error(result?.error || `IMAP 连接失败 (HTTP ${response.status})`);
+      showToast(`IMAP 登录成功 (${result.host}:${result.port})，INBOX 共有 ${result.exists} 封邮件。`, 'success');
+    } catch (error: any) {
+      showToast(error?.message || 'IMAP 连接测试失败', 'error');
+    } finally {
+      setImapTesting(false);
+    }
+  };
+
+  const handleSyncImap = async (source: 'frontend' | 'backend') => {
+    const token = getAdminSessionToken();
+    if (!token) {
+      showToast('拉取 IMAP 邮件需要管理员会话。', 'error');
+      return;
+    }
+    setImapSyncing(true);
+    try {
+      const response = await fetch('/api/mail/imap-sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          source,
+          limit: 25,
+          imapConfig: source === 'frontend' ? formSettings.imapConfig : undefined,
+        }),
+      });
+      const result = await readMailApiJson(response, 'IMAP 收信同步接口');
+      if (!response.ok || !result?.success) throw new Error(result?.error || `IMAP 拉取失败 (HTTP ${response.status})`);
+      await refreshServerInbox();
+      setActiveFolder('inbox');
+      showToast(`IMAP 同步完成：读取 ${result.totalFetched} 封最新邮件，新导入 ${result.imported} 封到收件箱。`, 'success');
+    } catch (error: any) {
+      showToast(error?.message || 'IMAP 同步邮件失败', 'error');
+    } finally {
+      setImapSyncing(false);
+    }
+  };
+
   // New Compose state
   const [recipient, setRecipient] = useState('');
   const [replyIdentity, setReplyIdentity] = useState('');
@@ -451,10 +554,10 @@ export const MailSection: React.FC = () => {
         <div>
           <h2 className="text-xl font-bold font-serif-sc text-slate-800 dark:text-slate-100 flex items-center gap-2">
             <Mail className="w-5 h-5 text-rose-500" />
-            <span>站内邮件中枢（Resend 发信与邮件事件）</span>
+            <span>站内邮件中枢（SMTP / IMAP / Resend）</span>
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            管理员来信由邮件服务端转发至管理员个人邮箱；本站仅可选留存邮件事件，不是个人邮箱收件箱
+            支持阿里云企业邮箱免费版、阿里云个人邮箱、腾讯企业邮箱免费版 SMTP 发信与 IMAP 收信，以及 Resend Webhook 投递
           </p>
         </div>
 
@@ -471,7 +574,7 @@ export const MailSection: React.FC = () => {
             </span>
             <span className={`inline-flex items-center gap-1.5 text-[10px] px-2 py-1 rounded-full font-medium border ${inboundServerReady ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300' : 'bg-rose-50 text-rose-600 border-rose-200 dark:bg-rose-950/40 dark:text-rose-400'}`}>
               <span className={`w-2 h-2 rounded-full ${inboundServerReady ? 'bg-emerald-500' : 'bg-rose-500'}`} />
-              <span>收件: {backendMailStatusAvailable === null ? '检测中' : backendMailStatusAvailable === false ? '状态不可读取' : inboundServerReady ? '服务端已就绪' : '未就绪/待配置'}</span>
+              <span>收件: {backendMailStatusAvailable === null ? '检测中' : backendMailStatusAvailable === false ? '状态不可读取' : inboundServerReady ? (inboundServerStatus?.imapConfigured ? 'IMAP / 服务端已就绪' : '服务端已就绪') : '未就绪/待配置'}</span>
             </span>
           </div>
 
@@ -484,6 +587,18 @@ export const MailSection: React.FC = () => {
             <RotateCcw className={`w-4 h-4 text-slate-500 ${isRefreshingInbox ? 'animate-spin' : ''}`} />
             <span>{isRefreshingInbox ? '刷新中…' : '刷新收件箱'}</span>
           </button>
+
+          {(formSettings.imapConfig?.host && formSettings.imapConfig?.user && formSettings.imapConfig?.pass) || inboundServerStatus?.imapConfigured ? (
+            <button
+              onClick={() => void handleSyncImap(inboundServerStatus?.imapConfigured && (!formSettings.imapConfig?.host || settingsSource === 'backend') ? 'backend' : 'frontend')}
+              disabled={imapSyncing}
+              title="从邮箱 IMAP 拉取最新来信"
+              className="flex items-center gap-1.5 px-3 py-2 bg-sky-50 dark:bg-sky-950/40 hover:bg-sky-100 dark:hover:bg-sky-900/60 border border-sky-200 dark:border-sky-800 disabled:opacity-50 text-sky-700 dark:text-sky-300 text-xs font-medium rounded-xl transition"
+            >
+              <Inbox className={`w-4 h-4 ${imapSyncing ? 'animate-pulse' : ''}`} />
+              <span>{imapSyncing ? '拉取中…' : '拉取 IMAP 来信'}</span>
+            </button>
+          ) : null}
 
           <button
             onClick={() => setShowConfig(!showConfig)}
@@ -575,6 +690,18 @@ export const MailSection: React.FC = () => {
                 <div className="text-[10px] text-slate-500">后台环境变量：{backendMailStatusAvailable === null ? '检测中…' : backendMailStatusAvailable === false ? '状态接口不可读取，无法判断后台是否配置' : isBackendTestFailed ? '实际测试邮件失败' : isBackendConnected ? '测试邮件已被服务商接受' : backendMailConfigured ? `已配置 (${backendMailProvider})，尚未发送测试邮件` : '未配置发信环境变量'}</div>
               </div>
 
+              <div className="p-3 rounded-xl border border-sky-200/80 dark:border-sky-900/60 bg-sky-50/50 dark:bg-sky-950/30 space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-[11px] font-bold text-sky-800 dark:text-sky-200">一键预设常用企业/免费邮箱参数（同时填充 SMTP 发信与 IMAP 收信）：</span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" onClick={() => applyMailPreset('aliyun-qiye')} className="px-3 py-1.5 rounded-lg border border-sky-300 bg-white dark:bg-slate-900 hover:bg-sky-50 text-[11px] font-semibold text-sky-700 dark:text-sky-300">阿里云企业邮箱免费版 (qiye.aliyun.com)</button>
+                  <button type="button" onClick={() => applyMailPreset('tencent-exmail')} className="px-3 py-1.5 rounded-lg border border-emerald-300 bg-white dark:bg-slate-900 hover:bg-emerald-50 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">腾讯企业邮箱免费版 (exmail.qq.com)</button>
+                  <button type="button" onClick={() => applyMailPreset('aliyun-personal')} className="px-3 py-1.5 rounded-lg border border-amber-300 bg-white dark:bg-slate-900 hover:bg-amber-50 text-[11px] font-semibold text-amber-700 dark:text-amber-300">阿里云个人邮箱 (aliyun.com)</button>
+                </div>
+                <p className="text-[10px] text-slate-500 leading-relaxed">提示：阿里云免费企业邮箱与腾讯企业邮箱免费版均需使用完整企业邮箱地址作为账号，并在邮箱安全设置中开启“客户端授权码/三方客户端登录安全密码”后填写授权码。</p>
+              </div>
+
               <div>
                 <label className="block text-xs text-slate-500 mb-1">
                   {tx('发信服务与加密方式')} <span className="text-rose-500 font-bold">[必填]</span>
@@ -585,7 +712,7 @@ export const MailSection: React.FC = () => {
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100"
                 >
                   <option value="resend">Resend API (HTTPS，推荐)</option>
-                  <option value="smtp">SMTP (SSL 465 / STARTTLS 587)</option>
+                  <option value="smtp">SMTP (SSL 465 / STARTTLS 587，阿里云/腾讯企业邮箱通用)</option>
                   <option value="sendcloud">{tx('SendCloud API (国内服务，按账户额度)')}</option>
                   <option value="brevo">Brevo API (HTTPS)</option>
                   <option value="sendgrid">Twilio SendGrid API (HTTPS)</option>
@@ -714,28 +841,121 @@ export const MailSection: React.FC = () => {
               </div>
             </div>
 
-            {/* Resend Receiving & Inbound Routing */}
+            {/* IMAP & Resend Receiving Section */}
             <div className="space-y-4 rounded-2xl border border-slate-200 p-4 dark:border-slate-700">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
-                  Resend 收件通道 (Inbound)
+                  收件通道：阿里云邮箱 / 腾讯企业邮箱 IMAP 收信 & Resend Receiving
                 </h4>
                 <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${inboundServerReady ? 'bg-emerald-50 text-emerald-700' : backendMailStatusAvailable === null || backendMailStatusAvailable === false ? 'bg-amber-50 text-amber-700' : 'bg-rose-50 text-rose-600'}`}>
-                  {backendMailStatusAvailable === null ? '○ 状态检测中' : backendMailStatusAvailable === false ? '○ 状态不可读取' : inboundServerReady ? '● 服务端已就绪' : '○ 服务端配置不完整'}
+                  {backendMailStatusAvailable === null ? '○ 状态检测中' : backendMailStatusAvailable === false ? '○ 状态不可读取' : inboundServerReady ? `● 已就绪${inboundServerStatus?.imapConfigured ? ` (IMAP: ${inboundServerStatus.imapHost})` : ''}` : '○ 后台收件未配置（可使用下方前台 IMAP 拉取）'}
                 </span>
               </div>
 
-              <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 space-y-3 text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">
-                <p><b>收件接入步骤：</b>在 Resend Dashboard → Emails → Receiving 启用 Resend 收件域名，或为自己的收件域名添加 Resend 要求的 MX 记录；然后创建 <code>email.received</code> Webhook。</p>
-                <p><b>Webhook URL：</b><code className="break-all">https://你的 Pages 域名/api/webhook</code>。将该 Webhook 的 Signing Secret 设为 Cloudflare Pages Secret <code>RESEND_WEBHOOK_SECRET</code>。Webhook 事件经签名验证后，后端使用 <code>RESEND_API_KEY</code> 拉取正文，并写入绑定名为 <code>DB</code> 的 D1 数据库；旧路径 <code>/api/mail/webhook</code> 仍可用。</p>
-                <p><b>状态含义：</b>{backendMailStatusAvailable === false || backendMailStatusAvailable === null ? '无法读取真实 /api/mail/status 状态，暂不能判断收件通道配置。' : inboundServerReady ? '真实 /api/mail/status 返回 inbound.configured=true：所需后端变量已配置并部署，服务端收件事件接入已就绪；这不代表已经收到邮件，也不检查 Resend Dashboard 的域名/MX/Webhook 是否实际连通。' : '真实 /api/mail/status 返回 inbound 未配置；请配置所需后端变量并部署。'}</p>
+              <div className="p-4 rounded-xl border border-sky-200 dark:border-sky-900 bg-sky-50/40 dark:bg-sky-950/20 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-xs font-bold text-slate-800 dark:text-slate-100">IMAP 收件箱配置（支持阿里云邮箱免费版 / 腾讯企业邮箱免费版）</span>
+                  <button
+                    type="button"
+                    onClick={() => setFormSettings(prev => ({
+                      ...prev,
+                      imapConfig: {
+                        host: prev.imapConfig?.host || (prev.smtpHost?.includes('exmail.qq.com') ? 'imap.exmail.qq.com' : prev.smtpHost?.includes('qiye.aliyun.com') ? 'imap.qiye.aliyun.com' : prev.smtpHost?.includes('aliyun.com') ? 'imap.aliyun.com' : ''),
+                        port: prev.imapConfig?.port || 993,
+                        user: prev.smtpUser || prev.senderEmail || '',
+                        pass: prev.smtpPass || '',
+                        tls: true,
+                      }
+                    }))}
+                    className="text-[11px] font-semibold text-sky-600 hover:underline"
+                  >
+                    从上方 SMTP 账号密码同步
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <div className="sm:col-span-2">
+                    <label className="block text-[11px] text-slate-500 mb-1">IMAP 收信服务器地址</label>
+                    <input
+                      type="text"
+                      value={formSettings.imapConfig?.host || ''}
+                      onChange={e => setFormSettings({ ...formSettings, imapConfig: { host: e.target.value, port: formSettings.imapConfig?.port || 993, user: formSettings.imapConfig?.user || '', pass: formSettings.imapConfig?.pass || '', tls: formSettings.imapConfig?.tls ?? true } })}
+                      placeholder="imap.qiye.aliyun.com 或 imap.exmail.qq.com"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-slate-500 mb-1">IMAP 端口 (推荐 993 SSL)</label>
+                    <input
+                      type="number"
+                      value={formSettings.imapConfig?.port || 993}
+                      onChange={e => setFormSettings({ ...formSettings, imapConfig: { host: formSettings.imapConfig?.host || '', port: parseInt(e.target.value, 10) || 993, user: formSettings.imapConfig?.user || '', pass: formSettings.imapConfig?.pass || '', tls: (parseInt(e.target.value, 10) || 993) !== 143 } })}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[11px] text-slate-500 mb-1">IMAP 登录邮箱账号</label>
+                    <input
+                      type="text"
+                      value={formSettings.imapConfig?.user || ''}
+                      onChange={e => setFormSettings({ ...formSettings, imapConfig: { host: formSettings.imapConfig?.host || '', port: formSettings.imapConfig?.port || 993, user: e.target.value, pass: formSettings.imapConfig?.pass || '', tls: formSettings.imapConfig?.tls ?? true } })}
+                      placeholder="admin@yourdomain.com"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-slate-500 mb-1">IMAP 密码 / 客户端授权码</label>
+                    <input
+                      type="password"
+                      value={formSettings.imapConfig?.pass || ''}
+                      onChange={e => setFormSettings({ ...formSettings, imapConfig: { host: formSettings.imapConfig?.host || '', port: formSettings.imapConfig?.port || 993, user: formSettings.imapConfig?.user || '', pass: e.target.value, tls: formSettings.imapConfig?.tls ?? true } })}
+                      placeholder="邮箱密码或专用授权码"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    disabled={imapTesting || !formSettings.imapConfig?.host || !formSettings.imapConfig?.user || !formSettings.imapConfig?.pass}
+                    onClick={() => void handleTestImap('frontend')}
+                    className="px-3 py-1.5 rounded-lg bg-sky-600 disabled:opacity-40 text-white text-[11px] font-semibold"
+                  >
+                    {imapTesting ? '连接中…' : '测试前台 IMAP 连接'}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={imapSyncing || !formSettings.imapConfig?.host || !formSettings.imapConfig?.user || !formSettings.imapConfig?.pass}
+                    onClick={() => void handleSyncImap('frontend')}
+                    className="px-3 py-1.5 rounded-lg bg-emerald-600 disabled:opacity-40 text-white text-[11px] font-semibold"
+                  >
+                    {imapSyncing ? '同步中…' : '立即拉取前台 IMAP 收件箱'}
+                  </button>
+                  {inboundServerStatus?.imapConfigured && (
+                    <>
+                      <button type="button" disabled={imapTesting} onClick={() => void handleTestImap('backend')} className="px-3 py-1.5 rounded-lg border border-indigo-300 text-indigo-700 dark:text-indigo-300 text-[11px] font-semibold disabled:opacity-40">
+                        测试后台环境变量 IMAP
+                      </button>
+                      <button type="button" disabled={imapSyncing} onClick={() => void handleSyncImap('backend')} className="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-[11px] font-semibold disabled:opacity-40">
+                        拉取后台环境变量 IMAP
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 space-y-2 text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">
+                <p><b>Resend Webhook（可选）：</b>在 Resend Dashboard → Emails → Receiving 启用收件域名与 <code>email.received</code> Webhook（指向 <code>/api/webhook</code>，配置 <code>RESEND_WEBHOOK_SECRET</code>），与 IMAP 收件箱共用同一个收件箱列表。</p>
                 {inboxLoadError && <p className="text-rose-600 dark:text-rose-400">收件箱读取提示：{inboxLoadError}</p>}
-                <p className="text-slate-500">本站不是管理员个人邮箱的收件箱。启用 webhook 时，邮件事件/正文可选留存于 D1 并显示在此页面（最多最近 500 封且清理 180 天前邮件）；这是可选事件留存，不替代邮件服务端转发到管理员个人邮箱。当前会保存附件元数据，但不会下载或展示附件文件。</p>
               </div>
 
               <div className="p-3 rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50/70 dark:bg-amber-950/30 text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">
                 <b className="text-slate-700 dark:text-slate-200">安全与限制：</b>
-                Webhook 使用原始请求体、签名与时间戳验证；收件箱仅允许有效管理员会话读取。注册验证码限流仍由服务端执行；邮件连通测试需要管理员会话。
+                SMTP 与 IMAP 连接均在服务端完成域名校验，禁止访问内网/回环地址；发信/拉取收件箱与测试操作均校验管理员会话。
               </div>
             </div>
           </div>

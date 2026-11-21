@@ -94,8 +94,14 @@ export const SafeImage: React.FC<SafeImageProps> = ({
         alt={alt}
         loading={props.loading || 'lazy'}
         decoding="async"
-        onError={handleError}
-        onLoad={handleLoad}
+        onError={event => {
+          handleError();
+          props.onError?.(event);
+        }}
+        onLoad={event => {
+          handleLoad();
+          props.onLoad?.(event);
+        }}
         className={`w-full h-full ${imageClassName} transition-opacity duration-200 ${
           isLoaded ? 'opacity-100' : 'opacity-0'
         }`}

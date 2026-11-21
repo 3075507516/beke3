@@ -1,4 +1,4 @@
-import { capturePayPalOrder, createPayment, verifyPaymentWebhook, refundPayment, type PaymentProvider } from './payment-providers';
+import { capturePayPalOrder, createPayment, queryPaymentStatus, verifyPaymentWebhook, refundPayment, type PaymentProvider } from './payment-providers';
 
 type UserIdentity = { id: string; username: string };
 type MailSender = (to: string, subject: string, text: string, html: string) => Promise<{ success: boolean; error?: string }>;
@@ -223,7 +223,7 @@ export async function handleCommerceRequest(
   headers: Headers,
   auth: CommerceAuth,
 ): Promise<Response | null> {
-  const matchOrder = path.match(/^\/orders\/([^/]+)(?:\/(cancel|capture|ship|refund|restore))?$/);
+  const matchOrder = path.match(/^\/orders\/([^/]+)(?:\/(cancel|capture|pay|verify|ship|refund|restore))?$/);
   const isCommercePath = path === '/orders' || path === '/orders/trash' || Boolean(matchOrder) || path.startsWith('/chat/') || path.startsWith('/notifications') || path === '/legal-pages' || path === '/payment-settings' || path === '/payment-config-status' || path.startsWith('/payments/webhook/');
   if (!isCommercePath) return null;
   if (!env.DB) return json({ success: false, error: '此功能需要已绑定且迁移成功的 Cloudflare D1（DB）数据库' }, 503, headers);
@@ -248,6 +248,16 @@ export async function handleCommerceRequest(
       if (response.ok && provider === 'wechat') return json({ code: 'SUCCESS', message: '成功' }, 200, headers);
       if (response.ok && provider === 'alipay') return new Response('success', { status: 200 });
       return response;
+    }
+
+    if (path === '/legal-pages' && request.method === 'GET') {
+      const result = await env.DB.prepare('SELECT pageKey, content, updatedAt FROM fox3_legal_pages').all();
+      const pages: Record<string, string> = { ...LEGAL_DEFAULTS };
+      const updatedAt: Record<string, number> = {};
+      for (const row of result?.results || []) if ((PAGE_KEYS as readonly string[]).includes(String(row.pageKey))) {
+        pages[String(row.pageKey)] = String(row.content || ''); updatedAt[String(row.pageKey)] = Number(row.updatedAt || 0);
+      }
+      return json({ success: true, pages, updatedAt }, 200, headers);
     }
 
     const isAdmin = await auth.isAdmin(request);
@@ -310,10 +320,12 @@ export async function handleCommerceRequest(
       const draft = { id, amountMinor, currency: 'CNY', productName: text(product.name, 250), quantity };
       try {
         const payment = await createPayment(provider as PaymentProvider, draft, env, new URL(request.url).origin);
-        await env.DB.prepare('UPDATE fox3_orders SET providerOrderId = ?, paymentUrl = ?, updatedAt = ? WHERE id = ?')
-          .bind(payment.providerOrderId || null, payment.redirectUrl || null, Date.now(), id).run();
+        const finalAmountMinor = payment.chargedAmountMinor ?? amountMinor;
+        const finalCurrency = payment.chargedCurrency ?? 'CNY';
+        await env.DB.prepare('UPDATE fox3_orders SET amountMinor = ?, currency = ?, providerOrderId = ?, paymentUrl = ?, updatedAt = ? WHERE id = ?')
+          .bind(finalAmountMinor, finalCurrency, payment.providerOrderId || null, payment.redirectUrl || null, Date.now(), id).run();
         const saved = await loadOrder(env.DB, id);
-        return json({ success: true, order: rowToOrder(saved), payment }, 201, headers);
+        return json({ success: true, order: rowToOrder(saved), payment, paymentError: payment.warning || undefined }, 201, headers);
       } catch (error: any) {
         await env.DB.prepare(`UPDATE fox3_orders SET status = 'failed', updatedAt = ? WHERE id = ? AND status = 'pending'`).bind(Date.now(), id).run();
         console.warn(`[Payment] ${provider} create payment failed for order ${id}: ${String(error?.message || error).slice(0, 180)}`);
@@ -341,15 +353,126 @@ export async function handleCommerceRequest(
         await env.DB.prepare('UPDATE fox3_orders SET deletedAt = ?, updatedAt = ? WHERE id = ? AND deletedAt IS NULL').bind(now, now, row.id).run();
         return json({ success: true, message: '订单已移入回收站' }, 200, headers);
       }
-      if (!action && request.method === 'GET') return json({ success: true, order: rowToOrder(row, isAdmin) }, 200, headers);
+      if (!action && request.method === 'GET') {
+        let currentRow = row;
+        if (currentRow.status === 'pending' && currentRow.providerOrderId) {
+          try {
+            const check = await queryPaymentStatus(
+              String(currentRow.paymentProvider) as PaymentProvider,
+              {
+                id: String(currentRow.id),
+                amountMinor: Number(currentRow.amountMinor),
+                currency: String(currentRow.currency),
+                productName: String(currentRow.productName),
+                quantity: Number(currentRow.quantity),
+                providerOrderId: currentRow.providerOrderId ? String(currentRow.providerOrderId) : undefined,
+              },
+              env,
+            );
+            if (
+              check.status === 'paid' &&
+              (check.amountMinor == null || Number(check.amountMinor) === Number(currentRow.amountMinor)) &&
+              (!check.currency || String(check.currency).toUpperCase() === String(currentRow.currency).toUpperCase())
+            ) {
+              const eventInsert = await env.DB.prepare('INSERT OR IGNORE INTO fox3_payment_events (eventId, provider, orderId, receivedAt) VALUES (?, ?, ?, ?)')
+                .bind(`${currentRow.paymentProvider}:query:${check.paymentId || currentRow.id}`, String(currentRow.paymentProvider), String(currentRow.id), Date.now()).run();
+              const now = Date.now();
+              await env.DB.prepare(`UPDATE fox3_orders SET status = 'paid', providerPaymentId = COALESCE(?, providerPaymentId), paidAt = COALESCE(paidAt, ?), updatedAt = ? WHERE id = ? AND status IN ('pending','failed')`)
+                .bind(check.paymentId || null, now, now, currentRow.id).run();
+              currentRow = await loadOrder(env.DB, row.id);
+              if (Number(eventInsert?.meta?.changes || 0) > 0 && currentRow?.status === 'paid') {
+                await notifyPaid(env.DB, currentRow, auth.sendMail, auth.defaultAdminEmail || '');
+              }
+            } else if (check.status === 'cancelled') {
+              await env.DB.prepare(`UPDATE fox3_orders SET status = 'cancelled', updatedAt = ? WHERE id = ? AND status = 'pending'`)
+                .bind(Date.now(), currentRow.id).run();
+              currentRow = await loadOrder(env.DB, row.id);
+            }
+          } catch {
+            // Keep persisted status when gateway status query is temporarily unreachable
+          }
+        }
+        return json({ success: true, order: rowToOrder(currentRow, isAdmin) }, 200, headers);
+      }
+      if (action === 'verify' && request.method === 'POST') {
+        if (row.status === 'paid' || row.status === 'shipped') {
+          return json({ success: true, verified: true, order: rowToOrder(row, isAdmin) }, 200, headers);
+        }
+        try {
+          const check = await queryPaymentStatus(
+            String(row.paymentProvider) as PaymentProvider,
+            {
+              id: String(row.id),
+              amountMinor: Number(row.amountMinor),
+              currency: String(row.currency),
+              productName: String(row.productName),
+              quantity: Number(row.quantity),
+              providerOrderId: row.providerOrderId ? String(row.providerOrderId) : undefined,
+            },
+            env,
+          );
+          if (check.status === 'paid') {
+            if (
+              (check.amountMinor != null && Number(check.amountMinor) !== Number(row.amountMinor)) ||
+              (check.currency && String(check.currency).toUpperCase() !== String(row.currency).toUpperCase())
+            ) {
+              return json({ success: false, error: '支付平台返回金额或币种与订单不符，已拒绝自动确认' }, 409, headers);
+            }
+            const eventInsert = await env.DB.prepare('INSERT OR IGNORE INTO fox3_payment_events (eventId, provider, orderId, receivedAt) VALUES (?, ?, ?, ?)')
+              .bind(`${row.paymentProvider}:verify:${check.paymentId || row.id}`, String(row.paymentProvider), String(row.id), Date.now()).run();
+            const now = Date.now();
+            await env.DB.prepare(`UPDATE fox3_orders SET status = 'paid', providerPaymentId = COALESCE(?, providerPaymentId), paidAt = COALESCE(paidAt, ?), updatedAt = ? WHERE id = ? AND status IN ('pending','failed')`)
+              .bind(check.paymentId || null, now, now, row.id).run();
+            const fresh = await loadOrder(env.DB, row.id);
+            if (Number(eventInsert?.meta?.changes || 0) > 0 && fresh?.status === 'paid') {
+              await notifyPaid(env.DB, fresh, auth.sendMail, auth.defaultAdminEmail || '');
+            }
+            return json({ success: true, verified: true, order: rowToOrder(fresh, isAdmin), message: '支付状态已向网关核验成功！' }, 200, headers);
+          }
+          if (check.status === 'cancelled') {
+            await env.DB.prepare(`UPDATE fox3_orders SET status = 'cancelled', updatedAt = ? WHERE id = ? AND status = 'pending'`).bind(Date.now(), row.id).run();
+          } else if (check.status === 'failed') {
+            await env.DB.prepare(`UPDATE fox3_orders SET status = 'failed', updatedAt = ? WHERE id = ? AND status = 'pending'`).bind(Date.now(), row.id).run();
+          }
+          return json({ success: true, verified: false, providerStatus: check.status, order: rowToOrder(await loadOrder(env.DB, row.id), isAdmin), message: '支付平台暂未确认到账，请在完成付款后再次点击核验。' }, 200, headers);
+        } catch (error: any) {
+          return json({ success: false, error: String(error?.message || '向支付平台核验订单状态失败').slice(0, 240) }, 502, headers);
+        }
+      }
+      if (action === 'pay' && request.method === 'POST') {
+        if (isAdmin || row.userId !== actorId || !['pending', 'failed'].includes(String(row.status))) {
+          return json({ success: false, error: '仅本人待支付或支付初始化失败的订单可重新发起支付' }, 409, headers);
+        }
+        try {
+          const payment = await createPayment(
+            String(row.paymentProvider) as PaymentProvider,
+            {
+              id: String(row.id),
+              amountMinor: Number(row.amountMinor),
+              currency: String(row.currency),
+              productName: String(row.productName),
+              quantity: Number(row.quantity),
+            },
+            env,
+            new URL(request.url).origin,
+          );
+          const finalAmountMinor = payment.chargedAmountMinor ?? Number(row.amountMinor);
+          const finalCurrency = payment.chargedCurrency ?? String(row.currency);
+          await env.DB.prepare(`UPDATE fox3_orders SET status = 'pending', amountMinor = ?, currency = ?, providerOrderId = ?, paymentUrl = ?, updatedAt = ? WHERE id = ?`)
+            .bind(finalAmountMinor, finalCurrency, payment.providerOrderId || null, payment.redirectUrl || null, Date.now(), row.id).run();
+          return json({ success: true, order: rowToOrder(await loadOrder(env.DB, row.id)), payment, paymentError: payment.warning || undefined }, 200, headers);
+        } catch (error: any) {
+          return json({ success: false, error: String(error?.message || '重新发起支付失败').slice(0, 260) }, 502, headers);
+        }
+      }
       if (action === 'cancel' && request.method === 'POST') {
-        if (isAdmin || row.status !== 'pending') return json({ success: false, error: '仅订单本人可取消尚未支付的订单' }, 409, headers);
-        await env.DB.prepare(`UPDATE fox3_orders SET status = 'cancelled', updatedAt = ? WHERE id = ? AND userId = ? AND status = 'pending'`).bind(Date.now(), row.id, actorId).run();
+        if (isAdmin || !['pending', 'failed'].includes(String(row.status))) return json({ success: false, error: '仅订单本人可取消尚未支付的订单' }, 409, headers);
+        await env.DB.prepare(`UPDATE fox3_orders SET status = 'cancelled', updatedAt = ? WHERE id = ? AND userId = ? AND status IN ('pending','failed')`).bind(Date.now(), row.id, actorId).run();
         return json({ success: true, order: rowToOrder(await loadOrder(env.DB, row.id)) }, 200, headers);
       }
       if (action === 'capture' && request.method === 'POST') {
-        // A PayPal return redirect is only a prompt to perform server-side capture; paid state still comes from verified server response/webhook.
-        if (isAdmin || row.userId !== actorId || row.paymentProvider !== 'paypal' || !['pending','failed'].includes(String(row.status))) return json({ success: false, error: '当前订单不可执行 PayPal 捕获' }, 409, headers);
+        // Server-side PayPal capture; only mark paid after PayPal confirms COMPLETED with matching amount and currency.
+        if (isAdmin || row.userId !== actorId || row.paymentProvider !== 'paypal' || !['pending', 'failed'].includes(String(row.status))) return json({ success: false, error: '当前订单不可执行 PayPal 捕获' }, 409, headers);
         if (!row.providerOrderId) return json({ success: false, error: 'PayPal 支付订单标识缺失' }, 409, headers);
         try {
           const capture = await capturePayPalOrder(String(row.providerOrderId), env);
@@ -357,14 +480,21 @@ export async function handleCommerceRequest(
             if (Number(capture.amountMinor) !== Number(row.amountMinor) || String(capture.currency || '').toUpperCase() !== String(row.currency).toUpperCase()) {
               return json({ success: false, error: 'PayPal 捕获金额/币种与订单不符，已阻止订单确认' }, 409, headers);
             }
-            await env.DB.prepare('UPDATE fox3_orders SET providerPaymentId = ?, updatedAt = ? WHERE id = ? AND userId = ? AND status = \'pending\'')
-              .bind(capture.paymentId, Date.now(), row.id, actorId).run();
+            const eventInsert = await env.DB.prepare('INSERT OR IGNORE INTO fox3_payment_events (eventId, provider, orderId, receivedAt) VALUES (?, ?, ?, ?)')
+              .bind(`paypal:capture:${capture.paymentId}`, 'paypal', String(row.id), Date.now()).run();
+            const now = Date.now();
+            await env.DB.prepare(`UPDATE fox3_orders SET status = 'paid', providerPaymentId = ?, paidAt = COALESCE(paidAt, ?), updatedAt = ? WHERE id = ? AND userId = ? AND status IN ('pending','failed')`)
+              .bind(capture.paymentId, now, now, row.id, actorId).run();
+            const fresh = await loadOrder(env.DB, row.id);
+            if (Number(eventInsert?.meta?.changes || 0) > 0 && fresh?.status === 'paid') {
+              await notifyPaid(env.DB, fresh, auth.sendMail, auth.defaultAdminEmail || '');
+            }
           } else if (capture.status === 'DECLINED') {
             await env.DB.prepare(`UPDATE fox3_orders SET status = 'failed', updatedAt = ? WHERE id = ? AND status = 'pending'`).bind(Date.now(), row.id).run();
           }
-          return json({ success: true, captureStatus: capture.status, order: rowToOrder(await loadOrder(env.DB, row.id)), message: capture.status === 'COMPLETED' ? 'PayPal 已确认捕获请求；订单到账状态仍以验签的 PayPal Webhook 为准。' : '支付平台尚未确认完成，请稍后刷新订单。' }, 200, headers);
-        } catch {
-          return json({ success: false, error: 'PayPal 服务端捕获失败；请重试或检查 PayPal 控制台' }, 502, headers);
+          return json({ success: true, captureStatus: capture.status, order: rowToOrder(await loadOrder(env.DB, row.id)), message: capture.status === 'COMPLETED' ? 'PayPal 扣款已确认，订单已标记为已支付！' : '支付平台尚未确认完成，请稍后刷新订单。' }, 200, headers);
+        } catch (err: any) {
+          return json({ success: false, error: String(err?.message || 'PayPal 服务端捕获失败；请重试或检查 PayPal 控制台').slice(0, 240) }, 502, headers);
         }
       }
       if (action === 'ship' && request.method === 'POST') {

@@ -1,4 +1,5 @@
 import { createVerificationCode, dispatchEmail, escapeHtml, normalizeEmail, probeResendConnection, type MailProvider, type OutboundMailSettings } from '../mail';
+import { fetchImapMessages, testImapConnection, type ImapSettings } from '../imap';
 import { getExternalObjectStoreConfig, getExternalObject, putExternalObject, deleteExternalObject, probeExternalObjectStore } from '../object-storage';
 import { handleWebDavAction } from '../webdav';
 import { handleCommerceRequest } from '../commerce';
@@ -43,6 +44,11 @@ interface Env {
   SMTP_SECURITY?: string;
   SMTP_USER?: string;
   SMTP_PASS?: string;
+  IMAP_HOST?: string;
+  IMAP_PORT?: string;
+  IMAP_USER?: string;
+  IMAP_PASS?: string;
+  IMAP_TLS?: string;
   ADMIN_SESSION_SECRET?: string;
   VERIFY_CODE_LENGTH?: string;
   VERIFY_EMAIL_SUBJECT?: string;
@@ -95,6 +101,19 @@ function hasOutboundMailService(settings: OutboundMailSettings): boolean {
   if (!settings.senderEmail) return false;
   if (settings.provider === 'smtp') return Boolean(settings.smtpHost && settings.smtpPass);
   return Boolean(settings.apiKey);
+}
+
+function getImapSettings(clientImap: any, env: any): ImapSettings {
+  const host = String(env.IMAP_HOST || clientImap?.host || '').trim();
+  const port = Number(env.IMAP_PORT || clientImap?.port || 993);
+  const tlsValue = env.IMAP_TLS !== undefined ? String(env.IMAP_TLS).toLowerCase() !== 'false' : clientImap?.tls !== false;
+  return {
+    host,
+    port: Number.isFinite(port) && port > 0 ? port : 993,
+    user: String(env.IMAP_USER || clientImap?.user || '').trim(),
+    pass: String(env.IMAP_PASS || clientImap?.pass || ''),
+    tls: tlsValue && port !== 143,
+  };
 }
 
 async function findRegisteredUserEmail(db: any, identity: string): Promise<string | null> {
@@ -2015,23 +2034,110 @@ export const onRequest = async (context: any) => {
         attachments TEXT NOT NULL DEFAULT '[]',
         receivedAt INTEGER NOT NULL
       )`).run();
-      const result = await env.DB.prepare('SELECT id, sender, recipient, subject, body, receivedAt FROM fox3_inbound_emails ORDER BY receivedAt DESC LIMIT 200').all();
-      const mails = (result?.results || []).map((row: any) => ({
-        id: `resend-inbound-${row.id}`,
-        folder: 'inbox',
-        sender: String(row.sender || ''),
-        recipient: String(row.recipient || ''),
-        subject: String(row.subject || '(无主题)'),
-        body: String(row.body || ''),
-        date: new Date(Number(row.receivedAt) || Date.now()).toISOString().replace('T', ' ').slice(0, 19),
-        read: false,
-        isStarred: false,
-        createdAt: Number(row.receivedAt) || Date.now(),
-        updatedAt: Number(row.receivedAt) || Date.now(),
-      }));
+      const result = await env.DB.prepare('SELECT id, eventId, sender, recipient, subject, body, receivedAt FROM fox3_inbound_emails ORDER BY receivedAt DESC LIMIT 200').all();
+      const mails = (result?.results || []).map((row: any) => {
+        const isImap = String(row.eventId || '').startsWith('imap:');
+        return {
+          id: `${isImap ? 'imap' : 'resend'}-inbound-${row.id}`,
+          folder: 'inbox',
+          sender: String(row.sender || ''),
+          recipient: String(row.recipient || ''),
+          subject: String(row.subject || '(无主题)'),
+          body: String(row.body || ''),
+          date: new Date(Number(row.receivedAt) || Date.now()).toISOString().replace('T', ' ').slice(0, 19),
+          read: false,
+          isStarred: false,
+          createdAt: Number(row.receivedAt) || Date.now(),
+          updatedAt: Number(row.receivedAt) || Date.now(),
+        };
+      });
       return new Response(JSON.stringify({ success: true, mails }), { headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
     } catch {
       return new Response(JSON.stringify({ success: false, error: '读取 D1 收件箱失败，请检查数据库绑定与迁移状态' }), { status: 500, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+    }
+  }
+
+  if (path === '/mail/imap-test' && request.method === 'POST') {
+    if (!await hasAdminSession(request, env)) {
+      return new Response(JSON.stringify({ success: false, error: 'IMAP 连接测试需要管理员登录' }), { status: 401, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+    }
+    try {
+      const body = await request.json().catch(() => ({})) as any;
+      const source = body.source === 'backend' ? 'backend' : 'frontend';
+      const settings = source === 'backend' ? getImapSettings({}, env) : getImapSettings(body.imapConfig || {}, {});
+      const probe = await testImapConnection(settings);
+      return new Response(JSON.stringify({ success: true, source, ...probe, mailbox: 'INBOX' }), {
+        headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' },
+      });
+    } catch (err: any) {
+      return new Response(JSON.stringify({ success: false, error: err?.message || 'IMAP 连接测试失败' }), {
+        status: 502,
+        headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' },
+      });
+    }
+  }
+
+  if (path === '/mail/imap-sync' && request.method === 'POST') {
+    if (!await hasAdminSession(request, env)) {
+      return new Response(JSON.stringify({ success: false, error: '拉取 IMAP 收件箱需要管理员登录' }), { status: 401, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+    }
+    if (!env.DB) {
+      return new Response(JSON.stringify({ success: false, error: '需要绑定数据库 DB 才能保存收件箱邮件' }), { status: 503, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
+    }
+    try {
+      const body = await request.json().catch(() => ({})) as any;
+      const source = body.source === 'backend' ? 'backend' : 'frontend';
+      const settings = source === 'backend' ? getImapSettings({}, env) : getImapSettings(body.imapConfig || {}, {});
+      const { exists, messages } = await fetchImapMessages(settings, Number(body.limit || 25));
+
+      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS fox3_inbound_emails (
+        id TEXT PRIMARY KEY,
+        eventId TEXT NOT NULL UNIQUE,
+        sender TEXT NOT NULL,
+        recipient TEXT NOT NULL,
+        subject TEXT NOT NULL,
+        body TEXT NOT NULL,
+        attachments TEXT NOT NULL DEFAULT '[]',
+        receivedAt INTEGER NOT NULL
+      )`).run();
+
+      let imported = 0;
+      for (const msg of messages) {
+        const eventId = `imap:${settings.host.toLowerCase()}:${settings.user.toLowerCase()}:${msg.uid || msg.messageId}`;
+        const insertRes = await env.DB.prepare(
+          `INSERT OR IGNORE INTO fox3_inbound_emails (id, eventId, sender, recipient, subject, body, attachments, receivedAt)
+           VALUES (?, ?, ?, ?, ?, ?, '[]', ?)`
+        ).bind(
+          crypto.randomUUID(),
+          eventId.slice(0, 240),
+          msg.sender,
+          msg.recipient || settings.user,
+          msg.subject,
+          msg.body,
+          msg.receivedAt,
+        ).run();
+        imported += Number(insertRes?.meta?.changes || 0);
+      }
+
+      await env.DB.prepare(
+        `DELETE FROM fox3_inbound_emails WHERE id NOT IN (SELECT id FROM fox3_inbound_emails ORDER BY receivedAt DESC LIMIT 500)`
+      ).run();
+
+      return new Response(JSON.stringify({
+        success: true,
+        source,
+        exists,
+        totalFetched: messages.length,
+        imported,
+        host: settings.host,
+      }), {
+        headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' },
+      });
+    } catch (err: any) {
+      return new Response(JSON.stringify({ success: false, error: err?.message || 'IMAP 同步收件箱失败' }), {
+        status: 502,
+        headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' },
+      });
     }
   }
 
@@ -2156,7 +2262,10 @@ export const onRequest = async (context: any) => {
       : Boolean(outboundSettings.apiKey && outboundSettings.senderEmail && (outboundSettings.provider !== 'sendcloud' || outboundSettings.apiUser));
     const outboundApiKeyConfigured = outboundSettings.provider !== 'smtp' && Boolean(outboundSettings.apiKey);
     const inboundApiKeyAvailable = Boolean(env.RESEND_API_KEY);
-    const inboundServerReady = Boolean(env.DB && env.RESEND_WEBHOOK_SECRET && inboundApiKeyAvailable);
+    const resendInboundReady = Boolean(env.DB && env.RESEND_WEBHOOK_SECRET && inboundApiKeyAvailable);
+    const imapSettings = getImapSettings({}, env);
+    const imapConfigured = Boolean(imapSettings.host && imapSettings.user && imapSettings.pass);
+    const inboundServerReady = resendInboundReady || Boolean(env.DB && imapConfigured);
     let lastReceivedAt: number | null = null;
     if (env.DB) {
       try {
@@ -2174,6 +2283,7 @@ export const onRequest = async (context: any) => {
         apiUserConfigured: outboundSettings.provider === 'sendcloud' && Boolean(outboundSettings.apiUser),
         senderConfigured: Boolean(outboundSettings.senderEmail),
         provider: outboundSettings.provider,
+        smtpHost: outboundSettings.smtpHost || '',
         connectionProbeSupported: outboundSettings.provider === 'resend',
         verified: false,
         status: outboundConfigured ? 'configured_unverified' : 'unconfigured',
@@ -2181,6 +2291,9 @@ export const onRequest = async (context: any) => {
       },
       inbound: {
         configured: inboundServerReady,
+        resendConfigured: resendInboundReady,
+        imapConfigured,
+        imapHost: imapSettings.host || '',
         implemented: true,
         verified: Boolean(lastReceivedAt),
         d1Available: Boolean(env.DB),

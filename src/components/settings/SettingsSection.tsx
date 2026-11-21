@@ -86,8 +86,6 @@ export const SettingsSection: React.FC = () => {
   const [translateDraft, setTranslateDraft] = useState(translateConfig);
   const [isTranslateSaved, setIsTranslateSaved] = useState(false);
   const [storageUsage, setStorageUsage] = useState<{ r2Bytes: number; r2Files: number; d1FallbackBytes: number; d1FallbackFiles: number; exact: boolean; note: string } | null>(null);
-  const [storageFiles, setStorageFiles] = useState<Array<{ key: string; name: string; size: number; uploadedAt?: number | null; contentType: string; url: string }>>([]);
-  const [storageCursor, setStorageCursor] = useState<string | null>(null);
   const [storageLoading, setStorageLoading] = useState(false);
 
   const handleSaveTranslateConfig = () => {
@@ -117,12 +115,19 @@ export const SettingsSection: React.FC = () => {
       privacy: true,
       storage: true,
       password: true,
+      ownerChat: true,
       calendar: true,
       translate: true,
       notebook: true,
       themeHelp: true,
     });
-    return { ...saved, privacy: saved.privacy ?? saved.privacyUsers ?? true };
+    return {
+      ...saved,
+      privacy: saved.privacy ?? saved.privacyUsers ?? true,
+      ownerChat: saved.ownerChat ?? true,
+      calendar: saved.calendar ?? true,
+      translate: saved.translate ?? true,
+    };
   });
 
   useEffect(() => {
@@ -155,39 +160,22 @@ export const SettingsSection: React.FC = () => {
     });
   };
 
-  const refreshStorage = async (append = false) => {
+  const refreshStorage = async () => {
     const token = getAdminSessionToken();
     if (!token) return;
     setStorageLoading(true);
     try {
       const headers = { Authorization: `Bearer ${token}` };
-      const [usageResponse, filesResponse] = await Promise.all([
-        fetch('/api/storage/usage', { headers, cache: 'no-store' }),
-        fetch(`/api/storage/files${append && storageCursor ? `?cursor=${encodeURIComponent(storageCursor)}` : ''}`, { headers, cache: 'no-store' }),
-      ]);
-      const [usage, files] = await Promise.all([usageResponse.json(), filesResponse.json()]);
+      const usageResponse = await fetch('/api/storage/usage', { headers, cache: 'no-store' });
+      const usage = await usageResponse.json();
       if (!usageResponse.ok || usage.success === false) throw new Error(usage.error || '存储统计读取失败');
       setStorageUsage(usage);
-      if (!filesResponse.ok || files.success === false) throw new Error(files.error || '文件目录读取失败');
-      setStorageFiles(previous => append ? [...previous, ...(files.objects || [])] : (files.objects || []));
-      setStorageCursor(files.truncated ? files.cursor : null);
     } catch (error: any) {
       showToast(error?.message || '无法读取真实存储数据', 'error');
-      if (!append) { setStorageUsage(null); setStorageFiles([]); setStorageCursor(null); }
+      setStorageUsage(null);
     } finally { setStorageLoading(false); }
   };
   useEffect(() => { if (currentUser?.role === 'admin') void refreshStorage(); }, [currentUser?.id]);
-
-  const removeStoredFile = async (file: { key: string; name: string }) => {
-    if (!window.confirm(`永久删除对象“${file.name}”？此操作会清理本站对应媒体记录，不能撤销。`)) return;
-    try {
-      const response = await fetch(`/api/files/${encodeURIComponent(file.key)}`, { method: 'DELETE', headers: { Authorization: `Bearer ${getAdminSessionToken()}` } });
-      const result = await response.json();
-      if (!response.ok || result.success === false) throw new Error(result.error || '文件删除失败');
-      showToast('对象已删除，媒体目录引用已清理。', 'success');
-      await refreshStorage();
-    } catch (error: any) { showToast(error?.message || '文件删除失败', 'error'); }
-  };
 
   const handleQuickTranslate = async () => {
     if (!sourceText.trim()) return;
@@ -437,21 +425,9 @@ export const SettingsSection: React.FC = () => {
         </div>
       </div>
 
-      <section className={`rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900 p-5 space-y-4`}>
-        <div className="flex items-center justify-between gap-3"><h3 className="text-sm font-bold">{tx('时尚布局切换')}</h3><span className="text-[10px] text-slate-500">{tx('五种布局会同步保存，并自动适配手机宽度')}</span></div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">{[
-          ['airy','轻盈留白'],['compact','紧凑效率'],['editorial','杂志编辑'],['sidebar','宽屏工作台'],['mobile-first','手机优先']
-        ].map(([id,label])=><button key={id} type="button" onClick={()=>updateSystemSettings({siteLayout:id as any})} className={`rounded-xl border px-3 py-3 text-xs font-semibold transition ${ (systemSettings.siteLayout||'airy')===id ? 'border-sky-500 bg-sky-50 text-sky-700 dark:bg-sky-950/30 dark:text-sky-300':'border-slate-200 dark:border-slate-700'}`}>{tx(label)}</button>)}</div>
-      </section>
       <section className={`rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900 overflow-hidden`}>
         <button type="button" onClick={()=>toggleSection('notebook')} aria-expanded={!collapsedSections.notebook} className="w-full flex items-center justify-between p-5 text-left"><span className="text-sm font-bold">{tx('同步记事本')}</span>{collapsedSections.notebook?<ChevronDown className="w-4 h-4"/>:<ChevronUp className="w-4 h-4"/>}</button>
         {!collapsedSections.notebook&&<div className="p-5 pt-0 space-y-3"><p className="text-xs text-slate-500">{tx('记事本通过管理员会话私密保存到 D1，仅管理员可读写，并在已登录设备间同步。')}</p><textarea value={notebookDraft} onChange={e=>setNotebookDraft(e.target.value)} rows={7} className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-transparent p-3 text-sm" placeholder={tx('在这里编辑备忘内容…')}/><div className="flex flex-wrap gap-2"><button type="button" onClick={()=>void saveNotebook()} disabled={notebookBusy} className="rounded-xl bg-sky-600 px-4 py-2 text-xs font-semibold text-white disabled:opacity-50">{notebookBusy?tx('保存中…'):tx('保存并同步')}</button><button type="button" onClick={()=>void saveNotebook(true)} disabled={notebookBusy} className="rounded-xl border border-rose-200 px-4 py-2 text-xs text-rose-600 disabled:opacity-50">{tx('删除记事本')}</button></div></div>}
-      </section>
-      <section className={`rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900 p-5 space-y-3`}>
-        <h3 className="text-sm font-bold">{tx('上传并应用主题 JSON')}</h3><p className="text-xs text-slate-500">{tx('导入主题文件后会应用颜色、背景与卡片透明度，并随设置同步。')}</p>
-        <input aria-label={tx('选择主题 JSON 文件')} type="file" accept="application/json,.json" className="block w-full text-xs" onChange={async e=>{const file=e.target.files?.[0];if(!file)return;try{if(file.size>128*1024)throw new Error('主题文件不能超过 128 KiB');const theme=JSON.parse(await file.text());if(!/^#[0-9a-f]{6}$/i.test(theme.themeColor||'')||!/^#[0-9a-f]{6}$/i.test(theme.background||''))throw new Error('主题 JSON 必须包含 themeColor 和 background 两个 #RRGGBB 颜色');updateSystemSettings({themeColor:theme.themeColor,customPaletteBg:theme.background,transparentCards:Boolean(theme.transparentCards),uploadedThemeName:String(theme.name||file.name).slice(0,80)});showToast(tx('主题已导入并保存'),'success');}catch(error:any){showToast(error.message||tx('主题导入失败'),'error');}e.currentTarget.value='';}}/>
-        <button type="button" onClick={()=>toggleSection('themeHelp')} aria-expanded={!collapsedSections.themeHelp} className="flex w-full items-center justify-between rounded-xl bg-slate-50 p-3 text-left text-xs font-semibold dark:bg-slate-800">{tx('主题制作与使用说明')} {collapsedSections.themeHelp?<ChevronDown className="h-4 w-4"/>:<ChevronUp className="h-4 w-4"/>}</button>
-        {!collapsedSections.themeHelp&&<div className="rounded-xl border border-slate-200 p-4 text-xs leading-relaxed dark:border-slate-700"><p>{tx('制作 UTF-8 JSON 文件，顶层填写 name、themeColor、background、transparentCards。颜色使用六位十六进制，例如 #2563EB。')}</p><pre className="mt-2 overflow-x-auto rounded-lg bg-slate-950 p-3 text-emerald-200">{`{\n  "name": "我的主题",\n  "themeColor": "#2563EB",\n  "background": "#F1F5F9",\n  "transparentCards": true\n}`}</pre><p className="mt-2">{tx('选择 JSON 后立即应用；保存的主题设置会与站点内容一起写入 D1。此导入器不会执行 CSS 或脚本，主题安全地使用颜色与透明度选项。')}</p></div>}
       </section>
       {/* SECTION 1: 主题调色与全局背景自定义选区 (从上到下按键功能顺序严格对应) */}
       <div className={`rounded-3xl border shadow-sm overflow-hidden transition-all duration-300 ${
@@ -966,42 +942,41 @@ export const SettingsSection: React.FC = () => {
             </div>
 
             {/* Capacity meters from server-side object enumeration */}
-            <div className={`grid gap-4 ${deviceMode === 'mobile' ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2'}`}>
-              <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700">
-                <span className="text-xs text-slate-400 block mb-1">Cloudflare R2 当前 Bucket 实际对象用量</span>
-                <span className="text-2xl font-bold font-mono text-sky-500">
-                  {storageUsage ? `${(storageUsage.r2Bytes / (1024 * 1024)).toFixed(2)} MB` : '尚未统计'}
-                </span>
-                <span className="text-xs text-slate-400 block mt-1">
-                  {storageUsage ? `${storageUsage.r2Files.toLocaleString()} 个 R2 对象${storageUsage.exact ? ' · 已全量枚举' : ' · 统计未完成'}` : '请刷新真实云端统计'}
-                </span>
-                {storageUsage?.note && <span className="mt-1 block text-[10px] text-slate-400">{storageUsage.note}</span>}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-slate-500">容量占用概览</span>
+                <button
+                  type="button"
+                  onClick={() => void refreshStorage()}
+                  disabled={storageLoading}
+                  className="flex items-center gap-1 text-[11px] text-sky-600 dark:text-sky-400 hover:underline disabled:opacity-50"
+                >
+                  <RotateCw className={`w-3 h-3 ${storageLoading ? 'animate-spin' : ''}`} />
+                  <span>{storageLoading ? '正在统计…' : '刷新用量统计'}</span>
+                </button>
               </div>
+              <div className={`grid gap-4 ${deviceMode === 'mobile' ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2'}`}>
+                <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700">
+                  <span className="text-xs text-slate-400 block mb-1">对象存储当前实际用量</span>
+                  <span className="text-2xl font-bold font-mono text-sky-500">
+                    {storageUsage ? `${(storageUsage.r2Bytes / (1024 * 1024)).toFixed(2)} MB` : '尚未统计'}
+                  </span>
+                  <span className="text-xs text-slate-400 block mt-1">
+                    {storageUsage ? `${storageUsage.r2Files.toLocaleString()} 个对象${storageUsage.exact ? ' · 已全量枚举' : ' · 统计未完成'}` : '请点击刷新用量统计'}
+                  </span>
+                  {storageUsage?.note && <span className="mt-1 block text-[10px] text-slate-400">{storageUsage.note}</span>}
+                </div>
 
-              <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700">
-                <span className="text-xs text-slate-400 block mb-1">D1 回退文件（单独列示，不与 R2 重复相加）</span>
-                <span className="text-sm font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1.5 mt-1">
-                  <HardDrive className="w-4 h-4" /> {storageUsage ? `${(storageUsage.d1FallbackBytes / (1024 * 1024)).toFixed(2)} MB · ${storageUsage.d1FallbackFiles} 个文件` : '尚未统计'}
-                </span>
-                <span className="text-xs text-slate-400 block mt-1">
-                  统计不虚构固定配额；外部 COS/OSS/S3、浏览器 IndexedDB 和本机临时文件未纳入 R2 桶用量。Cloudflare 账户计费配额请以控制台为准。
-                </span>
+                <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700">
+                  <span className="text-xs text-slate-400 block mb-1">数据库回退文件（单独列示，不重复相加）</span>
+                  <span className="text-sm font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1.5 mt-1">
+                    <HardDrive className="w-4 h-4" /> {storageUsage ? `${(storageUsage.d1FallbackBytes / (1024 * 1024)).toFixed(2)} MB · ${storageUsage.d1FallbackFiles} 个文件` : '尚未统计'}
+                  </span>
+                  <span className="text-xs text-slate-400 block mt-1">
+                    统计基于真实对象列举，不虚构固定配额；外部存储和浏览器本地缓存未计入。
+                  </span>
+                </div>
               </div>
-            </div>
-            <div className="rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/60">
-                <div><b className="text-sm">{tx('R2 文件管理')}</b><p className="text-[10px] text-slate-500">仅列出本站 Cloudflare R2 Bucket 中的原始对象；删除会清理本网站的媒体目录引用。</p></div>
-                <button onClick={() => void refreshStorage()} disabled={storageLoading} className="rounded-lg border px-3 py-1.5 text-xs disabled:opacity-50">{storageLoading ? '正在读取…' : tx('刷新统计与文件')}</button>
-              </div>
-              <div className="max-h-80 divide-y divide-slate-100 overflow-auto dark:divide-slate-800">
-                {storageFiles.map(file => <div key={file.key} className="flex flex-wrap items-center gap-2 px-3 py-2 text-xs">
-                  <div className="min-w-0 flex-1"><b className="block truncate" title={file.name}>{file.name}</b><span className="text-slate-500">{(file.size / (1024 * 1024)).toFixed(2)} MB · {file.contentType}</span></div>
-                  <a href={`${file.url}?download=1`} className="rounded border px-2 py-1">下载</a>
-                  <button onClick={() => void removeStoredFile(file)} className="rounded border border-rose-300 px-2 py-1 text-rose-600">{tx('删除文件')}</button>
-                </div>)}
-                {!storageFiles.length && <p className="p-4 text-xs text-slate-500">{storageLoading ? '正在加载…' : '无 R2 文件，或 R2 尚未绑定/无法枚举。'}</p>}
-              </div>
-              {storageCursor && <div className="border-t p-3 text-center"><button onClick={() => void refreshStorage(true)} disabled={storageLoading} className="rounded-lg border px-3 py-1.5 text-xs">{tx('加载更多文件')}</button></div>}
             </div>
           </div>
         )}
@@ -1199,7 +1174,7 @@ export const SettingsSection: React.FC = () => {
         )}
       </div>
 
-      <section className={`rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900 p-5`}><h3 className="mb-3 text-sm font-bold">{tx('站长对话板')}</h3><SiteOwnerChat /></section>
+      <SiteOwnerChat open={!collapsedSections.ownerChat} onToggle={() => toggleSection('ownerChat')} />
       {/* SECTION 6: 设置器底部日历与在线翻译工具组件 */}
       <div className={`p-6 rounded-3xl border shadow-sm grid grid-cols-1 md:grid-cols-2 gap-6 ${
         systemSettings.transparentCards
@@ -1208,14 +1183,25 @@ export const SettingsSection: React.FC = () => {
       }`}>
         {/* Interactive Calendar Widget */}
         <div className="space-y-3">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
               <CalendarIcon className="w-4 h-4 text-sky-500" />
-              <span>智能实时日历 (当前时区: {systemSettings.timezone || 'Asia/Shanghai'})</span>
+              <span>智能实时日历 ({systemSettings.timezone || 'Asia/Shanghai'})</span>
             </h4>
-            <button type="button" onClick={()=>toggleSection('calendar')} aria-expanded={!collapsedSections.calendar} className="text-xs text-sky-600">{collapsedSections.calendar?tx('展开'):tx('收拢')}</button><span className="text-[11px] font-mono text-sky-600 dark:text-sky-400 font-bold">
-              {new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-mono text-sky-600 dark:text-sky-400 font-bold">
+                {new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}
+              </span>
+              <button
+                type="button"
+                onClick={() => toggleSection('calendar')}
+                aria-expanded={!collapsedSections.calendar}
+                className="inline-flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 px-2.5 py-1 text-xs font-semibold text-sky-600 dark:text-sky-400 hover:bg-slate-50 dark:hover:bg-slate-800"
+              >
+                <span>{collapsedSections.calendar ? tx('展开') : tx('收拢')}</span>
+                {collapsedSections.calendar ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
+              </button>
+            </div>
           </div>
 
           {!collapsedSections.calendar && <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700">
@@ -1248,39 +1234,52 @@ export const SettingsSection: React.FC = () => {
         </div>
 
         {/* Online Translation Widget */}
-        <div className="space-y-3 flex flex-col min-h-[50vh] md:min-h-0">
-          <div className="flex items-center justify-between">
+        <div className="space-y-3 flex flex-col">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
               <Languages className="w-4 h-4 text-emerald-500" />
-              <span>快速在线互译助手 (即时翻译引擎)</span>
+              <span>快速在线互译助手</span>
             </h4>
             <div className="flex items-center gap-2 text-[11px]">
+              {!collapsedSections.translate && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setShowApiSettings(!showApiSettings)}
+                    className="text-[11px] text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-0.5"
+                  >
+                    <span>⚙️ API 配置</span>
+                  </button>
+                  <div className="flex items-center gap-1">
+                    <select
+                      value={translateSource}
+                      onChange={e => setTranslateSource(e.target.value)}
+                      className="px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                    >
+                      <option value="zh">中文</option>
+                      <option value="en">English</option>
+                    </select>
+                    <span>➔</span>
+                    <select
+                      value={translateTarget}
+                      onChange={e => setTranslateTarget(e.target.value)}
+                      className="px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                    >
+                      <option value="en">English</option>
+                      <option value="zh">中文</option>
+                    </select>
+                  </div>
+                </>
+              )}
               <button
                 type="button"
-                onClick={() => setShowApiSettings(!showApiSettings)}
-                className="text-[11px] text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-0.5"
+                onClick={() => toggleSection('translate')}
+                aria-expanded={!collapsedSections.translate}
+                className="inline-flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 px-2.5 py-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400 hover:bg-slate-50 dark:hover:bg-slate-800"
               >
-                <span>⚙️ API 配置</span>
+                <span>{collapsedSections.translate ? tx('展开') : tx('收拢')}</span>
+                {collapsedSections.translate ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
               </button>
-              <div className="flex items-center gap-1">
-                <select
-                  value={translateSource}
-                  onChange={e => setTranslateSource(e.target.value)}
-                  className="px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
-                >
-                  <option value="zh">中文</option>
-                  <option value="en">English</option>
-                </select>
-                <span>➔</span>
-                <select
-                  value={translateTarget}
-                  onChange={e => setTranslateTarget(e.target.value)}
-                  className="px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
-                >
-                  <option value="en">English</option>
-                  <option value="zh">中文</option>
-                </select>
-              </div>
             </div>
           </div>
 
@@ -1385,6 +1384,21 @@ export const SettingsSection: React.FC = () => {
           </div>}
         </div>
       </div>
+
+      {/* SECTION 7: 底部时尚布局切换与上传并应用主题 JSON */}
+      <section className={`rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900 p-5 space-y-4`}>
+        <div className="flex items-center justify-between gap-3"><h3 className="text-sm font-bold">{tx('时尚布局切换')}</h3><span className="text-[10px] text-slate-500">{tx('五种布局会同步保存，并自动适配手机宽度')}</span></div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">{[
+          ['airy','轻盈留白'],['compact','紧凑效率'],['editorial','杂志编辑'],['sidebar','宽屏工作台'],['mobile-first','手机优先']
+        ].map(([id,label])=><button key={id} type="button" onClick={()=>updateSystemSettings({siteLayout:id as any})} className={`rounded-xl border px-3 py-3 text-xs font-semibold transition ${ (systemSettings.siteLayout||'airy')===id ? 'border-sky-500 bg-sky-50 text-sky-700 dark:bg-sky-950/30 dark:text-sky-300':'border-slate-200 dark:border-slate-700'}`}>{tx(label)}</button>)}</div>
+      </section>
+
+      <section className={`rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900 p-5 space-y-3`}>
+        <h3 className="text-sm font-bold">{tx('上传并应用主题 JSON')}</h3><p className="text-xs text-slate-500">{tx('导入主题文件后会应用颜色、背景与卡片透明度，并随设置同步。')}</p>
+        <input aria-label={tx('选择主题 JSON 文件')} type="file" accept="application/json,.json" className="block w-full text-xs" onChange={async e=>{const file=e.target.files?.[0];if(!file)return;try{if(file.size>128*1024)throw new Error('主题文件不能超过 128 KiB');const theme=JSON.parse(await file.text());if(!/^#[0-9a-f]{6}$/i.test(theme.themeColor||'')||!/^#[0-9a-f]{6}$/i.test(theme.background||''))throw new Error('主题 JSON 必须包含 themeColor 和 background 两个 #RRGGBB 颜色');updateSystemSettings({themeColor:theme.themeColor,customPaletteBg:theme.background,transparentCards:Boolean(theme.transparentCards),uploadedThemeName:String(theme.name||file.name).slice(0,80)});showToast(tx('主题已导入并保存'),'success');}catch(error:any){showToast(error.message||tx('主题导入失败'),'error');}e.currentTarget.value='';}}/>
+        <button type="button" onClick={()=>toggleSection('themeHelp')} aria-expanded={!collapsedSections.themeHelp} className="flex w-full items-center justify-between rounded-xl bg-slate-50 p-3 text-left text-xs font-semibold dark:bg-slate-800">{tx('主题制作与使用说明')} {collapsedSections.themeHelp?<ChevronDown className="h-4 w-4"/>:<ChevronUp className="h-4 w-4"/>}</button>
+        {!collapsedSections.themeHelp&&<div className="rounded-xl border border-slate-200 p-4 text-xs leading-relaxed dark:border-slate-700"><p>{tx('制作 UTF-8 JSON 文件，顶层填写 name、themeColor、background、transparentCards。颜色使用六位十六进制，例如 #2563EB。')}</p><pre className="mt-2 overflow-x-auto rounded-lg bg-slate-950 p-3 text-emerald-200">{`{\n  "name": "我的主题",\n  "themeColor": "#2563EB",\n  "background": "#F1F5F9",\n  "transparentCards": true\n}`}</pre><p className="mt-2">{tx('选择 JSON 后立即应用；保存的主题设置会与站点内容一起写入 D1。此导入器不会执行 CSS 或脚本，主题安全地使用颜色与透明度选项。')}</p></div>}
+      </section>
     </div>
   );
 };
