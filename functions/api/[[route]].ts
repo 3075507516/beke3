@@ -1277,6 +1277,32 @@ export const onRequest = async (context: any) => {
 
   // Canonical, public site content is stored separately from private/admin sync data
   // and from WebDAV backup files. Public GET is read-only; writes require admin auth.
+  if (path === '/admin/notebook') {
+    if (!await hasAdminSession(request, env)) return Response.json({ success: false, error: '需要管理员会话' }, { status: 401, headers });
+    if (!env.DB) return Response.json({ success: false, error: '需要绑定 D1 数据库 DB 才能跨设备保存记事本' }, { status: 503, headers });
+    try {
+      await env.DB.prepare("CREATE TABLE IF NOT EXISTS fox3_admin_notebook (id TEXT PRIMARY KEY, content TEXT NOT NULL DEFAULT '', updatedAt INTEGER NOT NULL)").run();
+      if (request.method === 'GET') {
+        const row = await env.DB.prepare("SELECT content FROM fox3_admin_notebook WHERE id = 'owner'").first();
+        return Response.json({ success: true, content: String(row?.content || '') }, { headers });
+      }
+      if (request.method === 'PUT') {
+        const input = await readJsonRequestLimited(request, 128 * 1024);
+        const content = typeof input.content === 'string' ? input.content : '';
+        if (new TextEncoder().encode(content).byteLength > 64 * 1024) return Response.json({ success: false, error: '记事本内容最多 64 KiB' }, { status: 413, headers });
+        await env.DB.prepare("INSERT INTO fox3_admin_notebook (id, content, updatedAt) VALUES ('owner', ?, ?) ON CONFLICT(id) DO UPDATE SET content = excluded.content, updatedAt = excluded.updatedAt").bind(content, Date.now()).run();
+        return Response.json({ success: true, updatedAt: Date.now() }, { headers });
+      }
+      if (request.method === 'DELETE') {
+        await env.DB.prepare("DELETE FROM fox3_admin_notebook WHERE id = 'owner'").run();
+        return Response.json({ success: true }, { headers });
+      }
+      return new Response('Method not allowed', { status: 405, headers });
+    } catch (error: any) {
+      return Response.json({ success: false, error: error?.message || '记事本数据库操作失败' }, { status: 500, headers });
+    }
+  }
+
   if (path === '/site-content') {
     if (!env.DB) {
       return Response.json({ success: false, error: '跨设备站点内容需要在 Cloudflare Pages Functions 绑定 D1（变量名 DB）' }, { status: 503, headers });
@@ -1524,14 +1550,63 @@ export const onRequest = async (context: any) => {
     }
   }
 
+  // Large uploads are split in the browser into small requests so Pages/Workers request-body
+  // limits do not cap the complete file. R2 itself supports multipart objects up to 5 TiB.
+  const uploadBucket = env.R2_BUCKET || env.R2 || env.BUCKET;
+  if (path === '/upload/multipart/create' && request.method === 'POST') {
+    if (!uploadBucket) return Response.json({ success: false, error: '大文件分块上传需要绑定 R2_BUCKET 对象存储' }, { status: 503, headers });
+    try {
+      const input = await request.json() as { name?: string; type?: string; size?: number };
+      const expectedSize = Number(input.size);
+      const multipartChunkSize = 8 * 1024 * 1024;
+      const maxProjectObjectBytes = multipartChunkSize * 10000;
+      if (!Number.isSafeInteger(expectedSize) || expectedSize < 1 || expectedSize > maxProjectObjectBytes) return Response.json({ success: false, error: '文件大小无效或超过本项目当前 78.125 GiB 分块上传上限；R2 服务本身单对象上限为 5 TiB' }, { status: 413, headers });
+      const name = String(input.name || 'upload.bin').slice(0, 240);
+      if (/\.(html?|xhtml|svg|xml|js|mjs|cjs|wasm|php|phtml|exe|dll|bat|cmd|sh)$/i.test(name) || /^(text\/html|application\/xhtml\+xml|image\/svg\+xml|text\/xml|application\/xml|application\/(javascript|ecmascript|wasm|x-msdownload)|text\/javascript)/i.test(String(input.type || ''))) return Response.json({ success: false, error: '不接受可执行网页、脚本或程序文件' }, { status: 415, headers });
+      const safeName = name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 150) || 'upload.bin';
+      const key = `multipart/${expectedSize}/${Date.now()}-${crypto.randomUUID()}-${safeName}`;
+      const upload = await uploadBucket.createMultipartUpload(key, { httpMetadata: { contentType: String(input.type || 'application/octet-stream') }, customMetadata: { originalName: encodeURIComponent(name), expectedSize: String(expectedSize), uploadedAt: String(Date.now()) } });
+      return Response.json({ success: true, key, uploadId: upload.uploadId, name, type: String(input.type || 'application/octet-stream') }, { headers });
+    } catch (error: any) { return Response.json({ success: false, error: error?.message || '无法创建 R2 分块上传' }, { status: 500, headers }); }
+  }
+  if (path === '/upload/multipart/part' && request.method === 'PUT') {
+    if (!uploadBucket) return Response.json({ success: false, error: 'R2_BUCKET 未绑定' }, { status: 503, headers });
+    const key = url.searchParams.get('key') || '', uploadId = url.searchParams.get('uploadId') || '', partNumber = Number(url.searchParams.get('partNumber'));
+    if (!key || !uploadId || !Number.isInteger(partNumber) || partNumber < 1 || partNumber > 10000 || !request.body) return Response.json({ success: false, error: '分块参数缺失或无效' }, { status: 400, headers });
+    const contentLength = Number(request.headers.get('content-length') || 0);
+    if (contentLength > 8 * 1024 * 1024) return Response.json({ success: false, error: '单个分块不能超过 8 MiB' }, { status: 413, headers });
+    try { const part = await uploadBucket.resumeMultipartUpload(key, uploadId).uploadPart(partNumber, request.body); return Response.json({ success: true, part }, { headers }); }
+    catch (error: any) { return Response.json({ success: false, error: error?.message || '分块上传失败' }, { status: 502, headers }); }
+  }
+  if (path === '/upload/multipart/abort' && request.method === 'POST') {
+    if (!uploadBucket) return Response.json({ success: false, error: 'R2_BUCKET 未绑定' }, { status: 503, headers });
+    try { const input = await request.json() as { key?: string; uploadId?: string }; if (!input.key || !input.uploadId) return Response.json({ success: false, error: '缺少 key 或 uploadId' }, { status: 400, headers }); await uploadBucket.resumeMultipartUpload(input.key, input.uploadId).abort(); return Response.json({ success: true }, { headers }); }
+    catch (error: any) { return Response.json({ success: false, error: error?.message || '无法取消分块上传' }, { status: 502, headers }); }
+  }
+  if (path === '/upload/multipart/complete' && request.method === 'POST') {
+    if (!uploadBucket) return Response.json({ success: false, error: 'R2_BUCKET 未绑定' }, { status: 503, headers });
+    try {
+      const input = await request.json() as { key?: string; uploadId?: string; parts?: any[]; name?: string; type?: string; size?: number };
+      if (!input.key || !input.uploadId || !Array.isArray(input.parts) || !input.parts.length || input.parts.length > 10000) return Response.json({ success: false, error: '分块完成参数无效' }, { status: 400, headers });
+      const sizeMatch = /^multipart\/([1-9][0-9]*)\/[0-9]+-[0-9a-f-]+-[a-zA-Z0-9._-]+$/.exec(input.key);
+      if (!sizeMatch) return Response.json({ success: false, error: '分块对象键无效' }, { status: 400, headers });
+      const multipart = uploadBucket.resumeMultipartUpload(input.key, input.uploadId);
+      const expectedSize = Number(sizeMatch[1]);
+      const expectedParts = Math.ceil(expectedSize / (8 * 1024 * 1024));
+      const parts = input.parts as Array<{ partNumber: number; etag: string }>;
+      if (!Number.isSafeInteger(expectedSize) || expectedSize < 1 || parts.length !== expectedParts || parts.some((part, index) => part.partNumber !== index + 1 || typeof part.etag !== 'string' || !part.etag)) return Response.json({ success: false, error: '分块清单与初始化时声明的文件大小不一致' }, { status: 400, headers });
+      const completed = await multipart.complete(parts);
+      if (Number(completed.size) !== expectedSize) return Response.json({ success: false, error: 'R2 完成后的对象大小与文件声明不一致' }, { status: 502, headers });
+      return Response.json({ success: true, key: input.key, url: `/api/files/${encodeURIComponent(input.key)}`, name: String(input.name || 'upload.bin'), size: completed.size, storedTarget: 'r2', type: String(input.type || 'application/octet-stream') }, { headers });
+    } catch (error: any) { return Response.json({ success: false, error: error?.message || '无法完成 R2 分块上传' }, { status: 502, headers }); }
+  }
+
   // Public file uploads support blog/media publishing; apply strict size and active-content limits.
   if (path === '/upload' && request.method === 'POST') {
     try {
-      const maxUploadBytes = 90 * 1024 * 1024;
+      const maxUploadBytes = 95 * 1024 * 1024; // One-request fallback only; larger files use the multipart R2 endpoints above.
       const contentLength = Number(request.headers.get('content-length') || 0);
-      if (contentLength > maxUploadBytes + 1024 * 1024) {
-        return new Response(JSON.stringify({ success: false, error: '上传请求超过 90 MB 限制' }), { status: 413, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
-      }
+      if (contentLength > maxUploadBytes + 1024 * 1024) return Response.json({ success: false, error: '单次请求过大；大文件请使用 R2 分块上传并绑定 R2_BUCKET' }, { status: 413, headers });
       const formData = await request.formData();
       const file = formData.get('file') as File;
       if (!file) {
@@ -1540,9 +1615,7 @@ export const onRequest = async (context: any) => {
           headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
         });
       }
-      if (file.size > maxUploadBytes) {
-        return new Response(JSON.stringify({ success: false, error: '单个文件不能超过 90 MB' }), { status: 413, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
-      }
+      if (file.size > maxUploadBytes) return Response.json({ success: false, error: '该文件需通过 R2 分块上传；请检查前端版本及 R2_BUCKET 绑定' }, { status: 413, headers });
       if (/\.(html?|xhtml|svg|xml|js|mjs|cjs|wasm|php|phtml|exe|dll|bat|cmd|sh)$/i.test(file.name) || /^(text\/html|application\/xhtml\+xml|image\/svg\+xml|text\/xml|application\/xml|application\/(javascript|ecmascript|wasm|x-msdownload)|text\/javascript)/i.test(file.type)) {
         return new Response(JSON.stringify({ success: false, error: '不接受可执行网页、脚本或程序文件' }), { status: 415, headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' } });
       }
@@ -1791,9 +1864,10 @@ export const onRequest = async (context: any) => {
     if (request.method !== 'GET' && request.method !== 'HEAD') return new Response('Method not allowed', { status: 405, headers });
 
     // 1. Try fetch from R2
-    if (env.R2_BUCKET) {
+    const readBucket = env.R2_BUCKET || env.R2 || env.BUCKET;
+    if (readBucket) {
       try {
-        const object = await env.R2_BUCKET.get(key);
+        const object = await readBucket.get(key);
         if (object) {
           const responseHeaders = new Headers(headers);
           applyFileSafetyHeaders(responseHeaders);

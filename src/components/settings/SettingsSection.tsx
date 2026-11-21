@@ -31,6 +31,7 @@ import {
 } from 'lucide-react';
 import { GlobalThemeMode } from '../../types';
 import { translateInline } from '../../utils/i18n';
+import { SiteOwnerChat } from '../guide/SiteOwnerChat';
 import { getAdminSessionToken } from '../../utils/adminSession';
 
 export const SettingsSection: React.FC = () => {
@@ -64,6 +65,9 @@ export const SettingsSection: React.FC = () => {
 
   // In-page translator state with custom API support
   const [translateSource, setTranslateSource] = useState('zh');
+  const [notebookDraft, setNotebookDraft] = useState('');
+  const [notebookBusy, setNotebookBusy] = useState(false);
+  const [showThemeHelp, setShowThemeHelp] = useState(false);
   const [translateTarget, setTranslateTarget] = useState('en');
   const [sourceText, setSourceText] = useState('');
   const [translatedText, setTranslatedText] = useState('');
@@ -113,9 +117,35 @@ export const SettingsSection: React.FC = () => {
       privacy: true,
       storage: true,
       password: true,
+      calendar: true,
+      translate: true,
+      notebook: true,
+      themeHelp: true,
     });
     return { ...saved, privacy: saved.privacy ?? saved.privacyUsers ?? true };
   });
+
+  useEffect(() => {
+    const token = getAdminSessionToken();
+    if (!token) return;
+    void fetch('/api/admin/notebook', { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' }, cache: 'no-store' })
+      .then(response => response.json().then(data => ({ response, data })))
+      .then(({ response, data }) => { if (response.ok && data.success) setNotebookDraft(String(data.content || '')); })
+      .catch(() => undefined);
+  }, [currentUser?.role]);
+  const saveNotebook = async (remove = false) => {
+    const token = getAdminSessionToken();
+    if (!token) { showToast(tx('需要管理员会话才能保存记事本'), 'error'); return; }
+    setNotebookBusy(true);
+    try {
+      const response = await fetch('/api/admin/notebook', { method: remove ? 'DELETE' : 'PUT', headers: { Authorization: `Bearer ${token}`, ...(remove ? {} : { 'Content-Type': 'application/json' }) }, ...(remove ? {} : { body: JSON.stringify({ content: notebookDraft }) }) });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.error || tx('保存失败'));
+      if (remove) setNotebookDraft('');
+      showToast(remove ? tx('记事本已删除并同步') : tx('记事本已保存并同步至 D1'), 'success');
+    } catch (error: any) { showToast(error?.message || tx('记事本保存失败'), 'error'); }
+    finally { setNotebookBusy(false); }
+  };
 
   const toggleSection = (key: string) => {
     setCollapsedSections(prev => {
@@ -407,6 +437,22 @@ export const SettingsSection: React.FC = () => {
         </div>
       </div>
 
+      <section className={`rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900 p-5 space-y-4`}>
+        <div className="flex items-center justify-between gap-3"><h3 className="text-sm font-bold">{tx('时尚布局切换')}</h3><span className="text-[10px] text-slate-500">{tx('五种布局会同步保存，并自动适配手机宽度')}</span></div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">{[
+          ['airy','轻盈留白'],['compact','紧凑效率'],['editorial','杂志编辑'],['sidebar','宽屏工作台'],['mobile-first','手机优先']
+        ].map(([id,label])=><button key={id} type="button" onClick={()=>updateSystemSettings({siteLayout:id as any})} className={`rounded-xl border px-3 py-3 text-xs font-semibold transition ${ (systemSettings.siteLayout||'airy')===id ? 'border-sky-500 bg-sky-50 text-sky-700 dark:bg-sky-950/30 dark:text-sky-300':'border-slate-200 dark:border-slate-700'}`}>{tx(label)}</button>)}</div>
+      </section>
+      <section className={`rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900 overflow-hidden`}>
+        <button type="button" onClick={()=>toggleSection('notebook')} aria-expanded={!collapsedSections.notebook} className="w-full flex items-center justify-between p-5 text-left"><span className="text-sm font-bold">{tx('同步记事本')}</span>{collapsedSections.notebook?<ChevronDown className="w-4 h-4"/>:<ChevronUp className="w-4 h-4"/>}</button>
+        {!collapsedSections.notebook&&<div className="p-5 pt-0 space-y-3"><p className="text-xs text-slate-500">{tx('记事本通过管理员会话私密保存到 D1，仅管理员可读写，并在已登录设备间同步。')}</p><textarea value={notebookDraft} onChange={e=>setNotebookDraft(e.target.value)} rows={7} className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-transparent p-3 text-sm" placeholder={tx('在这里编辑备忘内容…')}/><div className="flex flex-wrap gap-2"><button type="button" onClick={()=>void saveNotebook()} disabled={notebookBusy} className="rounded-xl bg-sky-600 px-4 py-2 text-xs font-semibold text-white disabled:opacity-50">{notebookBusy?tx('保存中…'):tx('保存并同步')}</button><button type="button" onClick={()=>void saveNotebook(true)} disabled={notebookBusy} className="rounded-xl border border-rose-200 px-4 py-2 text-xs text-rose-600 disabled:opacity-50">{tx('删除记事本')}</button></div></div>}
+      </section>
+      <section className={`rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900 p-5 space-y-3`}>
+        <h3 className="text-sm font-bold">{tx('上传并应用主题 JSON')}</h3><p className="text-xs text-slate-500">{tx('导入主题文件后会应用颜色、背景与卡片透明度，并随设置同步。')}</p>
+        <input aria-label={tx('选择主题 JSON 文件')} type="file" accept="application/json,.json" className="block w-full text-xs" onChange={async e=>{const file=e.target.files?.[0];if(!file)return;try{if(file.size>128*1024)throw new Error('主题文件不能超过 128 KiB');const theme=JSON.parse(await file.text());if(!/^#[0-9a-f]{6}$/i.test(theme.themeColor||'')||!/^#[0-9a-f]{6}$/i.test(theme.background||''))throw new Error('主题 JSON 必须包含 themeColor 和 background 两个 #RRGGBB 颜色');updateSystemSettings({themeColor:theme.themeColor,customPaletteBg:theme.background,transparentCards:Boolean(theme.transparentCards),uploadedThemeName:String(theme.name||file.name).slice(0,80)});showToast(tx('主题已导入并保存'),'success');}catch(error:any){showToast(error.message||tx('主题导入失败'),'error');}e.currentTarget.value='';}}/>
+        <button type="button" onClick={()=>toggleSection('themeHelp')} aria-expanded={!collapsedSections.themeHelp} className="flex w-full items-center justify-between rounded-xl bg-slate-50 p-3 text-left text-xs font-semibold dark:bg-slate-800">{tx('主题制作与使用说明')} {collapsedSections.themeHelp?<ChevronDown className="h-4 w-4"/>:<ChevronUp className="h-4 w-4"/>}</button>
+        {!collapsedSections.themeHelp&&<div className="rounded-xl border border-slate-200 p-4 text-xs leading-relaxed dark:border-slate-700"><p>{tx('制作 UTF-8 JSON 文件，顶层填写 name、themeColor、background、transparentCards。颜色使用六位十六进制，例如 #2563EB。')}</p><pre className="mt-2 overflow-x-auto rounded-lg bg-slate-950 p-3 text-emerald-200">{`{\n  "name": "我的主题",\n  "themeColor": "#2563EB",\n  "background": "#F1F5F9",\n  "transparentCards": true\n}`}</pre><p className="mt-2">{tx('选择 JSON 后立即应用；保存的主题设置会与站点内容一起写入 D1。此导入器不会执行 CSS 或脚本，主题安全地使用颜色与透明度选项。')}</p></div>}
+      </section>
       {/* SECTION 1: 主题调色与全局背景自定义选区 (从上到下按键功能顺序严格对应) */}
       <div className={`rounded-3xl border shadow-sm overflow-hidden transition-all duration-300 ${
         systemSettings.transparentCards
@@ -1153,6 +1199,7 @@ export const SettingsSection: React.FC = () => {
         )}
       </div>
 
+      <section className={`rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900 p-5`}><h3 className="mb-3 text-sm font-bold">{tx('站长对话板')}</h3><SiteOwnerChat /></section>
       {/* SECTION 6: 设置器底部日历与在线翻译工具组件 */}
       <div className={`p-6 rounded-3xl border shadow-sm grid grid-cols-1 md:grid-cols-2 gap-6 ${
         systemSettings.transparentCards
@@ -1166,12 +1213,12 @@ export const SettingsSection: React.FC = () => {
               <CalendarIcon className="w-4 h-4 text-sky-500" />
               <span>智能实时日历 (当前时区: {systemSettings.timezone || 'Asia/Shanghai'})</span>
             </h4>
-            <span className="text-[11px] font-mono text-sky-600 dark:text-sky-400 font-bold">
+            <button type="button" onClick={()=>toggleSection('calendar')} aria-expanded={!collapsedSections.calendar} className="text-xs text-sky-600">{collapsedSections.calendar?tx('展开'):tx('收拢')}</button><span className="text-[11px] font-mono text-sky-600 dark:text-sky-400 font-bold">
               {new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}
             </span>
           </div>
 
-          <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700">
+          {!collapsedSections.calendar && <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700">
             {/* Simple Elegant Calendar Grid */}
             <div className="grid grid-cols-7 gap-1 text-center text-xs font-semibold text-slate-400 mb-2">
               <span>日</span><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span>
@@ -1197,7 +1244,7 @@ export const SettingsSection: React.FC = () => {
                 );
               })}
             </div>
-          </div>
+          </div>}
         </div>
 
         {/* Online Translation Widget */}
@@ -1237,7 +1284,7 @@ export const SettingsSection: React.FC = () => {
             </div>
           </div>
 
-          <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-3 flex-1 flex flex-col">
+          {!collapsedSections.translate && <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-3 flex-1 flex flex-col">
             {/* API Settings Panel (Foldable) */}
             {showApiSettings && (
               <div className="p-3.5 bg-white dark:bg-slate-800 border border-emerald-200 dark:border-emerald-800/60 rounded-xl space-y-3 text-xs">
@@ -1335,7 +1382,7 @@ export const SettingsSection: React.FC = () => {
                 {translatedText}
               </div>
             )}
-          </div>
+          </div>}
         </div>
       </div>
     </div>

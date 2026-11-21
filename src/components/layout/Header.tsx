@@ -67,7 +67,8 @@ export const Header: React.FC<HeaderProps> = ({
   const isGuestRestricted = !currentUser && systemSettings.hideNonBlogForGuests;
 
   // Minimalist section is completely removed.
-  // Mail, Settings, and WebDAV backup are strictly Admin-only; public site sections are visitor-readable.
+  // Mail and WebDAV backup are Admin-only. Signed-in users may open Settings for owner chat;
+  // the App renders the full settings controls only for administrators.
   const navItems = [
     { id: 'blog', label: t('nav.blog'), icon: BookOpen },
     { id: 'bookmarks', label: t('nav.bookmarks'), icon: Bookmark },
@@ -76,15 +77,17 @@ export const Header: React.FC<HeaderProps> = ({
     { id: 'gallery', label: t('nav.gallery'), icon: Image, restricted: true },
     { id: 'media', label: t('nav.media'), icon: Film, restricted: true },
     { id: 'shop', label: t('nav.shop'), icon: ShoppingBag },
-    { id: 'legal', label: '政策与联系', icon: ShieldAlert },
     { id: 'backup', label: '备份区', icon: Cloud, adminOnly: true },
     { id: 'mail', label: t('nav.mail'), icon: Mail, adminOnly: true },
-    { id: 'settings', label: t('nav.settings'), icon: Settings, adminOnly: true },
+    { id: 'settings', label: t('nav.settings'), icon: Settings },
     { id: 'guide', label: t('nav.guide'), icon: HelpCircle },
   ];
 
   const filteredNavItems = navItems.filter(item => {
     if (item.adminOnly && !isAdmin) {
+      return false;
+    }
+    if (item.id === 'settings' && !currentUser) {
       return false;
     }
     if (item.restricted && isGuestRestricted) {

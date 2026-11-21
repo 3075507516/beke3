@@ -32,7 +32,7 @@
 * **流量与上传性能极限优化**：
   * 全局图片采用懒加载 (`loading="lazy"`) 与异步解码 (`decoding="async"`)；
   * 标签页处于后台隐藏状态时（Page Visibility API）立即暂停网络长轮询与同步，彻底杜绝无操作流量浪费。
-  * 文件上传采用真正的 `XMLHttpRequest.upload.onprogress` 实时字节速率计算；当前单文件最大 90 MiB，慢速网络等待约 10 分钟，无断点续传。实际可用上限和持久性仍取决于 Pages Functions 配置及对象存储能力。
+  * 文件上传采用进度展示；超过 80 MiB 时通过 8 MiB 分块直写 R2，避免单次 Pages/Workers 请求体限制。R2 服务单对象上限 5 TiB；但本项目当前最多 10,000 个 8 MiB 分块，因此应用有效上限为 78.125 GiB（约 83.9 GB）。断线后暂不支持续传，且仍受账号配额、浏览器和网络影响。
 * **独立外部翻译 API 配置**：
   * 快速在线互译助手自带独立的“保存外部翻译 API 配置”按键，配置即时生效并持久化。
 * **备份区 (WebDAV)**：
@@ -150,7 +150,7 @@ http://<你的服务器IP>:8080
 
 | 变量名 / 绑定键 | 平台 / 类型 | 实际用途 | 建议 |
 | :--- | :--- | :--- | :--- |
-| `DB` | Cloudflare Pages D1 Binding | 已发布站点内容主库（`fox3_site_content`）、注册用户媒体目录（`fox3_user_media`）、用户/验证码与限流、Resend 收件箱、文件回退表及旧版私有同步 | 必须绑定；站点内容不使用 KV 替代 |
+| `DB` | Cloudflare Pages D1 Binding | 已发布站点内容主库（`fox3_site_content`）、注册用户媒体目录（`fox3_user_media`）、用户/验证码与限流、Resend 收件箱、文件回退表及管理员私有记事本（`fox3_admin_notebook`）、旧版私有同步 | 必须绑定；站点内容不使用 KV 替代 |
 | `R2_BUCKET` | Cloudflare Pages R2 Binding | 文件上传对象与下载读取 | 推荐 |
 | `KV` | Cloudflare Pages KV Binding | 旧版私有同步/验证码等兼容回退；不是站点内容数据库 | 可选 |
 | `ADMIN_USERNAME` | Pages Environment Variable | 管理员账号名，默认 `fox` | 推荐设置 |
@@ -172,7 +172,7 @@ http://<你的服务器IP>:8080
 
 ### 站点内容数据库与跨设备刷新
 
-Cloudflare Pages 项目必须部署 `functions/api/[[route]].ts` Functions，并在生产/预览环境绑定一个 D1 数据库，binding 名称必须为 `DB`。核心公开站点内容存入 `fox3_site_content`；无管理员身份的所有设备都可通过 `GET /api/site-content` 读取最新已发布内容和使用顶部刷新按钮，管理员修改内容后自动写入 D1。访客不能写入内容。接口只公开白名单字段：文章/管理员书籍/照片/媒体/产品目录/站点链接与公开外观设置；订单、邮件、聊天、账户、管理员/邮件/支付/WebDAV 凭据不进入公开 API。管理员开启“注册用户文件管理”后，已登录注册用户可将本人书籍/照片/音视频目录通过独立的签名会话写入 `fox3_user_media`；这些媒体条目会公开展示，但 API 只允许账户所有者更新/删除自己的条目。文件本体存对象存储，D1 只保存轻量目录元数据；EPUB/TXT 正文不进入同步快照，阅读时从云文件按需读取。
+Cloudflare Pages 项目必须部署 `functions/api/[[route]].ts` Functions，并在生产/预览环境绑定一个 D1 数据库，binding 名称必须为 `DB`。核心公开站点内容存入 `fox3_site_content`；无管理员身份的所有设备都可通过 `GET /api/site-content` 读取最新已发布内容和使用顶部刷新按钮，管理员修改内容后自动写入 D1。访客不能写入内容。管理员记事本单独写入 `fox3_admin_notebook`，由签名管理员会话保护，不进入公开站点内容 API。接口只公开白名单字段：文章/管理员书籍/照片/媒体/产品目录/站点链接与公开外观设置；订单、邮件、聊天、账户、管理员/邮件/支付/WebDAV 凭据不进入公开 API。管理员开启“注册用户文件管理”后，已登录注册用户可将本人书籍/照片/音视频目录通过独立的签名会话写入 `fox3_user_media`；这些媒体条目会公开展示，但 API 只允许账户所有者更新/删除自己的条目。文件本体存对象存储，D1 只保存轻量目录元数据；EPUB/TXT 正文不进入同步快照，阅读时从云文件按需读取。
 
 新部署可在绑定 D1 后预建表（应用也会在首次请求时安全执行 `CREATE TABLE IF NOT EXISTS`）：
 
@@ -232,7 +232,7 @@ Webhook 收到事件后，后端先按原始请求体验证 Resend/Svix 签名�
 
 **仅在 Cloudflare Pages Settings → Variables and Secrets → Secrets 配置下列密钥/凭据**，按实际部署环境设置，绝不写付款密钥到前端、`localStorage`、D1 或仓库：
 
-- Alipay：`ALIPAY_APP_ID`、`ALIPAY_PRIVATE_KEY`（PKCS#8）、`ALIPAY_PUBLIC_KEY`；可选 `ALIPAY_PID`、`ALIPAY_GATEWAY`。
+- Alipay：`ALIPAY_APP_ID`、`ALIPAY_PRIVATE_KEY`（PEM PKCS#8 `BEGIN PRIVATE KEY` 或 PKCS#1 `BEGIN RSA PRIVATE KEY`；都支持）、`ALIPAY_PUBLIC_KEY`；可选 `ALIPAY_PID`（作为 `biz_content.seller_id`）、`ALIPAY_NOTIFY_URL`、`ALIPAY_GATEWAY`。
 - WeChat Pay：`WECHAT_MCHID`、`WECHAT_APPID`、`WECHAT_SERIAL_NO`、`WECHAT_PRIVATE_KEY`（PKCS#8）、`WECHAT_API_V3_KEY`（32 个 ASCII 字节）、`WECHAT_PLATFORM_CERT`、`WECHAT_NOTIFY_URL=https://你的域名/api/payments/webhook/wechat`。
 - Stripe：`STRIPE_SECRET_KEY`、`STRIPE_WEBHOOK_SECRET`。
 - PayPal：`PAYPAL_CLIENT_ID`、`PAYPAL_CLIENT_SECRET`、`PAYPAL_WEBHOOK_ID`、`PAYPAL_API_BASE`。默认 API base 是 Sandbox；正式环境使用 `https://api-m.paypal.com`。
@@ -271,8 +271,8 @@ Webhook 收到事件后，后端先按原始请求体验证 Resend/Svix 签名�
 
 - **浏览器内存/`localStorage`**：公开核心内容可从既有 localStorage 读取为启动缓存，并在数据库成功拉取后被 D1 最新版本覆盖；本地回写也仅作为可丢弃缓存，不是跨设备内容的权威来源。设备偏好与邮件/支付/WebDAV 配置仍留在本机浏览器；前台密钥未加密，不要在公用设备保存。
 - **浏览器 IndexedDB**：浏览器本地文件/Blob 缓存与部分上传文件回退数据。清除浏览器站点数据会影响这些本机数据。
-- **Cloudflare D1 (`DB`)**：`fox3_site_content` 是公开站点内容的规范主库，含 revision；`fox3_user_media` 保存注册用户媒体目录，按账户隔离并含 revision，公共页面只合并目录记录；`fox3_users` 保存注册账户和 PBKDF2 密码哈希；`fox3_email_verifications`、`fox3_password_resets`、`fox3_email_ip_rates` 用于注册/找回验证码及限流；`fox3_inbound_emails` 保存经过 Resend webhook 验签并拉取的来信正文和附件元数据；`fox3_sync` 仅是旧版管理员私有同步兼容表，不是网站公开内容主库；`fox3_files` 是无 R2 时的文件回退表。邮件凭据/WebDAV 凭据不在公开站点载荷中。
-- **Cloudflare R2 (`R2_BUCKET`)**：上传文件对象的首选存储，下载同样优先从 R2 读取；单文件上传上限为 90 MiB，并拒绝常见可执行/活动内容扩展名；浏览器慢速网络等待最长约 10 分钟，当前不支持断点续传。只有成功写入 R2/COS/OSS/S3 对象存储的文件才能可靠跨设备读取；网络或云存储失败时若回退到 IndexedDB，会明确提示并仅在当前设备可用。R2 不可用时可按 `OBJECT_STORAGE_PROVIDER` 选择服务端 Tencent COS、Alibaba OSS 或通用 AWS SigV4 S3-compatible 对象存储后备。COS/OSS/S3 密钥只配置在 Pages Functions Secrets，绝不写入浏览器；COS Bucket 要填写带 APPID 的完整桶名（`bucketname-APPID`），COS region 形如 `ap-guangzhou`；OSS region 形如 `cn-hangzhou`。通用 S3 需提供 HTTPS endpoint、地域、桶名及密钥，并使用适配器支持的 path-style 请求。外部对象存储仍由当前 Cloudflare Pages Functions 代为签名读写，不会自动迁移 D1 用户/博客数据，也不代表前端静态部署已带有后端 API。对象存储失败时，文件不超过 1 MiB 才可回退 D1 文件表；KV 回退上限为 18 MiB；最后的 Worker 内存回退仅适用于 4 MiB 以内文件。内存回退会在实例重启/切换后丢失，无法视为持久存储；D1/KV 回退也不是等价的大文件对象存储。超过可用后备容量时 API 返回 JSON 503，不会报告虚假成功。
+- **Cloudflare D1 (`DB`)**：`fox3_site_content` 是公开站点内容的规范主库，含 revision；`fox3_user_media` 保存注册用户媒体目录，按账户隔离并含 revision，公共页面只合并目录记录；`fox3_users` 保存注册账户和 PBKDF2 密码哈希；`fox3_email_verifications`、`fox3_password_resets`、`fox3_email_ip_rates` 用于注册/找回验证码及限流；`fox3_inbound_emails` 保存经过 Resend webhook 验签并拉取的来信正文和附件元数据；`fox3_admin_notebook` 保存仅管理员会话可读写的私有记事本；`fox3_sync` 仅是旧版管理员私有同步兼容表，不是网站公开内容主库；`fox3_files` 是无 R2 时的文件回退表。邮件凭据/WebDAV 凭据不在公开站点载荷中。
+- **Cloudflare R2 (`R2_BUCKET`)**：上传文件对象首选，下载由 R2 流式返回。超过 80 MiB 的文件通过 8 MiB 分块上传，绕开单个 Pages/Workers 请求体大小限制；Cloudflare R2 服务自身上限为 5 TiB，但本项目当前最多 10,000 个 8 MiB 分块，应用有效单文件上限为 78.125 GiB（约 83.9 GB）；因此“无大小限制”不是字面无限，仍受配额、浏览器、网络及文件安全规则约束。断网后当前版本不会自动续传；失败分块不会自动重试。小文件使用单请求上传；超过 90 MB 的文件不适用于“影音天地”原生媒体上传说明，应使用相册/书架等共用文件上传入口。只有成功写入 R2/COS/OSS/S3 对象存储的文件才能可靠跨设备读取；网络或云存储失败时若回退到 IndexedDB，会明确提示并仅在当前设备可用。R2 不可用时可按 `OBJECT_STORAGE_PROVIDER` 选择服务端 Tencent COS、Alibaba OSS 或通用 AWS SigV4 S3-compatible 对象存储后备。COS/OSS/S3 密钥只配置在 Pages Functions Secrets，绝不写入浏览器；COS Bucket 要填写带 APPID 的完整桶名（`bucketname-APPID`），COS region 形如 `ap-guangzhou`；OSS region 形如 `cn-hangzhou`。通用 S3 需提供 HTTPS endpoint、地域、桶名及密钥，并使用适配器支持的 path-style 请求。外部对象存储仍由当前 Cloudflare Pages Functions 代为签名读写，不会自动迁移 D1 用户/博客数据，也不代表前端静态部署已带有后端 API。对象存储失败时，文件不超过 1 MiB 才可回退 D1 文件表；KV 回退上限为 18 MiB；最后的 Worker 内存回退仅适用于 4 MiB 以内文件。内存回退会在实例重启/切换后丢失，无法视为持久存储；D1/KV 回退也不是等价的大文件对象存储。超过可用后备容量时 API 返回 JSON 503，不会报告虚假成功。
 - **Cloudflare KV (`KV`)**：仅作旧版管理员私有同步/验证码兼容回退及短期记录；公开站点内容不写 KV。成功发送邮件回执由 API 返回并保存在前端状态，不额外写 KV。
 - **邮箱配置归属与收信范围**：前台邮件配置只保存在设置它的浏览器（本机存储且未加密）；前台配置只能用于管理员显式选择前台来源的手动邮件/本机测试，不会令验证码或后端自动触发的业务邮件生效。验证码与后端业务发信使用 Pages Functions 环境变量/Secrets。手动邮件也可选择后台环境变量。前台测试会真实发送测试邮件至配置的发件地址；后台连接检查只探测服务状态，不发信。Resend `email.received` webhook 验签并通过 Resend API 拉取正文后才写入 D1 收件箱；它不是通用个人邮箱 IMAP 收件，也不会把发往管理员个人邮箱的邮件或 Email Routing/普通转发自动导入本站。来信必须进入已配置 Resend Receiving 的域名并触发有效 webhook；转发到管理员个人邮箱仅是外部邮箱投递，不等于本站收件。
 - **跨设备站点内容与权限边界**：需要 Cloudflare Pages Functions 和 D1 binding `DB`。任何访客/设备可读和刷新白名单内已发布内容；管理员更改自动保存到 D1，并使用 revision 冲突保护。普通访客不能写入 D1。顶部按钮是手动重新读取，不执行管理员私有数据同步，也不操作 WebDAV。`BroadcastChannel` 仅用于同浏览器跨标签页。纯静态部署没有 Functions/D1，无法读取跨设备内容。注册用户媒体同步需真实 D1 用户登录签发的 7 天 HMAC 会话，且管理员已开启 `allowUserMediaManagement`；服务器对媒体目录写入按 token 中的用户 ID 强制归属，普通访客/无会话本地账号不能写 D1。文件对象经 `/api/upload` 保存到 R2 或已配置的对象存储；若云上传失败而回退 IndexedDB，该文件仅在当前浏览器可用，不会伪报跨设备持久化。用户媒体目录在页面公开展示，但只有其所有者可通过应用界面管理/删除。

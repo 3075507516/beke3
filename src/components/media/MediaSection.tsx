@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
 import { MediaItem, ViewMode } from '../../types';
 import { SafeImage } from '../common/SafeImage';
+import { translateInline } from '../../utils/i18n';
 import { resolveFileUrl } from '../../utils/storage';
 import {
   Play,
@@ -65,7 +66,9 @@ export const MediaSection: React.FC = () => {
     setViewMode,
     systemSettings,
     deviceMode,
+    locale,
   } = useApp();
+  const tx = (source: string) => translateInline(locale, source);
 
   const [currentPlaying, setCurrentPlaying] = useState<MediaItem | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -282,7 +285,7 @@ export const MediaSection: React.FC = () => {
         <div>
           <h2 className="text-xl font-bold font-serif-sc text-slate-800 dark:text-slate-100 flex items-center gap-2">
             <Disc3 className="w-5 h-5 text-sky-500 animate-spin-slow" />
-            <span>影音天地 (Native Audio / Video Streaming)</span>
+            <span>影音天地 (Native Audio / Video Streaming)</span><span className="ml-2 text-[10px] font-normal text-amber-600">{tx('影音天地不适用于超过 90 MB 的大文件；此类文件请使用相册或书架等 R2 大文件分块上传入口。')}</span>
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
             原生流媒体多媒体中心，支持音频流、高品质视频上传与自适应播放
