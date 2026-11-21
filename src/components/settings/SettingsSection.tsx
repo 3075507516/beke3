@@ -978,6 +978,18 @@ export const SettingsSection: React.FC = () => {
                 </div>
               </div>
             </div>
+
+            <div className="p-4 rounded-2xl border border-sky-200/80 dark:border-sky-900/60 bg-sky-50/60 dark:bg-sky-950/30 space-y-1.5 text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">
+              <div className="font-bold text-sky-800 dark:text-sky-200">
+                Cloudflare Pages 仪表板绑定指南（D1 数据库 / R2 存储桶 / KV 命名空间）
+              </div>
+              <p>
+                1. 本项目已移除仓库根目录会锁定控制台绑定的 <code className="font-mono">wrangler.toml</code>（改用 <code className="font-mono">wrangler.example.toml</code> 作为本地 CLI 参考），因此可在 Cloudflare Dashboard → <b>Pages 项目 → Settings → Bindings</b> 自由添加或修改资源绑定。
+              </p>
+              <p>
+                2. 推荐绑定变量名：D1 数据库填 <code className="font-mono font-semibold">DB</code>，R2 存储桶填 <code className="font-mono font-semibold">R2_BUCKET</code>，KV 命名空间填 <code className="font-mono font-semibold">KV</code>（服务端也支持常见别名与自动类型识别）。绑定完成后，请触发一次<b>重新部署（Retry deployment / Direct Upload）</b>使最新环境注入 Functions。
+              </p>
+            </div>
           </div>
         )}
       </div>

@@ -470,16 +470,72 @@ function emailHtmlToText(html: string): string {
     .trim();
 }
 
+function findBindingByAliases(rawEnv: Record<string, any>, aliases: string[]): any {
+  for (const name of aliases) {
+    if (rawEnv[name] !== undefined && rawEnv[name] !== null) return rawEnv[name];
+  }
+  const lowerMap = new Map<string, any>();
+  for (const [k, v] of Object.entries(rawEnv)) {
+    if (v !== undefined && v !== null) lowerMap.set(k.toLowerCase(), v);
+  }
+  for (const name of aliases) {
+    const hit = lowerMap.get(name.toLowerCase());
+    if (hit !== undefined && hit !== null) return hit;
+  }
+  return undefined;
+}
+
+function isD1Binding(val: any): boolean {
+  return Boolean(val && typeof val === 'object' && typeof val.prepare === 'function' && typeof val.batch === 'function');
+}
+
+function isR2Binding(val: any): boolean {
+  return Boolean(val && typeof val === 'object' && typeof val.put === 'function' && typeof val.list === 'function' && typeof val.head === 'function' && typeof val.prepare !== 'function');
+}
+
+function isKvBinding(val: any): boolean {
+  return Boolean(val && typeof val === 'object' && typeof val.get === 'function' && typeof val.put === 'function' && typeof val.delete === 'function' && typeof val.list === 'function' && typeof val.head !== 'function' && typeof val.prepare !== 'function');
+}
+
+function resolveCloudflareBindings(rawEnv: Record<string, any>) {
+  let db = findBindingByAliases(rawEnv, ['DB', 'D1', 'DATABASE', 'FOX3_DB', 'D1_DATABASE', 'D1_DB', 'SQLITE']);
+  if (!isD1Binding(db)) {
+    db = Object.values(rawEnv).find(isD1Binding) || db;
+  }
+
+  let r2 = findBindingByAliases(rawEnv, ['R2_BUCKET', 'R2', 'BUCKET', 'FOX3_R2', 'R2_STORAGE', 'STORAGE', 'FILES']);
+  if (!isR2Binding(r2)) {
+    r2 = Object.values(rawEnv).find(isR2Binding) || r2;
+  }
+
+  let kv = findBindingByAliases(rawEnv, ['KV', 'FOX3_KV', 'KV_NAMESPACE', 'MY_KV', 'CACHE']);
+  if (!isKvBinding(kv)) {
+    kv = Object.values(rawEnv).find(isKvBinding) || kv;
+  }
+
+  return {
+    ...rawEnv,
+    DB: db,
+    R2_BUCKET: r2,
+    KV: kv,
+  };
+}
+
+function uint8ArrayToBase64(bytes: Uint8Array): string {
+  const chunkSize = 0x8000;
+  let binary = '';
+  for (let i = 0; i < bytes.byteLength; i += chunkSize) {
+    const chunk = bytes.subarray(i, Math.min(i + chunkSize, bytes.byteLength));
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
+}
+
 export const onRequest = async (context: any) => {
   const { request } = context;
   const rawEnv: Env = context.env || {};
-  // Normalize bindings so different Cloudflare Pages binding names connect seamlessly
-  const env: any = {
-    ...rawEnv,
-    DB: rawEnv.DB || rawEnv.D1 || rawEnv.DATABASE,
-    R2_BUCKET: rawEnv.R2_BUCKET || rawEnv.R2 || rawEnv.BUCKET,
-    KV: rawEnv.KV || rawEnv.FOX3_KV,
-  };
+  // Normalize bindings so standard or custom Cloudflare Pages binding names connect seamlessly
+  const env: any = resolveCloudflareBindings(rawEnv);
   const url = new URL(request.url);
   const path = url.pathname.replace(/^\/api/, '');
 
@@ -1165,6 +1221,7 @@ export const onRequest = async (context: any) => {
     let r2Healthy = false;
     let kvHealthy = false;
     let externalObjectStorageHealthy = false;
+    const probeErrors: Record<string, string> = {};
     const externalObjectStore = getExternalObjectStoreConfig(env);
 
     // Active live connectivity probing
@@ -1172,43 +1229,53 @@ export const onRequest = async (context: any) => {
       try {
         await env.DB.prepare('SELECT 1').first();
         d1Healthy = true;
-      } catch {
+      } catch (err: any) {
         d1Healthy = false;
+        probeErrors.d1 = String(err?.message || err || 'D1 probe failed').slice(0, 140);
       }
+    } else {
+      probeErrors.d1 = '未检测到 D1 数据库绑定（请在 Pages Settings -> Bindings 添加变量名 DB）';
     }
 
     if (env.R2_BUCKET) {
       try {
         await env.R2_BUCKET.list({ limit: 1 });
         r2Healthy = true;
-      } catch {
+      } catch (err: any) {
         r2Healthy = false;
+        probeErrors.r2 = String(err?.message || err || 'R2 probe failed').slice(0, 140);
       }
+    } else {
+      probeErrors.r2 = '未检测到 R2 存储桶绑定（请在 Pages Settings -> Bindings 添加变量名 R2_BUCKET）';
     }
 
     if (env.KV) {
       try {
         await env.KV.get('__fox3_probe__');
         kvHealthy = true;
-      } catch {
+      } catch (err: any) {
         kvHealthy = false;
+        probeErrors.kv = String(err?.message || err || 'KV probe failed').slice(0, 140);
       }
+    } else {
+      probeErrors.kv = '未检测到 KV 命名空间绑定（请在 Pages Settings -> Bindings 添加变量名 KV）';
     }
 
-    if (externalObjectStore && await hasAdminSession(request, env)) {
+    const adminAuthorized = await hasAdminSession(request, env);
+    if (externalObjectStore && adminAuthorized) {
       try {
         externalObjectStorageHealthy = await probeExternalObjectStore(externalObjectStore);
       } catch {
         externalObjectStorageHealthy = false;
       }
     }
-    const channelOnline = d1Healthy || r2Healthy || externalObjectStorageHealthy;
+    const channelOnline = d1Healthy || r2Healthy || kvHealthy || externalObjectStorageHealthy;
 
     return new Response(JSON.stringify({
       success: true,
       status: channelOnline ? 'online' : 'offline',
       channelOnline,
-      version: '3.8.1',
+      version: '3.8.2',
       cloudServices: {
         d1: d1Healthy,
         r2: r2Healthy,
@@ -1216,9 +1283,15 @@ export const onRequest = async (context: any) => {
         objectStorage: externalObjectStorageHealthy,
         objectStorageProvider: externalObjectStore?.provider || null,
       },
+      bindingDetected: {
+        d1: isD1Binding(env.DB),
+        r2: isR2Binding(env.R2_BUCKET),
+        kv: isKvBinding(env.KV),
+      },
+      ...(adminAuthorized && Object.keys(probeErrors).length > 0 ? { probeErrors } : {}),
       message: channelOnline
-        ? '至少一个 D1/R2/COS/OSS/S3-compatible 资源探测成功；请查看 cloudServices 各项状态'
-        : 'D1、R2 与已配置的 COS/OSS/S3-compatible 存储均未通过探测；服务端云存储功能不可用',
+        ? '云端存储绑定探测完成；请查看 cloudServices 各项状态'
+        : 'D1、R2、KV 与外部对象存储均未通过探测；请检查 Pages Settings -> Bindings 并重新部署',
       timestamp: Date.now(),
     }), {
       headers: { ...Object.fromEntries(headers.entries()), 'Content-Type': 'application/json' }
@@ -1685,13 +1758,7 @@ export const onRequest = async (context: any) => {
       let base64Data = '';
       if (storedTarget === 'none' && (canUseD1Fallback || canUseKvFallback || canUseMemoryFallback)) {
         const arrayBuf = await file.arrayBuffer();
-        let binary = '';
-        const bytes = new Uint8Array(arrayBuf);
-        const len = bytes.byteLength;
-        for (let i = 0; i < len; i++) {
-          binary += String.fromCharCode(bytes[i]);
-        }
-        base64Data = btoa(binary);
+        base64Data = uint8ArrayToBase64(new Uint8Array(arrayBuf));
       }
 
       // 3. Cloudflare D1 SQLite database (fox3_files table), limited to 1 MiB.

@@ -84,8 +84,14 @@ async function ensureCommerceTables(db: any): Promise<void> {
     userId TEXT NOT NULL UNIQUE,
     username TEXT NOT NULL,
     createdAt INTEGER NOT NULL,
-    updatedAt INTEGER NOT NULL
+    updatedAt INTEGER NOT NULL,
+    deletedAt INTEGER
   )`).run();
+  const chatColumns = await db.prepare('PRAGMA table_info(fox3_conversations)').all();
+  if (!(chatColumns?.results || []).some((column: any) => column.name === 'deletedAt')) {
+    await db.prepare('ALTER TABLE fox3_conversations ADD COLUMN deletedAt INTEGER').run();
+  }
+  await db.prepare('CREATE INDEX IF NOT EXISTS fox3_conversations_deleted_updated ON fox3_conversations(deletedAt, updatedAt DESC)').run();
   await db.prepare(`CREATE TABLE IF NOT EXISTS fox3_chat_messages (
     id TEXT PRIMARY KEY,
     conversationId TEXT NOT NULL,
@@ -592,12 +598,12 @@ export async function handleCommerceRequest(
       const unread = await env.DB.prepare(`SELECT COUNT(*) AS count FROM fox3_notifications WHERE recipientRole = ? AND recipientId = ? AND readAt IS NULL`)
         .bind(role, recipient).first();
       const messages = await env.DB.prepare(`SELECT COUNT(*) AS count FROM fox3_chat_messages m JOIN fox3_conversations c ON c.id = m.conversationId
-        WHERE m.readAt IS NULL AND m.senderRole <> ? AND (? = 1 OR c.userId = ?)`)
+        WHERE c.deletedAt IS NULL AND m.readAt IS NULL AND m.senderRole <> ? AND (? = 1 OR c.userId = ?)`)
         .bind(isAdmin ? 'admin' : 'user', isAdmin ? 1 : 0, actorId).first();
       const latest = await env.DB.prepare(`SELECT kind, refId, title FROM fox3_notifications
         WHERE recipientRole = ? AND recipientId = ? AND readAt IS NULL ORDER BY createdAt DESC LIMIT 1`).bind(role, recipient).first();
       const latestMessage = await env.DB.prepare(`SELECT c.id AS conversationId FROM fox3_chat_messages m JOIN fox3_conversations c ON c.id = m.conversationId
-        WHERE m.readAt IS NULL AND m.senderRole <> ? AND (? = 1 OR c.userId = ?) ORDER BY m.createdAt DESC LIMIT 1`)
+        WHERE c.deletedAt IS NULL AND m.readAt IS NULL AND m.senderRole <> ? AND (? = 1 OR c.userId = ?) ORDER BY m.createdAt DESC LIMIT 1`)
         .bind(isAdmin ? 'admin' : 'user', isAdmin ? 1 : 0, actorId).first();
       const latestIsOrder = String(latest?.kind || '').startsWith('order_') || String(latest?.kind || '').startsWith('payment_');
       const latestKind = latestIsOrder ? 'orders' : latest ? 'chat' : latestMessage ? 'chat' : 'orders';
@@ -612,18 +618,50 @@ export async function handleCommerceRequest(
       return json({ success: true }, 200, headers);
     }
 
+    if (path === '/chat/conversations/trash' && request.method === 'GET') {
+      if (!isAdmin) return json({ success: false, error: '仅管理员可查看站内客服对话回收站' }, 403, headers);
+      const result = await env.DB.prepare(`SELECT c.id,c.userId,c.username,c.createdAt,c.updatedAt,c.deletedAt,
+        (SELECT message FROM fox3_chat_messages m WHERE m.conversationId=c.id ORDER BY m.createdAt DESC LIMIT 1) AS lastMessage,
+        (SELECT COUNT(*) FROM fox3_chat_messages m WHERE m.conversationId=c.id) AS messageCount
+        FROM fox3_conversations c WHERE c.deletedAt IS NOT NULL ORDER BY c.deletedAt DESC LIMIT 200`).all();
+      return json({ success: true, conversations: result?.results || [] }, 200, headers);
+    }
+    if (path === '/chat/conversations/trash' && request.method === 'DELETE') {
+      if (!isAdmin) return json({ success: false, error: '仅管理员可清空客服对话回收站' }, 403, headers);
+      await env.DB.batch([
+        env.DB.prepare('DELETE FROM fox3_chat_messages WHERE conversationId IN (SELECT id FROM fox3_conversations WHERE deletedAt IS NOT NULL)'),
+        env.DB.prepare("DELETE FROM fox3_notifications WHERE kind = 'chat_message' AND refId IN (SELECT id FROM fox3_conversations WHERE deletedAt IS NOT NULL)"),
+        env.DB.prepare('DELETE FROM fox3_conversations WHERE deletedAt IS NOT NULL'),
+      ]);
+      return json({ success: true, message: '客服对话回收站已清空' }, 200, headers);
+    }
+    const restoreConversationMatch = path.match(/^\/chat\/conversations\/([^/]+)\/restore$/);
+    if (restoreConversationMatch && request.method === 'POST') {
+      if (!isAdmin) return json({ success: false, error: '仅管理员可恢复客服对话' }, 403, headers);
+      const conversationId = decodeURIComponent(restoreConversationMatch[1]);
+      const conversation = await env.DB.prepare('SELECT id FROM fox3_conversations WHERE id = ?').bind(conversationId).first();
+      if (!conversation) return json({ success: false, error: '对话不存在或已被彻底删除' }, 404, headers);
+      await env.DB.prepare('UPDATE fox3_conversations SET deletedAt = NULL, updatedAt = ? WHERE id = ?').bind(Date.now(), conversationId).run();
+      return json({ success: true, message: '客服对话已恢复' }, 200, headers);
+    }
     const deleteConversationMatch = path.match(/^\/chat\/conversations\/([^/]+)$/);
     if (deleteConversationMatch && request.method === 'DELETE') {
       if (!isAdmin) return json({ success: false, error: '仅管理员可删除客服对话' }, 403, headers);
       const conversationId = decodeURIComponent(deleteConversationMatch[1]);
-      const conversation = await env.DB.prepare('SELECT id FROM fox3_conversations WHERE id = ?').bind(conversationId).first();
+      const permanent = new URL(request.url).searchParams.get('permanent') === '1';
+      const conversation = await env.DB.prepare('SELECT id, deletedAt FROM fox3_conversations WHERE id = ?').bind(conversationId).first();
       if (!conversation) return json({ success: false, error: '对话不存在或已被删除' }, 404, headers);
-      await env.DB.batch([
-        env.DB.prepare('DELETE FROM fox3_chat_messages WHERE conversationId = ?').bind(conversationId),
-        env.DB.prepare("DELETE FROM fox3_notifications WHERE kind = 'chat_message' AND refId = ?").bind(conversationId),
-        env.DB.prepare('DELETE FROM fox3_conversations WHERE id = ?').bind(conversationId),
-      ]);
-      return json({ success: true }, 200, headers);
+      if (permanent || conversation.deletedAt != null) {
+        await env.DB.batch([
+          env.DB.prepare('DELETE FROM fox3_chat_messages WHERE conversationId = ?').bind(conversationId),
+          env.DB.prepare("DELETE FROM fox3_notifications WHERE kind = 'chat_message' AND refId = ?").bind(conversationId),
+          env.DB.prepare('DELETE FROM fox3_conversations WHERE id = ?').bind(conversationId),
+        ]);
+        return json({ success: true, permanent: true, message: '客服对话及消息已彻底删除' }, 200, headers);
+      }
+      const now = Date.now();
+      await env.DB.prepare('UPDATE fox3_conversations SET deletedAt = ?, updatedAt = ? WHERE id = ?').bind(now, now, conversationId).run();
+      return json({ success: true, permanent: false, message: '客服对话已移入回收站' }, 200, headers);
     }
     if (path === '/chat/conversations/ensure' && request.method === 'POST') {
       if (!isAdmin) return json({ success: false, error: '仅管理员可从订单发起对话' }, 403, headers);
@@ -631,11 +669,13 @@ export async function handleCommerceRequest(
       const userId = text(body?.userId, 200);
       const username = text(body?.username, 120) || '用户';
       if (!userId) return json({ success: false, error: '订单缺少用户标识，无法打开客服对话' }, 400, headers);
-      let conversation = await env.DB.prepare('SELECT id FROM fox3_conversations WHERE userId = ?').bind(userId).first();
-      if (!conversation) {
+      let conversation = await env.DB.prepare('SELECT id, deletedAt FROM fox3_conversations WHERE userId = ?').bind(userId).first();
+      const now = Date.now();
+      if (conversation && conversation.deletedAt != null) {
+        await env.DB.prepare('UPDATE fox3_conversations SET deletedAt = NULL, updatedAt = ? WHERE id = ?').bind(now, conversation.id).run();
+      } else if (!conversation) {
         const id = uuid('chat');
-        const now = Date.now();
-        await env.DB.prepare('INSERT OR IGNORE INTO fox3_conversations (id,userId,username,createdAt,updatedAt) VALUES (?,?,?,?,?)').bind(id, userId, username, now, now).run();
+        await env.DB.prepare('INSERT OR IGNORE INTO fox3_conversations (id,userId,username,createdAt,updatedAt,deletedAt) VALUES (?,?,?,?,?,NULL)').bind(id, userId, username, now, now).run();
         conversation = await env.DB.prepare('SELECT id FROM fox3_conversations WHERE userId = ?').bind(userId).first();
       }
       return json({ success: true, conversationId: String(conversation?.id || '') }, 200, headers);
@@ -645,10 +685,10 @@ export async function handleCommerceRequest(
         const result = await env.DB.prepare(`SELECT c.id,c.userId,c.username,c.createdAt,c.updatedAt,
           (SELECT message FROM fox3_chat_messages m WHERE m.conversationId=c.id ORDER BY m.createdAt DESC LIMIT 1) AS lastMessage,
           (SELECT COUNT(*) FROM fox3_chat_messages m WHERE m.conversationId=c.id AND m.readAt IS NULL AND m.senderRole <> 'admin') AS unread
-          FROM fox3_conversations c ORDER BY c.updatedAt DESC LIMIT 200`).all();
+          FROM fox3_conversations c WHERE c.deletedAt IS NULL ORDER BY c.updatedAt DESC LIMIT 200`).all();
         return json({ success: true, conversations: result?.results || [] }, 200, headers);
       }
-      const result = await env.DB.prepare('SELECT id,userId,username,createdAt,updatedAt FROM fox3_conversations WHERE userId = ? LIMIT 1').bind(actorId).first();
+      const result = await env.DB.prepare('SELECT id,userId,username,createdAt,updatedAt FROM fox3_conversations WHERE userId = ? AND deletedAt IS NULL LIMIT 1').bind(actorId).first();
       return json({ success: true, conversations: result ? [result] : [] }, 200, headers);
     }
     if (path === '/chat/messages' && request.method === 'GET') {
@@ -666,19 +706,21 @@ export async function handleCommerceRequest(
       const message = text(body?.message, 4000);
       if (!message) return json({ success: false, error: '对话内容不能为空' }, 400, headers);
       let conversationId = text(body?.conversationId, 200);
-      let conversation: any = conversationId ? await env.DB.prepare('SELECT id,userId,username FROM fox3_conversations WHERE id = ?').bind(conversationId).first() : null;
+      let conversation: any = conversationId ? await env.DB.prepare('SELECT id,userId,username,deletedAt FROM fox3_conversations WHERE id = ?').bind(conversationId).first() : null;
       if (isAdmin) {
         if (!conversation) return json({ success: false, error: '管理员回复必须选择现有用户对话' }, 400, headers);
       } else {
         if (conversation && conversation.userId !== actorId) return json({ success: false, error: '无权向其他账户对话' }, 403, headers);
         if (!conversation) {
-          const existing = await env.DB.prepare('SELECT id,userId,username FROM fox3_conversations WHERE userId = ?').bind(actorId).first();
-          if (existing) { conversation = existing; conversationId = String(existing.id); }
-          else {
+          const existing = await env.DB.prepare('SELECT id,userId,username,deletedAt FROM fox3_conversations WHERE userId = ?').bind(actorId).first();
+          if (existing) {
+            conversation = existing;
+            conversationId = String(existing.id);
+          } else {
             conversationId = uuid('chat');
             const now = Date.now();
-            await env.DB.prepare('INSERT INTO fox3_conversations (id,userId,username,createdAt,updatedAt) VALUES (?,?,?,?,?)').bind(conversationId, actorId, user!.username, now, now).run();
-            conversation = { id: conversationId, userId: actorId, username: user!.username };
+            await env.DB.prepare('INSERT INTO fox3_conversations (id,userId,username,createdAt,updatedAt,deletedAt) VALUES (?,?,?,?,?,NULL)').bind(conversationId, actorId, user!.username, now, now).run();
+            conversation = { id: conversationId, userId: actorId, username: user!.username, deletedAt: null };
           }
         }
       }
@@ -690,7 +732,7 @@ export async function handleCommerceRequest(
       await env.DB.batch([
         env.DB.prepare('INSERT INTO fox3_chat_messages (id,conversationId,senderId,senderRole,senderName,message,createdAt,readAt) VALUES (?,?,?,?,?,?,?,NULL)')
           .bind(messageId, conversationId, senderId, senderRole, senderName, message, now),
-        env.DB.prepare('UPDATE fox3_conversations SET updatedAt = ? WHERE id = ?').bind(now, conversationId),
+        env.DB.prepare('UPDATE fox3_conversations SET deletedAt = NULL, updatedAt = ? WHERE id = ?').bind(now, conversationId),
       ]);
       if (isAdmin) await addNotification(env.DB, 'user', String(conversation.userId), 'chat_message', '站长回复了你的消息', message.slice(0, 200), conversationId);
       else await addNotification(env.DB, 'admin', '', 'chat_message', '收到新的用户咨询', `${user!.username}：${message.slice(0, 180)}`, conversationId);
@@ -710,6 +752,6 @@ export async function handleCommerceRequest(
   } catch (error: any) {
     const detail = String(error?.message || error || 'unknown').replace(/[\r\n\t]+/g, ' ').slice(0, 240);
     console.error('[Commerce] API failure:', String(error?.stack || detail).slice(0, 700));
-    return json({ success: false, error: `D1 数据库操作失败：${detail}。请确认 Pages 已绑定 DB，按顺序应用 migrations/0002_commerce.sql 与 migrations/0003_order_trash.sql。` }, 503, headers);
+    return json({ success: false, error: `D1 数据库操作失败：${detail}。请确认 Pages 已绑定 DB，按顺序应用 migrations/0002_commerce.sql、0003_order_trash.sql 与 0004_chat_trash.sql。` }, 503, headers);
   }
 }

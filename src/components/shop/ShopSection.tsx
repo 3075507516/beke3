@@ -16,7 +16,7 @@ type Order = {
   customerName?: string; customerPhone?: string; customerEmail?: string; shippingAddress?: string; username?: string; deletedAt?: number;
   paymentProvider: Provider; trackingNumber?: string; carrier?: string;
 };
-type Conversation = { id: string; userId?: string; username?: string; userName?: string; lastMessage?: string; unread?: number; unreadCount?: number };
+type Conversation = { id: string; userId?: string; username?: string; userName?: string; lastMessage?: string; unread?: number; unreadCount?: number; deletedAt?: number; messageCount?: number };
 type ChatMessage = { id: string; senderRole: 'admin' | 'user'; senderName: string; message: string; createdAt: number };
 type PaymentState = { orderId: string; payment?: { redirectUrl?: string; qrCode?: string; warning?: string }; order?: Order; error?: string };
 const DEFAULT_SHOP_CATEGORIES = ['实体周边', '电子书', '数码配件', '服饰鞋包', '家居生活', '文创文具', '虚拟商品', '课程培训', '会员服务', '软件工具', '摄影器材', '礼品收藏', '食品饮品', '咨询服务'];
@@ -62,6 +62,8 @@ export const ShopSection: React.FC = () => {
   const [trashOrders, setTrashOrders] = useState<Order[]>([]);
   const [showTrash, setShowTrash] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [trashConversations, setTrashConversations] = useState<Conversation[]>([]);
+  const [showChatTrash, setShowChatTrash] = useState(false);
   const [conversationId, setConversationId] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [messageText, setMessageText] = useState('');
@@ -103,6 +105,13 @@ export const ShopSection: React.FC = () => {
       else if (!conversationId && list[0]) setConversationId(list[0].id);
     } catch (e) { setError(e instanceof Error ? e.message : '对话加载失败'); }
   };
+  const loadTrashConversations = async () => {
+    if (!currentUser || !isAdmin || !token) return;
+    try {
+      const data = await api('/api/chat/conversations/trash');
+      setTrashConversations(Array.isArray(data.conversations) ? data.conversations : []);
+    } catch (e) { setError(e instanceof Error ? e.message : '客服对话回收站加载失败'); }
+  };
   const loadMessages = async (id: string) => {
     if (!id || !token) return;
     try {
@@ -111,7 +120,7 @@ export const ShopSection: React.FC = () => {
     } catch (e) { setError(e instanceof Error ? e.message : '消息加载失败'); }
   };
 
-  useEffect(() => { void loadOrders(); void loadConversations(); }, [currentUser?.id, token]);
+  useEffect(() => { void loadOrders(); void loadConversations(); if (isAdmin) void loadTrashConversations(); }, [currentUser?.id, isAdmin, token]);
   useEffect(() => { if (isAdmin) void api('/api/payment-config-status').then(data => setPaymentConfig(data.providers || {})).catch(() => setPaymentConfig(null)); }, [isAdmin, token]);
   useEffect(() => {
     const openMessages = () => {
@@ -358,11 +367,111 @@ export const ShopSection: React.FC = () => {
     </div>}
 
     {activeShopTab === 'chat' && dialogMode === 'chat' && <section className={`${panel} p-4`}>
-      <div className="flex items-center justify-between"><h3 className="flex items-center gap-2 font-bold"><MessageCircle className="text-sky-500"/>站内客服对话</h3><button onClick={() => setChatOpen(open => !open)} className="text-xs text-sky-600">{chatOpen ? '收起' : '打开对话'}</button></div>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="flex items-center gap-2 font-bold"><MessageCircle className="text-sky-500"/>站内客服对话</h3>
+        <div className="flex items-center gap-2">
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() => {
+                const next = !showChatTrash;
+                setShowChatTrash(next);
+                setChatOpen(true);
+                if (next) void loadTrashConversations();
+                else void loadConversations();
+              }}
+              className={`rounded-lg border px-2.5 py-1 text-xs font-medium transition ${showChatTrash ? 'border-rose-400 bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+            >
+              {showChatTrash ? '返回对话列表' : `对话回收站 (${trashConversations.length})`}
+            </button>
+          )}
+          <button onClick={() => setChatOpen(open => !open)} className="text-xs text-sky-600">{chatOpen ? '收起' : '打开对话'}</button>
+        </div>
+      </div>
       {!currentUser && <p className="mt-2 text-xs text-slate-500">登录注册账户后可与站长建立持久对话；访客留言不会显示为已发送。</p>}
       {chatOpen && <div className="mt-3">
-        {isAdmin && <div className="mb-3 flex flex-wrap gap-2">{conversations.map(conversation => <div key={conversation.id} className={`flex max-w-full items-start gap-2 rounded-xl p-2 text-xs ${conversationId === conversation.id ? 'bg-sky-500 text-white' : 'bg-slate-100 dark:bg-slate-800'}`}><button onClick={() => setConversationId(conversation.id)} className="min-w-0 text-left"><span className="block font-semibold">{conversation.username || conversation.userName || conversation.id}{(conversation.unread || conversation.unreadCount) ? ` · 未读 ${conversation.unread || conversation.unreadCount}` : ''}</span><span className="block max-w-[240px] truncate">{conversation.lastMessage || '打开对话'}</span></button><button type="button" aria-label={`删除与${conversation.username || '用户'}的对话`} title="删除对话及消息" onClick={async () => { if (!window.confirm('确定永久删除这段客服对话及其全部消息吗？')) return; try { await api(`/api/chat/conversations/${encodeURIComponent(conversation.id)}`, { method: 'DELETE' }); if (conversationId === conversation.id) { setConversationId(''); setMessages([]); } await loadConversations(); } catch (e) { setError(e instanceof Error ? e.message : '删除对话失败'); } }} className="rounded p-1 text-rose-600 hover:bg-rose-100 dark:hover:bg-rose-950/40"><Trash2 className="h-3.5 w-3.5"/></button></div>)}</div>}
-        {currentUser && <><div className="max-h-72 space-y-2 overflow-auto border-y border-slate-200 py-3 dark:border-slate-800">{messages.map(message => <div key={message.id} className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm ${message.senderRole === 'admin' ? 'bg-slate-100 dark:bg-slate-800' : 'ml-auto bg-sky-50 dark:bg-sky-950/50'}`}><div className="mb-1 text-[10px] text-slate-500">{message.senderName} · {new Date(message.createdAt).toLocaleString()}</div>{message.message}</div>)}{!messages.length && <p className="text-xs text-slate-500">{isAdmin ? '选择一位用户打开对话；新消息会显示在页眉通知灯。' : '你好，请留下问题，站长回复后页眉会显示提醒。'}</p>}</div><form onSubmit={sendMessage} className="mt-3 flex gap-2"><input value={messageText} onChange={event => setMessageText(event.target.value)} placeholder="输入消息…" maxLength={4000} className="min-w-0 flex-1 rounded-xl border bg-transparent px-3 py-2 text-sm dark:border-slate-700"/><button className="rounded-xl bg-sky-500 p-2 text-white" aria-label="发送消息"><Send className="h-4 w-4"/></button></form></>}
+        {isAdmin && showChatTrash ? (
+          <div className="space-y-3 rounded-2xl border border-rose-200/80 bg-rose-50/40 p-4 dark:border-rose-900/60 dark:bg-rose-950/20">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h4 className="text-xs font-bold text-rose-700 dark:text-rose-300">站内客服对话回收站 ({trashConversations.length})</h4>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">已移入回收站的对话可在此还原，或执行彻底删除以永久清除该对话及全部聊天记录。</p>
+              </div>
+              {trashConversations.length > 0 && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!window.confirm(`确定清空站内客服对话回收站中的全部 ${trashConversations.length} 条对话及消息吗？此操作不可撤销！`)) return;
+                    try {
+                      await api('/api/chat/conversations/trash', { method: 'DELETE' });
+                      await loadTrashConversations();
+                    } catch (e) { setError(e instanceof Error ? e.message : '清空对话回收站失败'); }
+                  }}
+                  className="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-rose-700"
+                >
+                  清空回收站
+                </button>
+              )}
+            </div>
+            {!trashConversations.length ? (
+              <p className="py-6 text-center text-xs text-slate-400">客服对话回收站为空。</p>
+            ) : (
+              <div className="space-y-2">
+                {trashConversations.map(conversation => (
+                  <div key={conversation.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3 text-xs dark:border-slate-700 dark:bg-slate-900">
+                    <div className="min-w-[200px] flex-1">
+                      <div className="font-bold text-slate-800 dark:text-slate-100">
+                        {conversation.username || conversation.userName || conversation.id}
+                        <span className="ml-2 font-normal text-slate-400">({Number(conversation.messageCount || 0)} 条消息)</span>
+                      </div>
+                      <p className="mt-0.5 truncate text-slate-500">{conversation.lastMessage || '（无消息正文）'}</p>
+                      {conversation.deletedAt && (
+                        <span className="mt-0.5 block text-[10px] text-slate-400">
+                          移入回收站：{new Date(conversation.deletedAt).toLocaleString()}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            await api(`/api/chat/conversations/${encodeURIComponent(conversation.id)}/restore`, { method: 'POST', body: '{}' });
+                            await loadTrashConversations();
+                            await loadConversations(conversation.id);
+                            setShowChatTrash(false);
+                          } catch (e) { setError(e instanceof Error ? e.message : '恢复对话失败'); }
+                        }}
+                        className="rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-300"
+                      >
+                        恢复对话
+                      </button>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!window.confirm(`确定从回收站彻底删除与「${conversation.username || conversation.id}」的客服对话及全部消息吗？此操作不可撤销！`)) return;
+                          try {
+                            await api(`/api/chat/conversations/${encodeURIComponent(conversation.id)}?permanent=1`, { method: 'DELETE' });
+                            await loadTrashConversations();
+                          } catch (e) { setError(e instanceof Error ? e.message : '彻底删除对话失败'); }
+                        }}
+                        className="flex items-center gap-1 rounded-lg bg-rose-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-rose-700"
+                      >
+                        <Trash2 className="h-3 w-3"/>
+                        <span>彻底删除</span>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : (
+          <>
+            {isAdmin && <div className="mb-3 flex flex-wrap gap-2">{conversations.map(conversation => <div key={conversation.id} className={`flex max-w-full items-start gap-2 rounded-xl p-2 text-xs ${conversationId === conversation.id ? 'bg-sky-500 text-white' : 'bg-slate-100 dark:bg-slate-800'}`}><button onClick={() => setConversationId(conversation.id)} className="min-w-0 text-left"><span className="block font-semibold">{conversation.username || conversation.userName || conversation.id}{(conversation.unread || conversation.unreadCount) ? ` · 未读 ${conversation.unread || conversation.unreadCount}` : ''}</span><span className="block max-w-[240px] truncate">{conversation.lastMessage || '打开对话'}</span></button><button type="button" aria-label={`将与${conversation.username || '用户'}的对话移入回收站`} title="移入对话回收站" onClick={async () => { if (!window.confirm('确定将这段客服对话移入回收站吗？（可在“对话回收站”恢复或彻底删除）')) return; try { await api(`/api/chat/conversations/${encodeURIComponent(conversation.id)}`, { method: 'DELETE' }); if (conversationId === conversation.id) { setConversationId(''); setMessages([]); } await loadConversations(); await loadTrashConversations(); } catch (e) { setError(e instanceof Error ? e.message : '移入回收站失败'); } }} className={`rounded p-1 transition ${conversationId === conversation.id ? 'text-white/90 hover:bg-white/20' : 'text-rose-600 hover:bg-rose-100 dark:hover:bg-rose-950/40'}`}><Trash2 className="h-3.5 w-3.5"/></button></div>)}</div>}
+            {currentUser && <><div className="max-h-72 space-y-2 overflow-auto border-y border-slate-200 py-3 dark:border-slate-800">{messages.map(message => <div key={message.id} className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm ${message.senderRole === 'admin' ? 'bg-slate-100 dark:bg-slate-800' : 'ml-auto bg-sky-50 dark:bg-sky-950/50'}`}><div className="mb-1 text-[10px] text-slate-500">{message.senderName} · {new Date(message.createdAt).toLocaleString()}</div>{message.message}</div>)}{!messages.length && <p className="text-xs text-slate-500">{isAdmin ? '选择一位用户打开对话；新消息会显示在页眉通知灯。' : '你好，请留下问题，站长回复后页眉会显示提醒。'}</p>}</div><form onSubmit={sendMessage} className="mt-3 flex gap-2"><input value={messageText} onChange={event => setMessageText(event.target.value)} placeholder="输入消息…" maxLength={4000} className="min-w-0 flex-1 rounded-xl border bg-transparent px-3 py-2 text-sm dark:border-slate-700"/><button className="rounded-xl bg-sky-500 p-2 text-white" aria-label="发送消息"><Send className="h-4 w-4"/></button></form></>}
+          </>
+        )}
       </div>}
     </section>}
 

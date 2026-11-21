@@ -99,6 +99,38 @@ async function startServer() {
   const app = express();
   app.disable('x-powered-by');
 
+  // Route all /api/download/pages-zip and /dist-upload.zip to the packed Cloudflare Pages Direct Upload archive
+  const handlePagesZipDownload = (_req: ExpressRequest, res: ExpressResponse) => {
+    const zipPath = path.resolve(process.cwd(), 'dist-upload.zip');
+    if (!fs.existsSync(zipPath)) {
+      res.status(404).json({
+        success: false,
+        error: 'dist-upload.zip 尚未生成，请先执行 npm run build。',
+      });
+      return;
+    }
+    const stat = fs.statSync(zipPath);
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Length', String(stat.size));
+    res.setHeader('Content-Disposition', 'attachment; filename="fox3-pages-dist-upload.zip"');
+    res.setHeader('Cache-Control', 'no-store');
+    fs.createReadStream(zipPath).pipe(res);
+  };
+  app.get('/dist-upload.zip', handlePagesZipDownload);
+  app.head('/dist-upload.zip', (_req, res) => {
+    const zipPath = path.resolve(process.cwd(), 'dist-upload.zip');
+    if (!fs.existsSync(zipPath)) {
+      res.status(404).end();
+      return;
+    }
+    const stat = fs.statSync(zipPath);
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Length', String(stat.size));
+    res.setHeader('Content-Disposition', 'attachment; filename="fox3-pages-dist-upload.zip"');
+    res.status(200).end();
+  });
+  app.get('/api/download/pages-zip', handlePagesZipDownload);
+
   // Route all /api and /api/* requests directly through the API handler with unparsed raw streams
   app.all(/^\/api(?:\/.*)?$/, (req, res) => {
     void handleApiRequest(req, res);

@@ -627,30 +627,10 @@ export const MailSection: React.FC = () => {
       {/* Cloudflare Routing & SMTP Settings Drawer */}
       {showConfig && (
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 shadow-xl space-y-6 animate-in fade-in">
-          {/* Detailed Setup Guide Banner inside Section */}
-          <div className="p-4 bg-sky-50/70 dark:bg-sky-950/40 border border-sky-200/80 dark:border-sky-900/60 rounded-2xl space-y-2 text-xs">
-            <div className="flex items-center gap-2 font-bold text-sky-800 dark:text-sky-200 text-sm">
-              <ShieldCheck className="w-4 h-4 text-sky-500 shrink-0" />
-              <span>{tx('站内发信与收信配置指南 & 后端环境变量说明')}</span>
-            </div>
-            <div className="text-slate-600 dark:text-slate-300 leading-relaxed space-y-1">
-              <p>{tx('1. 发信通道：推荐 Resend API（HTTPS），也支持通用 SMTP、Brevo API、SendGrid API 和 SendCloud API。阿里云 DirectMail、腾讯云 SES 可在服务商已开通 SMTP、提供有效参数且部署网络可连通时，选择通用 SMTP 使用；本仓库没有为它们单独适配 HTTP API。SendCloud API 需要单独配置 SENDCLOUD_API_USER、SENDCLOUD_API_KEY，并将 MAIL_PROVIDER 设为 sendcloud；免费额度与发送权限以服务商实际账号状态为准。')}</p>
-              <p>{tx('2. 前台与后台配置：前台发信设置只保存在当前浏览器，不会配置全站服务器。注册验证码和后台自动邮件必须在 Cloudflare Pages 后台 Variables/Secrets 配置通道凭据及 MAIL_SENDER，并重新部署；前台配置与后台配置应分开测试。')}</p>
-              <p>{tx('3. 注册验证码：验证码由服务端生成并校验；Cloudflare 部署需绑定 D1，并配置可用的后台发信通道。可选设置 VERIFY_CODE_LENGTH、VERIFY_EMAIL_SUBJECT、VERIFY_EMAIL_TEMPLATE；模板变量为 {{code}}、{{username}}、{{email}}。')}</p>
-              <p>{tx('4. 获取 RESEND_API_KEY：登录 resend.com，进入左侧 API Keys，点击 Create API Key，选择所需权限和域名后创建并立即复制。不要将密钥放在前端代码或公开仓库。')}</p>
-              <p>{tx('5. 获取 RESEND_WEBHOOK_SECRET 并配置 Webhook：在 Resend Webhooks 创建 Webhook；Endpoint / URL 填写你自己的 Pages Functions 地址，例如 https://你的项目名.pages.dev/api/webhook，监听 email.received。创建后复制 signing secret，保存为 RESEND_WEBHOOK_SECRET；接口也兼容旧路径 /api/mail/webhook。')}</p>
-              <p>{tx('6. 配置收件域名和 MX：在 Domains 添加域名；如需接收邮件，在域名详情启用 Receiving，并按 Resend 指示在域名 DNS 后台配置 MX 记录。')}</p>
-              <p>{tx('重要：Webhook URL 是你自己的 Pages Functions 接口，不是 Resend 提供的地址。RESEND_API_KEY 与 RESEND_WEBHOOK_SECRET 通常只在创建时完整显示一次，丢失后需重新生成。Webhook 验签通过后，服务端用 RESEND_API_KEY 调 Receiving API 取回正文并存入绑定名为 DB 的 D1；普通转发到个人邮箱不会把来信导入本站。')}</p>
-              <p>{tx('7. 站内邮件：管理员可在邮件中枢查看服务器收件箱、撰写和回复；发送及收件箱 API 需有效管理员会话。回复注册邮箱时优先从 D1 用户记录解析地址；前台/本机发件历史保存在浏览器，Resend 来信正文保存在 D1。')}</p>
-              <p>{tx('Resend API 域名连接检查只读域名信息，不会发送邮件；本页不显示独立的 Resend 检查按钮。要验证真实投递，请使用单独的测试邮件按钮。')}</p>
-              <p>{tx('目前只有 Resend Receiving 的 email.received webhook 会将经服务端验签并取回正文的来信保存到 D1；其他发信渠道不自动提供本站收件。状态灯只表示所需服务端变量已配置，不代表 MX/Webhook 实测成功或已经收到邮件。')}</p>
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
             <div className="flex items-center gap-2 text-rose-500 font-bold text-sm">
               <ShieldCheck className="w-4 h-4" />
-              <span>{tx('邮件服务提供商与收发限制参数设定')}</span>
+              <span>{tx('邮件中枢设置：发信区与收信区（已分区整理，方便阅读与操作）')}</span>
             </div>
             <button
               onClick={() => setShowConfig(false)}
@@ -660,23 +640,30 @@ export const MailSection: React.FC = () => {
             </button>
           </div>
 
-          <div className="grid grid-cols-1 gap-4">
-            {/* Third party API configuration */}
-            <div className="space-y-4 rounded-2xl border border-slate-200 p-4 dark:border-slate-700">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
-                  <span>发信通道设置 (Outbound)</span>
-                </h4>
-                <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${isFrontendConnected ? 'bg-emerald-50 text-emerald-700' : isFrontendTestFailed || !frontendOutboundConfigured ? 'bg-rose-50 text-rose-600' : 'bg-amber-50 text-amber-700'}`}>
+          <div className="grid grid-cols-1 gap-6">
+            {/* ==================== 区域一：发信区 (Outbound) ==================== */}
+            <div className="space-y-4 rounded-2xl border-2 border-sky-200/80 dark:border-sky-900/60 bg-sky-50/15 dark:bg-sky-950/10 p-5">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-sky-100 dark:border-sky-900/50 pb-3">
+                <div>
+                  <h4 className="text-sm font-bold text-sky-700 dark:text-sky-300 flex items-center gap-2">
+                    <Send className="w-4 h-4" />
+                    <span>一、发信区（发送邮件设置 &amp; 发信说明）</span>
+                  </h4>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                    用于站内写信/回信，以及注册验证码、订单与系统自动发信配置
+                  </p>
+                </div>
+                <span className={`text-[10px] px-2.5 py-1 rounded-full font-bold ${isFrontendConnected ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : isFrontendTestFailed || !frontendOutboundConfigured ? 'bg-rose-50 text-rose-600 border border-rose-200' : 'bg-amber-50 text-amber-700 border border-amber-200'}`}>
                   {isFrontendConnected ? '● 前台测试已接受' : isFrontendTestFailed ? '○ 前台测试失败' : frontendOutboundConfigured ? '● 前台参数已填写/待测试' : '○ 前台未配置'}
                 </span>
               </div>
 
-              <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 space-y-2">
-                <label className="block text-[11px] text-slate-600 dark:text-slate-300 font-semibold">普通站内信使用哪组发信凭据？</label>
-                <select value={settingsSource} onChange={e => setSettingsSource(e.target.value as 'frontend' | 'backend')} className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs">
-                  <option value="frontend">使用前台邮箱设置（本机保存）</option>
-                  <option value="backend">使用 Cloudflare 后台环境变量</option>
+              {/* 发信凭据选择与真实投递测试 */}
+              <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/80 space-y-2.5">
+                <label className="block text-[11px] text-slate-600 dark:text-slate-300 font-semibold">普通站内写信 / 回信使用哪组发信凭据？</label>
+                <select value={settingsSource} onChange={e => setSettingsSource(e.target.value as 'frontend' | 'backend')} className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs">
+                  <option value="frontend">使用前台邮箱设置（本机浏览器保存）</option>
+                  <option value="backend">使用 Cloudflare / 服务端环境变量（推荐生产使用）</option>
                 </select>
                 <div className="flex flex-wrap gap-2">
                   <button type="button" disabled={testingStatus || !frontendOutboundConfigured} onClick={() => handleTestMail('frontend')} className="px-3 py-1.5 rounded-lg bg-sky-600 disabled:opacity-40 text-white text-[11px] font-semibold">
@@ -685,176 +672,224 @@ export const MailSection: React.FC = () => {
                   <button type="button" disabled={testingStatus || !backendMailConfigured} onClick={() => handleTestMail('backend')} className="px-3 py-1.5 rounded-lg bg-indigo-600 disabled:opacity-40 text-white text-[11px] font-semibold">
                     {testingStatus ? tx('测试中…') : tx('发送后台测试邮件')}
                   </button>
-                  <span className="self-center text-[10px] text-slate-500">测试邮件会真实发回发件地址；前台配置仅用于当前浏览器测试，正式验证码及后台通知需配置并部署后端环境变量。</span>
+                  <span className="self-center text-[10px] text-slate-500">测试邮件会真实发送至当前发件人地址；注册验证码及后台业务邮件固定读取服务端环境变量。</span>
                 </div>
-                <div className="text-[10px] text-slate-500">后台环境变量：{backendMailStatusAvailable === null ? '检测中…' : backendMailStatusAvailable === false ? '状态接口不可读取，无法判断后台是否配置' : isBackendTestFailed ? '实际测试邮件失败' : isBackendConnected ? '测试邮件已被服务商接受' : backendMailConfigured ? `已配置 (${backendMailProvider})，尚未发送测试邮件` : '未配置发信环境变量'}</div>
+                <div className="text-[10px] text-slate-500">后台环境变量状态：{backendMailStatusAvailable === null ? '检测中…' : backendMailStatusAvailable === false ? '状态接口不可读取，无法判断后台是否配置' : isBackendTestFailed ? '实际测试邮件失败' : isBackendConnected ? '测试邮件已被服务商接受' : backendMailConfigured ? `已配置 (${backendMailProvider})，待发送测试邮件` : '未配置后台发信环境变量'}</div>
               </div>
 
-              <div className="p-3 rounded-xl border border-sky-200/80 dark:border-sky-900/60 bg-sky-50/50 dark:bg-sky-950/30 space-y-2">
+              {/* 一键预设常见企业邮箱 */}
+              <div className="p-3.5 rounded-xl border border-sky-200/80 dark:border-sky-900/60 bg-sky-50/60 dark:bg-sky-950/30 space-y-2">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-[11px] font-bold text-sky-800 dark:text-sky-200">一键预设常用企业/免费邮箱参数（同时填充 SMTP 发信与 IMAP 收信）：</span>
+                  <span className="text-[11px] font-bold text-sky-800 dark:text-sky-200">一键预设常用企业/免费邮箱（同时填充 SMTP 发信与下方收信区 IMAP）：</span>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <button type="button" onClick={() => applyMailPreset('aliyun-qiye')} className="px-3 py-1.5 rounded-lg border border-sky-300 bg-white dark:bg-slate-900 hover:bg-sky-50 text-[11px] font-semibold text-sky-700 dark:text-sky-300">阿里云企业邮箱免费版 (qiye.aliyun.com)</button>
                   <button type="button" onClick={() => applyMailPreset('tencent-exmail')} className="px-3 py-1.5 rounded-lg border border-emerald-300 bg-white dark:bg-slate-900 hover:bg-emerald-50 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">腾讯企业邮箱免费版 (exmail.qq.com)</button>
                   <button type="button" onClick={() => applyMailPreset('aliyun-personal')} className="px-3 py-1.5 rounded-lg border border-amber-300 bg-white dark:bg-slate-900 hover:bg-amber-50 text-[11px] font-semibold text-amber-700 dark:text-amber-300">阿里云个人邮箱 (aliyun.com)</button>
                 </div>
-                <p className="text-[10px] text-slate-500 leading-relaxed">提示：阿里云免费企业邮箱与腾讯企业邮箱免费版均需使用完整企业邮箱地址作为账号，并在邮箱安全设置中开启“客户端授权码/三方客户端登录安全密码”后填写授权码。</p>
+                <p className="text-[10px] text-slate-500 leading-relaxed">提示：阿里云免费企业邮箱与腾讯企业邮箱免费版均需填写完整邮箱地址作为账号，并在对应邮箱后台安全中心开启“三方客户端安全密码 / 客户端授权码”。</p>
               </div>
 
-              <div>
-                <label className="block text-xs text-slate-500 mb-1">
-                  {tx('发信服务与加密方式')} <span className="text-rose-500 font-bold">[必填]</span>
-                </label>
-                <select
-                  value={formSettings.provider}
-                  onChange={e => setFormSettings({ ...formSettings, provider: e.target.value as any })}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100"
-                >
-                  <option value="resend">Resend API (HTTPS，推荐)</option>
-                  <option value="smtp">SMTP (SSL 465 / STARTTLS 587，阿里云/腾讯企业邮箱通用)</option>
-                  <option value="sendcloud">{tx('SendCloud API (国内服务，按账户额度)')}</option>
-                  <option value="brevo">Brevo API (HTTPS)</option>
-                  <option value="sendgrid">Twilio SendGrid API (HTTPS)</option>
-                </select>
-              </div>
-
-              {formSettings.provider === 'sendcloud' && (
-                <div>
-                  <label className="block text-xs text-slate-500 mb-1">{tx('SendCloud API_USER（触发邮件账号）')}</label>
-                  <input type="text" value={formSettings.apiUser || ''} onChange={event => setFormSettings({ ...formSettings, apiUser: event.target.value })} placeholder={tx('从 SendCloud 控制台 API_USER 页面复制')} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-xs dark:border-slate-700 dark:bg-slate-800" />
-                  <p className="mt-1 text-[10px] text-slate-500">{tx('SendCloud API_USER 与 API_KEY 是两项独立凭据；免费额度、域名验证和发送权限由服务商账户决定。')}</p>
-                </div>
-              )}
-
-              {formSettings.provider !== 'smtp' ? (
+              {/* 发信通道与参数表单 */}
+              <div className="space-y-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/80 p-4">
                 <div>
                   <label className="block text-xs text-slate-500 mb-1">
-                    API Key / Access Token 密钥 <span className="text-rose-500 font-bold">[必填]</span>
+                    {tx('发信服务与加密方式')} <span className="text-rose-500 font-bold">[必填]</span>
+                  </label>
+                  <select
+                    value={formSettings.provider}
+                    onChange={e => setFormSettings({ ...formSettings, provider: e.target.value as any })}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100"
+                  >
+                    <option value="resend">Resend API (HTTPS，推荐)</option>
+                    <option value="smtp">SMTP (SSL 465 / STARTTLS 587，阿里云/腾讯企业邮箱通用)</option>
+                    <option value="sendcloud">{tx('SendCloud API (国内服务，按账户额度)')}</option>
+                    <option value="brevo">Brevo API (HTTPS)</option>
+                    <option value="sendgrid">Twilio SendGrid API (HTTPS)</option>
+                  </select>
+                </div>
+
+                {formSettings.provider === 'sendcloud' && (
+                  <div>
+                    <label className="block text-xs text-slate-500 mb-1">{tx('SendCloud API_USER（触发邮件账号）')}</label>
+                    <input type="text" value={formSettings.apiUser || ''} onChange={event => setFormSettings({ ...formSettings, apiUser: event.target.value })} placeholder={tx('从 SendCloud 控制台 API_USER 页面复制')} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-xs dark:border-slate-700 dark:bg-slate-800" />
+                    <p className="mt-1 text-[10px] text-slate-500">{tx('SendCloud API_USER 与 API_KEY 是两项独立凭据；免费额度、域名验证和发送权限由服务商账户决定。')}</p>
+                  </div>
+                )}
+
+                {formSettings.provider !== 'smtp' ? (
+                  <div>
+                    <label className="block text-xs text-slate-500 mb-1">
+                      API Key / Access Token 密钥 <span className="text-rose-500 font-bold">[必填]</span>
+                    </label>
+                    <input
+                      type="password"
+                      value={formSettings.apiKey}
+                      onChange={e => setFormSettings({ ...formSettings, apiKey: e.target.value })}
+                      placeholder="re_xxxxxxxxxxxxxx 或 key-xxxxxxxx"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 font-mono"
+                    />
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <div className="sm:col-span-2">
+                        <label className="block text-xs text-slate-500 mb-1">
+                          SMTP 发件服务器地址 <span className="text-rose-500 font-bold">[必填]</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={formSettings.smtpHost}
+                          onChange={e => setFormSettings({ ...formSettings, smtpHost: e.target.value })}
+                          placeholder="smtp.qiye.aliyun.com 或 smtp.exmail.qq.com"
+                          className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-slate-500 mb-1">
+                          端口 (Port) <span className="text-rose-500 font-bold">[必填]</span>
+                        </label>
+                        <input
+                          type="number"
+                          value={formSettings.smtpPort || 465}
+                          onChange={e => setFormSettings({ ...formSettings, smtpPort: parseInt(e.target.value) || 465 })}
+                          placeholder="465"
+                          className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 font-mono"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-xs text-slate-500 mb-1">
+                          加密方式 <span className="text-rose-500 font-bold">[必填]</span>
+                        </label>
+                        <select
+                          value={formSettings.smtpSecurity || 'ssl'}
+                          onChange={e => setFormSettings({
+                            ...formSettings,
+                            smtpSecurity: e.target.value as 'ssl' | 'starttls',
+                            smtpPort: e.target.value === 'ssl' ? 465 : 587,
+                          })}
+                          className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100"
+                        >
+                          <option value="ssl">SSL / Implicit TLS (465)</option>
+                          <option value="starttls">STARTTLS (587)</option>
+                        </select>
+                      </div>
+                      <p className="self-end text-[10px] text-slate-400 pb-2">推荐 SSL 465；STARTTLS 通常使用 587。</p>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-xs text-slate-500 mb-1">
+                          SMTP 账号 / 用户名 <span className="text-rose-500 font-bold">[必填]</span>
+                        </label>
+                        <input
+                          type="text"
+                          value={formSettings.smtpUser}
+                          onChange={e => setFormSettings({ ...formSettings, smtpUser: e.target.value })}
+                          placeholder="admin@yourdomain.com 或 resend"
+                          className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-slate-500 mb-1">
+                          SMTP 授权码 / 密码 <span className="text-rose-500 font-bold">[必填]</span>
+                        </label>
+                        <input
+                          type="password"
+                          value={formSettings.smtpPass}
+                          onChange={e => setFormSettings({ ...formSettings, smtpPass: e.target.value })}
+                          placeholder="客户端授权码或 Resend API Key"
+                          className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 font-mono"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-xs text-slate-500 mb-1">
+                    发信人地址 (From Header) <span className="text-rose-500 font-bold">[必填]</span>
                   </label>
                   <input
-                    type="password"
-                    value={formSettings.apiKey}
-                    onChange={e => setFormSettings({ ...formSettings, apiKey: e.target.value })}
-                    placeholder="re_xxxxxxxxxxxxxx 或 key-xxxxxxxx"
+                    type="text"
+                    value={formSettings.senderEmail}
+                    onChange={e => setFormSettings({ ...formSettings, senderEmail: e.target.value })}
+                    placeholder="Fox3 <service@yourdomain.com>"
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 font-mono"
                   />
                 </div>
-              ) : (
-                <div className="space-y-2">
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                    <div className="sm:col-span-2">
-                      <label className="block text-xs text-slate-500 mb-1">
-                        SMTP 发件服务器地址 <span className="text-rose-500 font-bold">[必填]</span>
-                      </label>
-                      <input
-                        type="text"
-                        value={formSettings.smtpHost}
-                        onChange={e => setFormSettings({ ...formSettings, smtpHost: e.target.value })}
-                        placeholder="smtp.resend.com"
-                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 font-mono"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-slate-500 mb-1">
-                        端口 (Port) <span className="text-rose-500 font-bold">[必填]</span>
-                      </label>
-                      <input
-                        type="number"
-                        value={formSettings.smtpPort || 465}
-                        onChange={e => setFormSettings({ ...formSettings, smtpPort: parseInt(e.target.value) || 465 })}
-                        placeholder="465"
-                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 font-mono"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-xs text-slate-500 mb-1">
-                        加密方式 <span className="text-rose-500 font-bold">[必填]</span>
-                      </label>
-                      <select
-                        value={formSettings.smtpSecurity || 'ssl'}
-                        onChange={e => setFormSettings({
-                          ...formSettings,
-                          smtpSecurity: e.target.value as 'ssl' | 'starttls',
-                          smtpPort: e.target.value === 'ssl' ? 465 : 587,
-                        })}
-                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100"
-                      >
-                        <option value="ssl">SSL / Implicit TLS</option>
-                        <option value="starttls">STARTTLS</option>
-                      </select>
-                    </div>
-                    <p className="self-end text-[10px] text-slate-400 pb-2">Resend 推荐 SSL 465；STARTTLS 通常使用 587。</p>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-xs text-slate-500 mb-1">
-                        SMTP 账号 / 用户名 <span className="text-rose-500 font-bold">[必填]</span>
-                      </label>
-                      <input
-                        type="text"
-                        value={formSettings.smtpUser}
-                        onChange={e => setFormSettings({ ...formSettings, smtpUser: e.target.value })}
-                        placeholder="resend"
-                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 font-mono"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-slate-500 mb-1">
-                        SMTP 授权码 / 密码 <span className="text-rose-500 font-bold">[必填]</span>
-                      </label>
-                      <input
-                        type="password"
-                        value={formSettings.smtpPass}
-                        onChange={e => setFormSettings({ ...formSettings, smtpPass: e.target.value })}
-                        placeholder="Resend API Key（re_...）"
-                        className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 font-mono"
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              <div>
-                <label className="block text-xs text-slate-500 mb-1">
-                  发信人地址 (From Header) <span className="text-rose-500 font-bold">[必填]</span>
-                </label>
-                <input
-                  type="text"
-                  value={formSettings.senderEmail}
-                  onChange={e => setFormSettings({ ...formSettings, senderEmail: e.target.value })}
-                  placeholder="service@whitefox.blog"
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-800 dark:text-slate-100 font-mono"
-                />
               </div>
 
-              <div className="border-t border-slate-100 dark:border-slate-800 pt-4">
-                <div className="p-3 rounded-xl border border-sky-200 dark:border-sky-900 bg-sky-50/70 dark:bg-sky-950/30 space-y-1 text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">
-                  <h5 className="font-bold text-slate-700 dark:text-slate-200">注册验证码邮件（服务端生成与校验）</h5>
-                  <p>验证码由 Pages Functions 安全随机生成并存入 D1/KV；注册访客的请求不会传入本机 SMTP 密钥、验证码位数或邮件正文。</p>
-                  <p>如需自定义，请在 Cloudflare Pages 的 Functions Variables/Secrets 设置 <code>VERIFY_CODE_LENGTH</code>（默认 6，范围 4–8）、<code>VERIFY_EMAIL_SUBJECT</code> 和 <code>VERIFY_EMAIL_TEMPLATE</code>。模板变量：{'{{code}}'}、{'{{username}}'}、{'{{email}}'}；未设置时使用系统默认内容。</p>
-                </div>
+              {/* 发信区专属说明书：Resend 发信详细流程 */}
+              <div className="p-4 rounded-xl border border-emerald-200/80 dark:border-emerald-900/60 bg-emerald-50/50 dark:bg-emerald-950/20 space-y-2 text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">
+                <h5 className="font-bold text-emerald-800 dark:text-emerald-300 text-xs">Resend 发信详细流程（逐步操作指南）</h5>
+                <ol className="list-decimal pl-4 space-y-1">
+                  <li><b>域名认证（Domain DNS）</b>：登录 <code className="font-mono">resend.com</code> → <b>Domains</b> → Add Domain 添加你的发信域名，按提示在域名 DNS 后台添加 SPF（TXT）、DKIM（TXT）记录并点击 <b>Verify DNS Records</b> 至状态变为 Verified。</li>
+                  <li><b>创建发信 API Key</b>：进入左侧 <b>API Keys</b> → <b>Create API Key</b>，权限选择 <i>Sending access</i> 或 <i>Full access</i>，创建后立即复制（<code className="font-mono">re_...</code>，仅显示一次）。</li>
+                  <li><b>填写配置（二选一或同时设置）</b>：
+                    <span className="block pl-2 mt-0.5 text-slate-500 dark:text-slate-400">
+                      • <b>后台环境变量（用于注册验证码/订单通知/后台发信）</b>：在 Cloudflare Pages → Variables and Secrets 设置 <code className="font-mono">MAIL_PROVIDER=resend</code>、<code className="font-mono">RESEND_API_KEY=re_...</code>、<code className="font-mono">MAIL_SENDER=Fox3 &lt;no-reply@已验证域名&gt;</code> 并重新部署。<br/>
+                      • <b>前台本机配置（用于手动写信快速测试）</b>：在上方服务下拉选择 <b>Resend API</b>，填入 API Key 与发信人地址并点击保存。
+                    </span>
+                  </li>
+                  <li><b>验证发信</b>：点击上方“发送后台测试邮件”或“发送前台测试邮件”，确认发件人邮箱真实收到测试邮件即完成发信对接（若改走 SMTP，填写 <code className="font-mono">smtp.resend.com</code>、端口 <code className="font-mono">465</code> SSL、用户名 <code className="font-mono">resend</code>、密码填 API Key）。</li>
+                </ol>
+              </div>
+
+              {/* 注册验证码配置说明 */}
+              <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-slate-900/60 space-y-1 text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">
+                <h5 className="font-bold text-slate-700 dark:text-slate-200">注册验证码与自动邮件后端说明</h5>
+                <p>验证码由服务端随机生成并存入 D1（<code className="font-mono">DB</code>）或 KV，支持 Cloudflare Variables/Secrets 自定义：<code className="font-mono">VERIFY_CODE_LENGTH</code>（默认 6，范围 4–8）、<code className="font-mono">VERIFY_EMAIL_SUBJECT</code>、<code className="font-mono">VERIFY_EMAIL_TEMPLATE</code>（可用变量 <code className="font-mono">{'{{code}}'}</code>、<code className="font-mono">{'{{username}}'}</code>、<code className="font-mono">{'{{email}}'}</code>）。阿里云 DirectMail、腾讯云 SES、Brevo、SendGrid、SendCloud 均可配置于后台环境变量用于注册发信。</p>
               </div>
             </div>
 
-            {/* IMAP & Resend Receiving Section */}
-            <div className="space-y-4 rounded-2xl border border-slate-200 p-4 dark:border-slate-700">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider">
-                  收件通道：阿里云邮箱 / 腾讯企业邮箱 IMAP 收信 & Resend Receiving
-                </h4>
-                <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${inboundServerReady ? 'bg-emerald-50 text-emerald-700' : backendMailStatusAvailable === null || backendMailStatusAvailable === false ? 'bg-amber-50 text-amber-700' : 'bg-rose-50 text-rose-600'}`}>
-                  {backendMailStatusAvailable === null ? '○ 状态检测中' : backendMailStatusAvailable === false ? '○ 状态不可读取' : inboundServerReady ? `● 已就绪${inboundServerStatus?.imapConfigured ? ` (IMAP: ${inboundServerStatus.imapHost})` : ''}` : '○ 后台收件未配置（可使用下方前台 IMAP 拉取）'}
+            {/* ==================== 区域二：收信区 (Inbound) ==================== */}
+            <div className="space-y-4 rounded-2xl border-2 border-indigo-200/80 dark:border-indigo-900/60 bg-indigo-50/15 dark:bg-indigo-950/10 p-5">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-indigo-100 dark:border-indigo-900/50 pb-3">
+                <div>
+                  <h4 className="text-sm font-bold text-indigo-700 dark:text-indigo-300 flex items-center gap-2">
+                    <Inbox className="w-4 h-4" />
+                    <span>二、收信区（接收邮件设置 &amp; Resend / IMAP 收信说明）</span>
+                  </h4>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                    支持两种收信方案：1）Resend Receiving + Webhook 实时推送入库；2）阿里云/腾讯企业邮箱 IMAP 主动拉取收件箱
+                  </p>
+                </div>
+                <span className={`text-[10px] px-2.5 py-1 rounded-full font-bold ${inboundServerReady ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : backendMailStatusAvailable === null || backendMailStatusAvailable === false ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-rose-50 text-rose-600 border border-rose-200'}`}>
+                  {backendMailStatusAvailable === null ? '○ 状态检测中' : backendMailStatusAvailable === false ? '○ 状态不可读取' : inboundServerReady ? `● 后台收件已就绪${inboundServerStatus?.imapConfigured ? ` (IMAP: ${inboundServerStatus.imapHost})` : ''}${inboundServerStatus?.resendConfigured ? ' (Resend Webhook)' : ''}` : '○ 后台收件未就绪（可使用下方前台 IMAP 拉取）'}
                 </span>
               </div>
 
-              <div className="p-4 rounded-xl border border-sky-200 dark:border-sky-900 bg-sky-50/40 dark:bg-sky-950/20 space-y-3">
+              {/* 收信区方式 1：Resend 收信详细流程 */}
+              <div className="p-4 rounded-xl border border-indigo-200 dark:border-indigo-900/60 bg-indigo-50/50 dark:bg-indigo-950/30 space-y-2 text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-xs font-bold text-slate-800 dark:text-slate-100">IMAP 收件箱配置（支持阿里云邮箱免费版 / 腾讯企业邮箱免费版）</span>
+                  <h5 className="font-bold text-indigo-800 dark:text-indigo-200 text-xs">方式 A：Resend 收信详细流程（Receiving + Webhook 逐步操作）</h5>
+                  <span className="text-[10px] px-2 py-0.5 rounded bg-white dark:bg-slate-900 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300">
+                    当前状态：{inboundServerStatus?.resendConfigured ? '已检测到 DB + RESEND_API_KEY + RESEND_WEBHOOK_SECRET' : '缺少 DB / RESEND_API_KEY / RESEND_WEBHOOK_SECRET 中一项或多项'}
+                  </span>
+                </div>
+                <ol className="list-decimal pl-4 space-y-1">
+                  <li><b>开启域名 Receiving 并配置 MX</b>：在 Resend → <b>Domains</b> 进入域名详情，打开 <b>Receiving</b> 开关，并按 Resend 页面提供的收件 MX 主机与优先级，在域名 DNS 后台添加对应 <b>MX 记录</b>。（若主域名已绑定腾讯/阿里云个人邮箱 MX，建议在 Resend 添加专用子域名如 <code className="font-mono">inbox.yourdomain.com</code> 避免 MX 冲突。）</li>
+                  <li><b>创建 Webhook 接收端</b>：进入 Resend → <b>Webhooks</b> → <b>Add Webhook</b>，Endpoint URL 填入你自己的站点公网 HTTPS 地址：<code className="font-mono font-semibold">https://你的域名/api/webhook</code>（同时兼容 <code className="font-mono">/api/mail/webhook</code>），订阅事件只勾选 <code className="font-mono font-semibold">email.received</code>。</li>
+                  <li><b>保存 Webhook Signing Secret 并重新部署</b>：创建 Webhook 后复制右侧显示的 Signing Secret（格式 <code className="font-mono">whsec_...</code>），进入 Cloudflare Pages → Settings → Variables and Secrets：
+                    <span className="block pl-2 mt-0.5 text-slate-500 dark:text-slate-400">
+                      • Secret 1：<code className="font-mono">RESEND_WEBHOOK_SECRET=whsec_...</code>（用于 Svix 请求体签名与时间戳防重放校验）<br/>
+                      • Secret 2：<code className="font-mono">RESEND_API_KEY=re_...</code>（权限需支持读取 Receiving，用于收到 Webhook 后拉取完整来信正文）<br/>
+                      • Binding：确认已绑定 D1 数据库 <code className="font-mono">DB</code>（用于持久化写入 <code className="font-mono">fox3_inbound_emails</code> 表）。完成后重新部署一次项目。
+                    </span>
+                  </li>
+                  <li><b>实测收信</b>：使用外部邮箱向你配置的 Resend 收件域名发信（如 <code className="font-mono">hello@你的收件域名</code>）；Resend 触发 Webhook 后，服务端自动拉取正文并保存至本站“收件箱”，点击顶部“刷新收件箱”即可阅读与回复。</li>
+                </ol>
+                <p className="text-[10px] text-slate-500">注：仅把邮件转发到管理员个人邮箱不会自动写入本站 D1 收件箱；如使用阿里云/腾讯企业邮箱，请直接配置下方 IMAP 收信拉取。</p>
+              </div>
+
+              {/* 收信区方式 2：IMAP 收件箱配置 */}
+              <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/80 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-xs font-bold text-slate-800 dark:text-slate-100">方式 B：IMAP 主动拉取收信配置（支持阿里云邮箱免费版 / 腾讯企业邮箱免费版）</span>
                   <button
                     type="button"
                     onClick={() => setFormSettings(prev => ({
@@ -869,7 +904,7 @@ export const MailSection: React.FC = () => {
                     }))}
                     className="text-[11px] font-semibold text-sky-600 hover:underline"
                   >
-                    从上方 SMTP 账号密码同步
+                    从发信区 SMTP 账号密码同步填入
                   </button>
                 </div>
 
@@ -881,7 +916,7 @@ export const MailSection: React.FC = () => {
                       value={formSettings.imapConfig?.host || ''}
                       onChange={e => setFormSettings({ ...formSettings, imapConfig: { host: e.target.value, port: formSettings.imapConfig?.port || 993, user: formSettings.imapConfig?.user || '', pass: formSettings.imapConfig?.pass || '', tls: formSettings.imapConfig?.tls ?? true } })}
                       placeholder="imap.qiye.aliyun.com 或 imap.exmail.qq.com"
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-mono"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-mono"
                     />
                   </div>
                   <div>
@@ -890,7 +925,7 @@ export const MailSection: React.FC = () => {
                       type="number"
                       value={formSettings.imapConfig?.port || 993}
                       onChange={e => setFormSettings({ ...formSettings, imapConfig: { host: formSettings.imapConfig?.host || '', port: parseInt(e.target.value, 10) || 993, user: formSettings.imapConfig?.user || '', pass: formSettings.imapConfig?.pass || '', tls: (parseInt(e.target.value, 10) || 993) !== 143 } })}
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-mono"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-mono"
                     />
                   </div>
                 </div>
@@ -903,7 +938,7 @@ export const MailSection: React.FC = () => {
                       value={formSettings.imapConfig?.user || ''}
                       onChange={e => setFormSettings({ ...formSettings, imapConfig: { host: formSettings.imapConfig?.host || '', port: formSettings.imapConfig?.port || 993, user: e.target.value, pass: formSettings.imapConfig?.pass || '', tls: formSettings.imapConfig?.tls ?? true } })}
                       placeholder="admin@yourdomain.com"
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-mono"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-mono"
                     />
                   </div>
                   <div>
@@ -913,7 +948,7 @@ export const MailSection: React.FC = () => {
                       value={formSettings.imapConfig?.pass || ''}
                       onChange={e => setFormSettings({ ...formSettings, imapConfig: { host: formSettings.imapConfig?.host || '', port: formSettings.imapConfig?.port || 993, user: formSettings.imapConfig?.user || '', pass: e.target.value, tls: formSettings.imapConfig?.tls ?? true } })}
                       placeholder="邮箱密码或专用授权码"
-                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-mono"
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs font-mono"
                     />
                   </div>
                 </div>
@@ -946,16 +981,19 @@ export const MailSection: React.FC = () => {
                     </>
                   )}
                 </div>
+
+                <p className="text-[10px] text-slate-500">如使用后台环境变量配置 IMAP，请在 Cloudflare Pages / 服务端配置 <code className="font-mono">IMAP_HOST</code>、<code className="font-mono">IMAP_PORT=993</code>、<code className="font-mono">IMAP_USER</code>、<code className="font-mono">IMAP_PASS</code>（及 <code className="font-mono">DB</code>）。</p>
               </div>
 
-              <div className="p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 space-y-2 text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">
-                <p><b>Resend Webhook（可选）：</b>在 Resend Dashboard → Emails → Receiving 启用收件域名与 <code>email.received</code> Webhook（指向 <code>/api/webhook</code>，配置 <code>RESEND_WEBHOOK_SECRET</code>），与 IMAP 收件箱共用同一个收件箱列表。</p>
-                {inboxLoadError && <p className="text-rose-600 dark:text-rose-400">收件箱读取提示：{inboxLoadError}</p>}
-              </div>
+              {inboxLoadError && (
+                <div className="p-3 rounded-xl border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/30 text-[11px] text-rose-600 dark:text-rose-400">
+                  收件箱读取提示：{inboxLoadError}
+                </div>
+              )}
 
               <div className="p-3 rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50/70 dark:bg-amber-950/30 text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">
                 <b className="text-slate-700 dark:text-slate-200">安全与限制：</b>
-                SMTP 与 IMAP 连接均在服务端完成域名校验，禁止访问内网/回环地址；发信/拉取收件箱与测试操作均校验管理员会话。
+                SMTP 与 IMAP 连接均在服务端完成域名校验，禁止访问内网/回环地址；发信、拉取收件箱与测试操作均校验有效管理员会话。收件箱正文保存在 D1（保留最新 500 封、180 天内来信）。
               </div>
             </div>
           </div>
@@ -963,7 +1001,7 @@ export const MailSection: React.FC = () => {
           {/* Explicit Save Configuration Button */}
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-4 border-t border-slate-100 dark:border-slate-800">
             <span className="text-xs text-slate-400">
-              邮箱配置（含密码/API Key）将持久保存在此浏览器本机，采用浏览器本地存储，不加密且不会同步到其它设备；导出备份仍会排除密钥。请勿在公用设备保存。
+              前台邮箱配置（含密码/API Key）将保存在此浏览器本机（localStorage，未加密且不跨设备同步；导出备份会排除密钥）。请勿在公用设备保存。
             </span>
             <div className="flex items-center gap-2 self-end sm:self-auto">
               <button
@@ -971,7 +1009,7 @@ export const MailSection: React.FC = () => {
                 onClick={() => {
                   updateEmailSettings(formSettings);
                   setIsSaved(true);
-                  showToast('邮箱配置已保存。发信是否连通以实际发送结果为准。', 'success');
+                  showToast('邮箱配置已保存。发信与收信连通性以实际测试结果为准。', 'success');
                   setTimeout(() => {
                     setIsSaved(false);
                     setShowConfig(false);

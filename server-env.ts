@@ -299,6 +299,23 @@ function createR2BucketShim(storageDir: string) {
       const obj = objects.get(key);
       return obj ? toR2Response(obj) : null;
     },
+    async head(key: string) {
+      const obj = objects.get(key);
+      if (!obj) return null;
+      return {
+        key: obj.key,
+        size: obj.data.byteLength,
+        etag: obj.httpEtag,
+        httpEtag: obj.httpEtag,
+        uploaded: obj.uploaded,
+        httpMetadata: obj.httpMetadata,
+        customMetadata: obj.customMetadata,
+        writeHttpMetadata(headers: Headers) {
+          if (obj.httpMetadata?.contentType) headers.set('Content-Type', obj.httpMetadata.contentType);
+          if (obj.httpMetadata?.contentDisposition) headers.set('Content-Disposition', obj.httpMetadata.contentDisposition);
+        },
+      };
+    },
     async delete(key: string | string[]) {
       const keys = Array.isArray(key) ? key : [key];
       for (const k of keys) {
@@ -394,24 +411,99 @@ function createR2BucketShim(storageDir: string) {
   };
 }
 
-function createKvNamespaceShim() {
-  const store = new Map<string, { value: string; expiresAt: number | null }>();
+function createKvNamespaceShim(storageDir: string) {
+  const kvFile = path.join(storageDir, 'kv.json');
+  const store = new Map<string, { value: string; expiresAt: number | null; metadata?: Record<string, unknown> }>();
+
+  try {
+    if (fs.existsSync(kvFile)) {
+      const saved = JSON.parse(fs.readFileSync(kvFile, 'utf8')) as Record<string, { value: string; expiresAt: number | null; metadata?: Record<string, unknown> }>;
+      const now = Date.now();
+      for (const [k, entry] of Object.entries(saved || {})) {
+        if (!entry.expiresAt || entry.expiresAt > now) {
+          store.set(k, entry);
+        }
+      }
+    }
+  } catch {
+    // Non-fatal if KV disk cache cannot be read
+  }
+
+  const persistKv = () => {
+    try {
+      fs.mkdirSync(storageDir, { recursive: true });
+      const out: Record<string, { value: string; expiresAt: number | null; metadata?: Record<string, unknown> }> = {};
+      const now = Date.now();
+      for (const [k, entry] of store.entries()) {
+        if (!entry.expiresAt || entry.expiresAt > now) {
+          out[k] = entry;
+        }
+      }
+      fs.writeFileSync(kvFile, JSON.stringify(out));
+    } catch {
+      // Ignore write failures in read-only runtimes
+    }
+  };
+
+  const readEntry = (key: string) => {
+    const entry = store.get(key);
+    if (!entry) return null;
+    if (entry.expiresAt && entry.expiresAt <= Date.now()) {
+      store.delete(key);
+      persistKv();
+      return null;
+    }
+    return entry;
+  };
+
   return {
-    async get(key: string) {
-      const entry = store.get(key);
+    async get(key: string, typeOrOptions?: string | { type?: string }) {
+      const entry = readEntry(key);
       if (!entry) return null;
-      if (entry.expiresAt && entry.expiresAt <= Date.now()) {
-        store.delete(key);
-        return null;
+      const type = typeof typeOrOptions === 'string' ? typeOrOptions : typeOrOptions?.type;
+      if (type === 'json') {
+        try { return JSON.parse(entry.value); } catch { return null; }
+      }
+      if (type === 'arrayBuffer') {
+        return new TextEncoder().encode(entry.value).buffer;
       }
       return entry.value;
     },
-    async put(key: string, value: string, options?: { expirationTtl?: number }) {
-      const expiresAt = options?.expirationTtl ? Date.now() + Number(options.expirationTtl) * 1000 : null;
-      store.set(key, { value: String(value), expiresAt });
+    async getWithMetadata(key: string, typeOrOptions?: string | { type?: string }) {
+      const entry = readEntry(key);
+      if (!entry) return { value: null, metadata: null };
+      const value = await this.get(key, typeOrOptions);
+      return { value, metadata: entry.metadata ?? null };
+    },
+    async put(key: string, value: string, options?: { expirationTtl?: number; expiration?: number; metadata?: Record<string, unknown> }) {
+      const expiresAt = options?.expirationTtl
+        ? Date.now() + Number(options.expirationTtl) * 1000
+        : options?.expiration
+          ? Number(options.expiration) * 1000
+          : null;
+      store.set(key, { value: String(value), expiresAt, metadata: options?.metadata });
+      persistKv();
     },
     async delete(key: string) {
       store.delete(key);
+      persistKv();
+    },
+    async list(options?: { prefix?: string; limit?: number }) {
+      const prefix = options?.prefix || '';
+      const limit = Math.max(1, Number(options?.limit || 1000));
+      const now = Date.now();
+      const keys: Array<{ name: string; expiration?: number; metadata?: Record<string, unknown> }> = [];
+      for (const [k, entry] of store.entries()) {
+        if (entry.expiresAt && entry.expiresAt <= now) continue;
+        if (prefix && !k.startsWith(prefix)) continue;
+        keys.push({
+          name: k,
+          ...(entry.expiresAt ? { expiration: Math.floor(entry.expiresAt / 1000) } : {}),
+          ...(entry.metadata ? { metadata: entry.metadata } : {}),
+        });
+        if (keys.length >= limit) break;
+      }
+      return { keys, list_complete: true, cacheStatus: null };
     },
   };
 }
@@ -546,7 +638,7 @@ export async function getRuntimeEnv(): Promise<Record<string, any>> {
   const d1 = createD1DatabaseShim(sqlDb, persistDb);
 
   // Run idempotent SQL migrations from /migrations
-  const migrationFiles = ['0001_site_content.sql', '0002_commerce.sql', '0003_order_trash.sql'];
+  const migrationFiles = ['0001_site_content.sql', '0002_commerce.sql', '0003_order_trash.sql', '0004_chat_trash.sql'];
   for (const fileName of migrationFiles) {
     const filePath = path.join(rootDir, 'migrations', fileName);
     if (!fs.existsSync(filePath)) continue;
@@ -554,7 +646,7 @@ export async function getRuntimeEnv(): Promise<Record<string, any>> {
     try {
       sqlDb.exec(sqlText);
     } catch (err: any) {
-      // Ignore duplicate column error if 0003_order_trash.sql already ran
+      // Ignore duplicate column error if alter-table migration already ran
       if (!String(err?.message || '').includes('duplicate column name')) {
         console.warn(`[server-env] Migration ${fileName} notice:`, err?.message || err);
       }
@@ -564,7 +656,7 @@ export async function getRuntimeEnv(): Promise<Record<string, any>> {
   persistDb();
 
   const r2 = createR2BucketShim(dataDir);
-  const kv = createKvNamespaceShim();
+  const kv = createKvNamespaceShim(dataDir);
 
   cachedRuntimeEnv = { DB: d1, R2_BUCKET: r2, KV: kv };
   return buildEnvView(d1, r2, kv);
