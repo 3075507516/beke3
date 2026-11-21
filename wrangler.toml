@@ -1,0 +1,23 @@
+name = "fox3"
+compatibility_date = "2024-11-01"
+pages_build_output_dir = "dist"
+
+# Cloudflare Pages 资源绑定说明：
+# - 在 Cloudflare Dashboard -> Workers & Pages -> Settings -> Bindings 中绑定：
+#   1) D1 Database: 变量名填写 DB
+#   2) R2 Bucket (可选): 变量名填写 R2_BUCKET
+#   3) KV Namespace (可选): 变量名填写 KV
+# - 若使用本地 wrangler pages dev 调试，可在下方取消注释并填入你自己的资源 ID：
+#
+# [[d1_databases]]
+# binding = "DB"
+# database_name = "fox3-db"
+# database_id = "<your-d1-database-id>"
+#
+# [[r2_buckets]]
+# binding = "R2_BUCKET"
+# bucket_name = "fox3-r2"
+#
+# [[kv_namespaces]]
+# binding = "KV"
+# id = "<your-kv-namespace-id>"

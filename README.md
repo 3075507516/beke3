@@ -85,16 +85,17 @@ Cloudflare Pages Functions 从部署环境读取至少 6 字符的 `ADMIN_PASSWO
 
 ---
 
-### 2. Cloudflare Pages 直接上传部署 (Direct Upload)
+### 2. Cloudflare Pages 直接上传部署 (Direct Upload / CLI)
 
-适合免 Git 仓库交付**静态前端**。`npm run build` 会生成 `dist/` 与 `dist-upload.zip`，其中 ZIP 仅含静态产物。Direct Upload 不部署仓库 `functions/`，也不会创建 D1/R2/KV 绑定；注册/重置、服务端验证码与邮件、管理员云同步和远程文件 API 均不可用：
+`npm run build` 会在 `dist/` 目录自动生成前端静态产物，以及 Cloudflare Pages Advanced Mode 所需的 **`dist/_worker.js`** 与 **`dist/_routes.json`**（同时打包 `dist-upload.zip`），使 Direct Upload 上传部署与 Git 部署拥有完整的 `/api/*` 后端能力：
 1. 本地执行构建与打包命令：
    ```bash
    npm run build
    ```
-2. 构建脚本会在根目录下自动生成 `dist-upload.zip` 与 `dist/` 编译输出目录。
-3. 登录 Cloudflare Pages 控制台，选择 **Create application** -> **Pages** -> **Direct Upload**。
-4. 填写项目名称（如 `fox3`），上传 `dist` 文件夹或静态上传包。要启用服务端功能，请改用上方 Git 集成部署并配置 Functions 与资源绑定。
+2. 构建脚本会在 `dist/` 内自动打包全栈路由 `dist/_worker.js` + `dist/_routes.json`，并在根目录生成 `dist-upload.zip`。
+3. 登录 Cloudflare Dashboard，进入 **Workers & Pages** -> **Create application** -> **Pages** -> **Direct Upload**，上传整个 `dist/` 文件夹或 `dist-upload.zip`（或使用 CLI 运行 `npx wrangler pages deploy dist`）。
+4. 部署后同样可在 **Settings -> Functions / Variables and Secrets -> Bindings** 绑定 `DB`（D1）、`R2_BUCKET`（R2）、`KV` 及管理员/支付/邮件环境变量，即可完整启用跨设备同步、登录注册、支付与邮件收发。
+5. 项目根目录下同时提供 `wrangler.toml`，开箱支持 `npx wrangler pages dev dist` 与 `npx wrangler pages deploy dist`。
 
 ---
 
@@ -106,18 +107,22 @@ Cloudflare Pages Functions 从部署环境读取至少 6 字符的 `ADMIN_PASSWO
 
 ---
 
-### 4. Docker & docker-compose 一键容器化部署
+### 4. Docker & docker-compose 一键全栈容器化部署
 
-本项目已提供精简多阶段构建 `Dockerfile` 与 `docker-compose.yml`：
+本项目已升级为全栈 Node 22 + 内置持久化 SQLite/R2 兼容层的多阶段构建 `Dockerfile` 与 `docker-compose.yml`（默认持久化数据卷 `fox3_data:/app/.data`）：
 
 ```bash
 # 1. 克隆代码
 git clone <your-repo-url> && cd fox3
 
-# 2. 一键构建并启动
+# 2. (可选) 设置环境变量，例如管理员密码与会话密钥
+export ADMIN_PASSWORD="your-strong-password"
+export ADMIN_SESSION_SECRET="your-at-least-32-chars-random-secret-key"
+
+# 3. 一键构建并启动
 docker-compose up -d --build
 
-# 3. 访问站点
+# 4. 访问站点
 http://<你的服务器IP>:8080
 ```
 

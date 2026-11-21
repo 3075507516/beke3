@@ -1,6 +1,4 @@
-import net from 'node:net';
-import tls from 'node:tls';
-import { assertPublicMailHost } from './mail';
+import { assertPublicMailHost, getNodeMailRuntime } from './mail';
 
 export interface ImapSettings {
   host: string;
@@ -25,23 +23,47 @@ interface ImapCommandResult {
   status: 'OK' | 'NO' | 'BAD';
   text: string;
   lines: string[];
-  literals: Buffer[];
+  literals: Uint8Array[];
+}
+
+const encoder = new TextEncoder();
+const utf8Decoder = new TextDecoder('utf-8', { fatal: false });
+const latin1Decoder = new TextDecoder('iso-8859-1', { fatal: false });
+
+function concatBytes(left: Uint8Array, right: Uint8Array): Uint8Array {
+  if (left.length === 0) return right;
+  if (right.length === 0) return left;
+  const merged = new Uint8Array(left.length + right.length);
+  merged.set(left, 0);
+  merged.set(right, left.length);
+  return merged;
+}
+
+function base64ToBytes(b64: string): Uint8Array {
+  const clean = b64.replace(/[^A-Za-z0-9+/=]/g, '');
+  if (!clean) return new Uint8Array(0);
+  const bin = atob(clean);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i += 1) {
+    bytes[i] = bin.charCodeAt(i);
+  }
+  return bytes;
 }
 
 function escapeImapQuoted(value: string): string {
   return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
-function decodeCharsetBuffer(buf: Buffer, charsetRaw = 'utf-8'): string {
+function decodeCharsetBytes(buf: Uint8Array, charsetRaw = 'utf-8'): string {
   const charset = charsetRaw.trim().toLowerCase().replace(/^["']|["']$/g, '') || 'utf-8';
   const normalized = charset === 'gb2312' ? 'gbk' : charset;
   try {
     return new TextDecoder(normalized, { fatal: false }).decode(buf);
   } catch {
     try {
-      return new TextDecoder('utf-8', { fatal: false }).decode(buf);
+      return utf8Decoder.decode(buf);
     } catch {
-      return buf.toString('utf8');
+      return latin1Decoder.decode(buf);
     }
   }
 }
@@ -58,11 +80,11 @@ function decodeQuotedPrintable(input: string, charset = 'utf-8'): string {
       if (ch <= 0xff) {
         bytes.push(ch);
       } else {
-        for (const b of Buffer.from(normalized[i], 'utf8')) bytes.push(b);
+        for (const b of encoder.encode(normalized[i])) bytes.push(b);
       }
     }
   }
-  return decodeCharsetBuffer(Buffer.from(bytes), charset);
+  return decodeCharsetBytes(new Uint8Array(bytes), charset);
 }
 
 function decodeRfc2047(value: string): string {
@@ -72,8 +94,8 @@ function decodeRfc2047(value: string): string {
     try {
       const enc = String(encoding).toUpperCase();
       if (enc === 'B') {
-        const buf = Buffer.from(String(text).replace(/\s+/g, ''), 'base64');
-        return decodeCharsetBuffer(buf, String(charset));
+        const bytes = base64ToBytes(String(text));
+        return decodeCharsetBytes(bytes, String(charset));
       }
       if (enc === 'Q') {
         const replaced = String(text).replace(/_/g, ' ');
@@ -154,12 +176,15 @@ function extractBodyContent(headers: Record<string, string>, rawBody: string): {
 
   let decoded = rawBody;
   if (transferEncoding === 'base64') {
-    const clean = rawBody.replace(/[^A-Za-z0-9+/=]/g, '');
-    decoded = decodeCharsetBuffer(Buffer.from(clean, 'base64'), charset);
+    decoded = decodeCharsetBytes(base64ToBytes(rawBody), charset);
   } else if (transferEncoding === 'quoted-printable') {
     decoded = decodeQuotedPrintable(rawBody, charset);
-  } else if (charset.toLowerCase() !== 'utf-8' && charset.toLowerCase() !== 'utf8') {
-    decoded = decodeCharsetBuffer(Buffer.from(rawBody, 'latin1'), charset);
+  } else {
+    const bytes = new Uint8Array(rawBody.length);
+    for (let i = 0; i < rawBody.length; i += 1) {
+      bytes[i] = rawBody.charCodeAt(i) & 0xff;
+    }
+    decoded = decodeCharsetBytes(bytes, charset);
   }
 
   if (/text\/html/i.test(contentType)) {
@@ -168,8 +193,8 @@ function extractBodyContent(headers: Record<string, string>, rawBody: string): {
   return { text: decoded.trim(), html: '' };
 }
 
-function parseRawRfc822(rawBuffer: Buffer, fallbackUid: string, fallbackInternalDate?: string): ImapMessage {
-  const latin1 = rawBuffer.slice(0, 512 * 1024).toString('latin1');
+function parseRawRfc822(rawBytes: Uint8Array, fallbackUid: string, fallbackInternalDate?: string): ImapMessage {
+  const latin1 = latin1Decoder.decode(rawBytes.subarray(0, 512 * 1024));
   const { headers, body } = parseHeadersAndBody(latin1);
   const subjectRaw = decodeRfc2047(headers['subject'] || '');
   const senderRaw = decodeRfc2047(headers['from'] || '');
@@ -192,21 +217,27 @@ function parseRawRfc822(rawBuffer: Buffer, fallbackUid: string, fallbackInternal
   };
 }
 
-class NodeImapClient {
-  private socket: net.Socket | tls.TLSSocket;
-  private buf = Buffer.alloc(0);
-  private tagCounter = 0;
+interface ImapTransport {
+  readLine(): Promise<string>;
+  readExact(length: number): Promise<Uint8Array>;
+  write(data: string): Promise<void>;
+  close(): void;
+}
+
+class NodeImapTransport implements ImapTransport {
+  private socket: any;
+  private buf: Uint8Array = new Uint8Array(0);
   private closedError: Error | null = null;
   private onProgress: (() => void) | null = null;
 
-  constructor(socket: net.Socket | tls.TLSSocket) {
+  constructor(socket: any) {
     this.socket = socket;
     socket.setTimeout(20000);
-    socket.on('data', chunk => {
-      this.buf = Buffer.concat([this.buf, chunk]);
+    socket.on('data', (chunk: Uint8Array) => {
+      this.buf = concatBytes(this.buf, chunk);
       this.onProgress?.();
     });
-    socket.on('error', err => {
+    socket.on('error', (err: Error) => {
       this.closedError = err instanceof Error ? err : new Error(String(err || 'IMAP 连接异常'));
       this.onProgress?.();
     });
@@ -223,38 +254,125 @@ class NodeImapClient {
   private waitForMore(): Promise<void> {
     if (this.closedError) return Promise.reject(this.closedError);
     return new Promise((resolve, reject) => {
-      const check = () => {
+      this.onProgress = () => {
         this.onProgress = null;
         if (this.closedError) reject(this.closedError);
         else resolve();
       };
-      this.onProgress = check;
     });
   }
 
-  private async readLine(): Promise<string> {
+  async readLine(): Promise<string> {
     while (true) {
-      const idx = this.buf.indexOf(0x0a); // \n
+      const idx = this.buf.indexOf(0x0a);
       if (idx >= 0) {
         const lineBuf = this.buf.subarray(0, idx);
         this.buf = this.buf.subarray(idx + 1);
-        return lineBuf.toString('utf8').replace(/\r$/, '');
+        return utf8Decoder.decode(lineBuf).replace(/\r$/, '');
       }
       await this.waitForMore();
     }
   }
 
-  private async readExact(length: number): Promise<Buffer> {
+  async readExact(length: number): Promise<Uint8Array> {
     while (this.buf.length < length) {
       await this.waitForMore();
     }
-    const slice = Buffer.from(this.buf.subarray(0, length));
+    const slice = this.buf.slice(0, length);
     this.buf = this.buf.subarray(length);
     return slice;
   }
 
+  write(data: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      this.socket.write(data, (err?: Error | null) => (err ? reject(err) : resolve()));
+    });
+  }
+
+  close() {
+    try { this.socket.end(); } catch {}
+    try { this.socket.destroy(); } catch {}
+  }
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms);
+    promise.then(
+      val => {
+        clearTimeout(timer);
+        resolve(val);
+      },
+      err => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
+class CloudflareImapTransport implements ImapTransport {
+  private socket: any;
+  private reader: ReadableStreamDefaultReader<Uint8Array>;
+  private writer: WritableStreamDefaultWriter<Uint8Array>;
+  private buf: Uint8Array = new Uint8Array(0);
+
+  constructor(socket: any) {
+    this.socket = socket;
+    this.reader = socket.readable.getReader();
+    this.writer = socket.writable.getWriter();
+  }
+
+  private async pullMore(): Promise<void> {
+    const result = await withTimeout(this.reader.read(), 20000, 'IMAP 操作超时（20 秒无响应）');
+    if (result.done) {
+      throw new Error('IMAP 服务器已断开连接');
+    }
+    this.buf = concatBytes(this.buf, result.value);
+  }
+
+  async readLine(): Promise<string> {
+    while (true) {
+      const idx = this.buf.indexOf(0x0a);
+      if (idx >= 0) {
+        const lineBuf = this.buf.subarray(0, idx);
+        this.buf = this.buf.subarray(idx + 1);
+        return utf8Decoder.decode(lineBuf).replace(/\r$/, '');
+      }
+      await this.pullMore();
+    }
+  }
+
+  async readExact(length: number): Promise<Uint8Array> {
+    while (this.buf.length < length) {
+      await this.pullMore();
+    }
+    const slice = this.buf.slice(0, length);
+    this.buf = this.buf.subarray(length);
+    return slice;
+  }
+
+  async write(data: string): Promise<void> {
+    await withTimeout(this.writer.write(encoder.encode(data)), 20000, 'IMAP 写入超时');
+  }
+
+  close() {
+    try { this.reader.releaseLock(); } catch {}
+    try { this.writer.releaseLock(); } catch {}
+    try { void this.socket.close(); } catch {}
+  }
+}
+
+class ImapClient {
+  private transport: ImapTransport;
+  private tagCounter = 0;
+
+  constructor(transport: ImapTransport) {
+    this.transport = transport;
+  }
+
   async readGreeting(): Promise<void> {
-    const line = await this.readLine();
+    const line = await this.transport.readLine();
     if (!/^\*\s+(OK|PREAUTH)/i.test(line)) {
       throw new Error(`IMAP 服务器未返回就绪响应: ${line.slice(0, 120)}`);
     }
@@ -262,14 +380,12 @@ class NodeImapClient {
 
   async command(cmd: string): Promise<ImapCommandResult> {
     const tag = `A${++this.tagCounter}`;
-    await new Promise<void>((resolve, reject) => {
-      this.socket.write(`${tag} ${cmd}\r\n`, err => (err ? reject(err) : resolve()));
-    });
+    await this.transport.write(`${tag} ${cmd}\r\n`);
 
     const lines: string[] = [];
-    const literals: Buffer[] = [];
+    const literals: Uint8Array[] = [];
     while (true) {
-      let line = await this.readLine();
+      let line = await this.transport.readLine();
       while (true) {
         const litMatch = line.match(/\{(\d+)\}$/);
         if (!litMatch) break;
@@ -277,9 +393,9 @@ class NodeImapClient {
         if (!Number.isFinite(size) || size < 0 || size > 4 * 1024 * 1024) {
           throw new Error(`IMAP 邮件数据块大小超出安全限制 (${size} bytes)`);
         }
-        const literalBuf = await this.readExact(size);
-        literals.push(literalBuf);
-        const tail = await this.readLine();
+        const literalBytes = await this.transport.readExact(size);
+        literals.push(literalBytes);
+        const tail = await this.transport.readLine();
         line += `\n__LITERAL_${literals.length - 1}__${tail}`;
       }
 
@@ -294,12 +410,11 @@ class NodeImapClient {
   }
 
   close() {
-    try { this.socket.end(); } catch {}
-    try { this.socket.destroy(); } catch {}
+    this.transport.close();
   }
 }
 
-async function openImapClient(settings: ImapSettings): Promise<NodeImapClient> {
+async function openImapClient(settings: ImapSettings): Promise<ImapClient> {
   const host = (settings.host || '').trim();
   const port = Number(settings.port || (settings.tls === false ? 143 : 993));
   const user = (settings.user || '').trim();
@@ -313,32 +428,45 @@ async function openImapClient(settings: ImapSettings): Promise<NodeImapClient> {
   const validatedHost = await assertPublicMailHost(host, 'IMAP');
   const useTls = settings.tls !== false && port !== 143;
 
-  const socket: net.Socket | tls.TLSSocket = await new Promise((resolve, reject) => {
-    if (useTls) {
-      const s = tls.connect({
-        host: validatedHost,
-        port,
-        servername: validatedHost,
-        rejectUnauthorized: true,
-      });
-      s.setTimeout(20000);
-      s.once('error', err => {
-        s.destroy();
-        reject(new Error(`IMAP TLS 连接失败 (${validatedHost}:${port}): ${err.message}`));
-      });
-      s.once('secureConnect', () => resolve(s));
-    } else {
-      const s = net.connect({ host: validatedHost, port });
-      s.setTimeout(20000);
-      s.once('error', err => {
-        s.destroy();
-        reject(new Error(`IMAP TCP 连接失败 (${validatedHost}:${port}): ${err.message}`));
-      });
-      s.once('connect', () => resolve(s));
-    }
-  });
+  let transport: ImapTransport;
+  const nodeMail = getNodeMailRuntime();
+  if (nodeMail) {
+    const socket = await new Promise<any>((resolve, reject) => {
+      if (useTls) {
+        const s = nodeMail.tls.connect({
+          host: validatedHost,
+          port,
+          servername: validatedHost,
+          rejectUnauthorized: true,
+        });
+        s.setTimeout(20000);
+        s.once('error', (err: Error) => {
+          s.destroy();
+          reject(new Error(`IMAP TLS 连接失败 (${validatedHost}:${port}): ${err.message}`));
+        });
+        s.once('secureConnect', () => resolve(s));
+      } else {
+        const s = nodeMail.net.connect({ host: validatedHost, port });
+        s.setTimeout(20000);
+        s.once('error', (err: Error) => {
+          s.destroy();
+          reject(new Error(`IMAP TCP 连接失败 (${validatedHost}:${port}): ${err.message}`));
+        });
+        s.once('connect', () => resolve(s));
+      }
+    });
+    transport = new NodeImapTransport(socket);
+  } else {
+    const socketsMod = await import('cloudflare:sockets');
+    const socket = socketsMod.connect(
+      { hostname: validatedHost, port },
+      { secureTransport: useTls ? 'on' : 'off' },
+    );
+    await withTimeout(socket.opened, 20000, `IMAP 连接超时 (${validatedHost}:${port})`);
+    transport = new CloudflareImapTransport(socket);
+  }
 
-  const client = new NodeImapClient(socket);
+  const client = new ImapClient(transport);
   await client.readGreeting();
   const loginRes = await client.command(`LOGIN ${escapeImapQuoted(user)} ${escapeImapQuoted(pass)}`);
   if (loginRes.status !== 'OK') {

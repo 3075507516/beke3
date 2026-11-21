@@ -59,9 +59,11 @@ async function ensureCommerceTables(db: any): Promise<void> {
     updatedAt INTEGER NOT NULL,
     paidAt INTEGER,
     shippedAt INTEGER,
-    refundedAt INTEGER
+    refundedAt INTEGER,
+    deletedAt INTEGER
   )`).run();
   await db.prepare('CREATE INDEX IF NOT EXISTS fox3_orders_user_created ON fox3_orders(userId, createdAt DESC)').run();
+  await db.prepare('CREATE INDEX IF NOT EXISTS fox3_orders_status_created ON fox3_orders(status, createdAt DESC)').run();
   // Older D1 deployments may have run commerce migration 0002 but not 0003.
   // Add the nullable soft-delete column idempotently so order, chat and policy
   // requests remain usable while the formal migration is being applied.

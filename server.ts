@@ -1,14 +1,37 @@
+import dns from 'node:dns/promises';
 import fs from 'node:fs';
+import net from 'node:net';
 import path from 'node:path';
 import { Readable } from 'node:stream';
+import tls from 'node:tls';
 import express, { type Request as ExpressRequest, type Response as ExpressResponse } from 'express';
-import { createServer as createViteServer } from 'vite';
 import { onRequest } from './functions/api/[[route]]';
 import { getRuntimeEnv } from './server-env';
 
+(globalThis as any).__FOX3_NODE_MAIL__ = { net, tls, dns };
+
 try {
-  if (fs.existsSync(path.join(process.cwd(), '.env')) && typeof process.loadEnvFile === 'function') {
-    process.loadEnvFile();
+  const envPath = path.join(process.cwd(), '.env');
+  if (fs.existsSync(envPath)) {
+    if (typeof process.loadEnvFile === 'function') {
+      process.loadEnvFile(envPath);
+    } else {
+      const content = fs.readFileSync(envPath, 'utf8');
+      for (const rawLine of content.split(/\r?\n/)) {
+        const line = rawLine.trim();
+        if (!line || line.startsWith('#')) continue;
+        const eqIndex = line.indexOf('=');
+        if (eqIndex <= 0) continue;
+        const key = line.slice(0, eqIndex).trim().replace(/^export\s+/, '');
+        let value = line.slice(eqIndex + 1).trim();
+        if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+          value = value.slice(1, -1);
+        }
+        if (key && process.env[key] === undefined) {
+          process.env[key] = value;
+        }
+      }
+    }
   }
 } catch {
   // Ignore missing or unreadable .env
@@ -83,6 +106,7 @@ async function startServer() {
 
   const isProduction = process.env.NODE_ENV === 'production';
   if (!isProduction) {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
@@ -90,6 +114,9 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distDir = path.resolve(process.cwd(), 'dist');
+    app.use(/^\/(?:_worker\.js|_routes\.json|_redirects|_headers)$/, (_req, res) => {
+      res.status(404).end();
+    });
     app.use(express.static(distDir, { index: false }));
     app.use((_req, res) => {
       res.sendFile(path.join(distDir, 'index.html'));
