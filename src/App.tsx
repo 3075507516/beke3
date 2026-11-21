@@ -28,6 +28,8 @@ const MainLayout: React.FC = () => {
   const isAdmin = currentUser?.role === 'admin';
   const isGuestRestricted = !currentUser && systemSettings.hideNonBlogForGuests;
 
+  const canAccessSites = isAdmin || (Boolean(systemSettings.allowPublicSitesAccess) && !isGuestRestricted);
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.has('paymentOrder') || params.has('paymentCancel')) setCurrentTab('shop');
@@ -35,17 +37,17 @@ const MainLayout: React.FC = () => {
 
   // Keep admin controls protected; signed-in users may open Settings for the owner-chat panel only.
   useEffect(() => {
-    if ((!isAdmin && ['sites', 'mail', 'backup'].includes(currentTab)) || (currentTab === 'settings' && !currentUser)) {
+    if ((!isAdmin && ['mail', 'backup'].includes(currentTab)) || (currentTab === 'sites' && !canAccessSites) || (currentTab === 'settings' && !currentUser)) {
       setCurrentTab('blog');
     }
-  }, [isAdmin, currentUser, currentTab]);
+  }, [isAdmin, canAccessSites, currentUser, currentTab]);
 
   // Privacy protection: if guest and restricted, redirect to blog
   useEffect(() => {
     if (
       !currentUser &&
       systemSettings.hideNonBlogForGuests &&
-      ['books', 'gallery', 'media', 'backup'].includes(currentTab)
+      ['books', 'gallery', 'media', 'backup', 'sites'].includes(currentTab)
     ) {
       setCurrentTab('blog');
     }
@@ -56,17 +58,12 @@ const MainLayout: React.FC = () => {
     if (deviceMode === 'mobile') {
       return 'max-w-[420px] w-full mx-auto my-6 px-3 py-4 shadow-2xl rounded-[40px] overflow-hidden border-[10px] border-slate-800 bg-slate-50 dark:bg-slate-900 min-h-[844px] transition-all duration-300 flex flex-col';
     }
-    const layout = systemSettings.siteLayout || 'airy';
-    if (layout === 'compact') return 'max-w-5xl mx-auto px-3 sm:px-4 py-4 w-full';
-    if (layout === 'editorial') return 'max-w-6xl mx-auto px-4 sm:px-8 lg:px-12 py-8 w-full';
-    if (layout === 'sidebar') return 'max-w-[1440px] mx-auto px-3 sm:px-5 py-5 w-full';
-    if (layout === 'mobile-first') return 'max-w-5xl mx-auto px-2 sm:px-5 py-4 w-full';
     return 'max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 w-full';
   };
 
   return (
     <div
-      className={`min-h-screen transition-colors duration-300 relative flex flex-col justify-between theme-${themeMode} layout-${systemSettings.siteLayout || 'airy'}`}
+      className={`min-h-screen transition-colors duration-300 relative flex flex-col justify-between theme-${themeMode}`}
       style={{
         backgroundColor: systemSettings.customPaletteBg || '#f8fafc',
         backgroundImage: systemSettings.fullBackgroundUrl
@@ -98,7 +95,7 @@ const MainLayout: React.FC = () => {
           {/* Tab Views */}
           {currentTab === 'blog' && <BlogSection />}
           {currentTab === 'bookmarks' && <BookmarksSection />}
-          {currentTab === 'sites' && isAdmin && <SitesSection />}
+          {currentTab === 'sites' && canAccessSites && <SitesSection />}
           {currentTab === 'books' && <BookshelfSection />}
           {currentTab === 'gallery' && <GallerySection />}
           {currentTab === 'media' && <MediaSection />}
@@ -126,7 +123,9 @@ const MainLayout: React.FC = () => {
             <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3 text-left sm:text-left">
               <span>&copy; {new Date().getFullYear()} <b>{systemSettings.siteName}</b> (fox3). All rights reserved.</span>
               <span className="text-[11px] text-amber-600/90 dark:text-amber-400/90">
-                (系统权限说明：备份区、邮箱中枢、系统设置、网站图床专区仅管理员可见)
+                {systemSettings.allowPublicSitesAccess
+                  ? '(系统权限说明：备份区、邮箱中枢、系统设置仅管理员可见；网站图床中心已开启公开浏览)'
+                  : '(系统权限说明：备份区、邮箱中枢、系统设置、网站图床专区仅管理员可见)'}
               </span>
             </div>
             <div className="flex items-center gap-4 text-[11px] shrink-0">

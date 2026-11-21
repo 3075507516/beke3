@@ -87,6 +87,9 @@ export const Header: React.FC<HeaderProps> = ({
     if (item.adminOnly && !isAdmin) {
       return false;
     }
+    if (item.id === 'sites' && !isAdmin && (!systemSettings.allowPublicSitesAccess || isGuestRestricted)) {
+      return false;
+    }
     if (item.id === 'settings' && !currentUser) {
       return false;
     }

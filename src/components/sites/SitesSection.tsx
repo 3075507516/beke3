@@ -25,12 +25,14 @@ export const SitesSection: React.FC = () => {
     setWebsites,
     currentUser,
     systemSettings,
+    updateSystemSettings,
     uploadFile,
     locale,
   } = useApp();
   const tx = (source: string) => translateInline(locale, source);
 
   const isAdmin = currentUser?.role === 'admin';
+  const canViewSites = isAdmin || Boolean(systemSettings.allowPublicSitesAccess);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [siteTitle, setSiteTitle] = useState('');
   const [siteUrl, setSiteUrl] = useState('');
@@ -146,7 +148,7 @@ export const SitesSection: React.FC = () => {
     }
   };
 
-  if (!isAdmin) {
+  if (!canViewSites) {
     return (
       <div className="py-20 text-center space-y-3">
         <Shield className="w-12 h-12 mx-auto text-rose-500/80" />
@@ -154,7 +156,7 @@ export const SitesSection: React.FC = () => {
           管理员专属功能区
         </h3>
         <p className="text-xs text-slate-500 max-w-sm mx-auto">
-          此专区为网站与图床集中管理功能区，仅超级管理员登录后方可查阅和维护。
+          此专区默认仅超级管理员登录后方可查阅和维护；管理员可在设置或本区顶部开关中开启公开浏览权限。
         </p>
       </div>
     );
@@ -171,9 +173,26 @@ export const SitesSection: React.FC = () => {
         }`}
       >
         <div>
-          <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-rose-50 dark:bg-rose-950/50 text-rose-600 dark:text-rose-400 text-[10px] font-semibold mb-1 border border-rose-200/60 dark:border-rose-900/50">
-            <Shield className="w-3 h-3" />
-            <span>管理员专属专区</span>
+          <div className="flex flex-wrap items-center gap-2 mb-1">
+            <div className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-semibold border ${
+              systemSettings.allowPublicSitesAccess
+                ? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 border-emerald-200/60 dark:border-emerald-900/50'
+                : 'bg-rose-50 dark:bg-rose-950/50 text-rose-600 dark:text-rose-400 border-rose-200/60 dark:border-rose-900/50'
+            }`}>
+              <Shield className="w-3 h-3" />
+              <span>{systemSettings.allowPublicSitesAccess ? '已开启公开浏览 · 编辑限管理员' : '管理员专属专区'}</span>
+            </div>
+            {isAdmin && (
+              <label className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800 text-[11px] font-medium text-sky-700 dark:text-sky-300 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={Boolean(systemSettings.allowPublicSitesAccess)}
+                  onChange={e => updateSystemSettings({ allowPublicSitesAccess: e.target.checked })}
+                  className="w-3.5 h-3.5 accent-sky-500 rounded cursor-pointer"
+                />
+                <span>非管理员可见</span>
+              </label>
+            )}
           </div>
           <h2 className="text-xl font-bold font-serif-sc text-slate-800 dark:text-slate-100 flex items-center gap-2">
             <Globe className="w-5 h-5 text-sky-500" />
@@ -189,14 +208,20 @@ export const SitesSection: React.FC = () => {
             <button type="button" onClick={() => setSiteViewMode('cards')} title={tx('海报卡片视图')} aria-label={tx('海报卡片视图')} aria-pressed={siteViewMode === 'cards'} className={`rounded-lg p-1.5 ${siteViewMode === 'cards' ? 'bg-sky-500 text-white' : 'text-slate-500'}`}><LayoutGrid className="h-4 w-4" /></button>
             <button type="button" onClick={() => setSiteViewMode('details')} title={tx('网址详细列表')} aria-label={tx('网址详细列表')} aria-pressed={siteViewMode === 'details'} className={`rounded-lg p-1.5 ${siteViewMode === 'details' ? 'bg-sky-500 text-white' : 'text-slate-500'}`}><List className="h-4 w-4" /></button>
           </div>
-          <button onClick={() => setIsModalOpen(true)} className="flex items-center gap-1.5 px-4 py-2 bg-sky-500 hover:bg-sky-600 text-white text-xs font-semibold rounded-xl shadow-md transition shrink-0 cursor-pointer">
-            <Plus className="w-4 h-4" /><span>添加新网站/图床</span>
-          </button>
+          {isAdmin && (
+            <button onClick={() => setIsModalOpen(true)} className="flex items-center gap-1.5 px-4 py-2 bg-sky-500 hover:bg-sky-600 text-white text-xs font-semibold rounded-xl shadow-md transition shrink-0 cursor-pointer">
+              <Plus className="w-4 h-4" /><span>添加新网站/图床</span>
+            </button>
+          )}
           <button onClick={() => exportSites(selectedSites.length ? websites.filter(site => selectedSites.includes(site.id)) : websites, 'html')} disabled={!websites.length} className="flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs disabled:opacity-40"><Download className="h-3.5 w-3.5"/>{tx('下载所选/全部书签 HTML')} ({selectedSites.length || websites.length})</button>
           <button onClick={() => exportSites(selectedSites.length ? websites.filter(site => selectedSites.includes(site.id)) : websites, 'txt')} disabled={!websites.length} className="flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs disabled:opacity-40">{tx('下载所选/全部 TXT')}</button>
           <button onClick={() => setSelectedSites(selectedSites.length === websites.length ? [] : websites.map(site => site.id))} className="rounded-xl border px-3 py-2 text-xs">{tx(selectedSites.length === websites.length ? '取消全选' : '全选书签')}</button>
-          <button onClick={() => bookmarksInputRef.current?.click()} className="flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs"><Upload className="h-3.5 w-3.5"/>{tx('上传/导入书签')}</button>
-          <input ref={bookmarksInputRef} type="file" accept=".html,.htm,.txt,.json,text/html,text/plain,application/json" multiple onChange={importBookmarks} className="hidden" />
+          {isAdmin && (
+            <>
+              <button onClick={() => bookmarksInputRef.current?.click()} className="flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs"><Upload className="h-3.5 w-3.5"/>{tx('上传/导入书签')}</button>
+              <input ref={bookmarksInputRef} type="file" accept=".html,.htm,.txt,.json,text/html,text/plain,application/json" multiple onChange={importBookmarks} className="hidden" />
+            </>
+          )}
         </div>
       </div>
 

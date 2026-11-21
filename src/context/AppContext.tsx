@@ -496,6 +496,65 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     document.documentElement.dir = 'ltr';
   }, [locale]);
 
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    let active = true;
+    let objectUrl = '';
+    const applyFontVars = () => {
+      const fontKey = systemSettings.fontFamily || 'default';
+      const fontStacks: Record<string, string> = {
+        default: `'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif`,
+        kaiti: `'Fox3KaitiFallback', 'KaiTi', 'STKaiti', 'Kaiti SC', 'DFKai-SB', 'BiauKai', 'AR PL UKai CN', 'Noto Serif SC', serif`,
+        youyuan: `'YouYuan', 'Yuanti SC', 'STYuanti', 'Hiragino Maru Gothic ProN', 'PingFang SC', sans-serif`,
+        qinzhuanshu: `'Fox3UploadedFont', 'FZXiaoZhuanTi-S13T', '方正小篆体', 'SentySeal', 'HanziPen SC', 'KaiTi', 'Noto Serif SC', serif`,
+        custom: `'Fox3UploadedFont', 'Plus Jakarta Sans', 'KaiTi', -apple-system, sans-serif`,
+      };
+      const stack = fontStacks[fontKey] || fontStacks.default;
+      document.documentElement.style.setProperty('--fox3-font-family', stack);
+      document.documentElement.dataset.fox3Font = fontKey === 'default' ? 'default' : 'custom-active';
+    };
+
+    const loadCustomFont = async () => {
+      const styleId = 'fox3-custom-font-style';
+      let styleEl = document.getElementById(styleId) as HTMLStyleElement | null;
+      let resolvedUrl = '';
+      try {
+        const localBlob = await getFileFromIndexedDB('idb_file_fox3_custom_font');
+        if (localBlob instanceof Blob) {
+          objectUrl = URL.createObjectURL(localBlob);
+          resolvedUrl = objectUrl;
+        } else if (typeof localBlob === 'string' && localBlob) {
+          resolvedUrl = localBlob;
+        }
+      } catch {}
+      if (!resolvedUrl && systemSettings.customFontUrl && !/^(?:idb_file_|blob:)/i.test(systemSettings.customFontUrl)) {
+        resolvedUrl = systemSettings.customFontUrl;
+      }
+      if (!active) {
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+        return;
+      }
+      if (resolvedUrl) {
+        if (!styleEl) {
+          styleEl = document.createElement('style');
+          styleEl.id = styleId;
+          document.head.appendChild(styleEl);
+        }
+        styleEl.textContent = `@font-face { font-family: 'Fox3UploadedFont'; src: url('${resolvedUrl.replace(/'/g, "\\'")}'); font-display: swap; }`;
+      } else if (styleEl) {
+        styleEl.textContent = '';
+      }
+      applyFontVars();
+    };
+
+    applyFontVars();
+    void loadCustomFont();
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [systemSettings.fontFamily, systemSettings.customFontUrl, systemSettings.customFontName]);
+
   const setLocale = (loc: Locale) => {
     const normalized = normalizeLocale(loc);
     setLocaleState(normalized);
@@ -955,7 +1014,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!siteContentReadyRef.current || !getAdminSessionToken()) return;
     if (siteContentTimeoutRef.current) clearTimeout(siteContentTimeoutRef.current);
     siteContentTimeoutRef.current = setTimeout(async () => {
-      const publicSettingKeys = ['siteName', 'headerTagline', 'shopCategories', 'themeColor', 'customPaletteBg', 'fullBackgroundUrl', 'avatarUrl', 'heroIntroImage', 'heroBadge', 'heroTitle', 'heroSubtitle', 'transparentCards', 'bottomButtonsEnabled', 'hideNonBlogForGuests', 'allowUserMediaManagement', 'globalTheme', 'deviceView', 'timezone', 'siteLayout', 'uploadedThemeName'];
+      const publicSettingKeys = ['siteName', 'headerTagline', 'shopCategories', 'themeColor', 'customPaletteBg', 'fullBackgroundUrl', 'avatarUrl', 'heroIntroImage', 'heroBadge', 'heroTitle', 'heroSubtitle', 'transparentCards', 'bottomButtonsEnabled', 'hideNonBlogForGuests', 'allowUserMediaManagement', 'allowPublicSitesAccess', 'globalTheme', 'deviceView', 'timezone', 'fontFamily', 'customFontName', 'customFontUrl', 'uploadedThemeName'];
       const hasLocalUrl = (value: unknown) => typeof value === 'string' && /^(?:idb_file_|data:|blob:)/i.test(value);
       const removeLocalRefs = (value: string) => value.replace(/(?:idb_file_[\w.-]+|data:[^\s"'<>)]*)/gi, '');
       const publicSettings = Object.fromEntries(publicSettingKeys.filter(key => (systemSettings as any)[key] !== undefined && !hasLocalUrl((systemSettings as any)[key])).map(key => [key, (systemSettings as any)[key]]));

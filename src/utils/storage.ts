@@ -125,6 +125,7 @@ export const DEFAULT_SETTINGS: SystemSettings = {
   emailRegistrationOnly: false,
   allowRegistration: true,
   allowUserMediaManagement: false,
+  allowPublicSitesAccess: false,
   totalCapacityBytes: 10 * 1024 * 1024 * 1024, // 10 GB
   usedCapacityBytes: 0, // Default starts at zero as requested
   storageConfig: {
@@ -136,6 +137,9 @@ export const DEFAULT_SETTINGS: SystemSettings = {
   syncIntervalSeconds: 600,
   globalTheme: 'modern',
   deviceView: 'responsive',
+  fontFamily: 'default',
+  customFontName: '',
+  customFontUrl: '',
 };
 
 export const DEFAULT_ADMIN: User = {

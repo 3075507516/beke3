@@ -16,7 +16,10 @@ export type PaymentOrder = {
 export type PaymentEnv = Record<string, string | undefined>;
 export type CreatePaymentResult = {
   redirectUrl?: string;
+  wapUrl?: string;
+  qrEmbedUrl?: string;
   qrCode?: string;
+  qrMode?: 'precreate' | 'wap_fallback';
   providerOrderId?: string;
   chargedAmountMinor?: number;
   chargedCurrency?: string;
@@ -82,7 +85,12 @@ function b64(a: ArrayBuffer | Uint8Array): string {
 }
 
 function normalizePem(pem: string): string {
-  return pem.replace(/\\n/g, '\n').replace(/^["']|["']$/g, '').trim();
+  return pem
+    .replace(/[\u200B-\u200D\uFEFF\r]/g, '')
+    .replace(/\\n/g, '\n')
+    .trim()
+    .replace(/^["']+|["']+$/g, '')
+    .trim();
 }
 
 function pemBytes(pem: string): Uint8Array {
@@ -388,17 +396,18 @@ export async function createPayment(
   }
 
   if (provider === 'alipay') {
-    const appId = required(env, 'ALIPAY_APP_ID');
+    const appId = required(env, 'ALIPAY_APP_ID').replace(/^["']+|["']+$/g, '').trim();
     const privateKey = await importPrivate(required(env, 'ALIPAY_PRIVATE_KEY'));
-    const gateway = (env.ALIPAY_GATEWAY?.trim() || 'https://openapi.alipay.com/gateway.do').trim();
+    const gateway = (env.ALIPAY_GATEWAY?.trim() || 'https://openapi.alipay.com/gateway.do').replace(/^["']+|["']+$/g, '').trim();
     if (!gateway.startsWith('https://')) throw new Error('ALIPAY_GATEWAY 必须使用 HTTPS');
     const notifyUrl = env.ALIPAY_NOTIFY_URL?.trim() || (base.protocol === 'https:' ? `${base.origin}/api/payments/webhook/alipay` : '');
     const returnUrl = `${base.origin}/?paymentOrder=${encodeURIComponent(order.id)}`;
     const totalAmount = minorToDecimal(order.amountMinor, order.currency);
     const ts = alipayTimestamp();
     const subject = `${order.productName}${order.quantity > 1 ? ` × ${order.quantity}` : ''}`.slice(0, 128);
+    const sellerPart = env.ALIPAY_PID?.trim() ? { seller_id: env.ALIPAY_PID.trim() } : {};
 
-    // 1. Build signed Alipay Web Cashier URL (alipay.trade.page.pay) for browser redirect checkout
+    // 1. Signed Alipay PC Web Cashier URL (alipay.trade.page.pay) for browser redirect checkout
     const pageParams: Record<string, string> = {
       app_id: appId,
       method: 'alipay.trade.page.pay',
@@ -413,14 +422,61 @@ export async function createPayment(
         total_amount: totalAmount,
         subject,
         product_code: 'FAST_INSTANT_TRADE_PAY',
-        ...(env.ALIPAY_PID?.trim() ? { seller_id: env.ALIPAY_PID.trim() } : {}),
+        ...sellerPart,
       }),
     };
     if (notifyUrl) pageParams.notify_url = notifyUrl;
     pageParams.sign = await rsaSign(buildAlipaySignedString(pageParams), privateKey);
     const redirectUrl = `${gateway}?${new URLSearchParams(pageParams).toString()}`;
 
-    // 2. Request Face-to-Face Pay QR code (alipay.trade.precreate) so user can immediately scan QR
+    // 2. Signed Alipay Mini-QR Embed URL (qr_pay_mode=4) for official iframe/popup QR rendering
+    const embedParams: Record<string, string> = {
+      app_id: appId,
+      method: 'alipay.trade.page.pay',
+      format: 'JSON',
+      return_url: returnUrl,
+      charset: 'utf-8',
+      sign_type: 'RSA2',
+      timestamp: ts,
+      version: '1.0',
+      biz_content: JSON.stringify({
+        out_trade_no: order.id,
+        total_amount: totalAmount,
+        subject,
+        product_code: 'FAST_INSTANT_TRADE_PAY',
+        qr_pay_mode: '4',
+        qrcode_width: '220',
+        ...sellerPart,
+      }),
+    };
+    if (notifyUrl) embedParams.notify_url = notifyUrl;
+    embedParams.sign = await rsaSign(buildAlipaySignedString(embedParams), privateKey);
+    const qrEmbedUrl = `${gateway}?${new URLSearchParams(embedParams).toString()}`;
+
+    // 3. Signed Mobile Web Cashier URL (alipay.trade.wap.pay) as guaranteed scannable QR fallback
+    const wapParams: Record<string, string> = {
+      app_id: appId,
+      method: 'alipay.trade.wap.pay',
+      format: 'JSON',
+      return_url: returnUrl,
+      charset: 'utf-8',
+      sign_type: 'RSA2',
+      timestamp: ts,
+      version: '1.0',
+      biz_content: JSON.stringify({
+        out_trade_no: order.id,
+        total_amount: totalAmount,
+        subject,
+        product_code: 'QUICK_WAP_WAY',
+        quit_url: returnUrl,
+        ...sellerPart,
+      }),
+    };
+    if (notifyUrl) wapParams.notify_url = notifyUrl;
+    wapParams.sign = await rsaSign(buildAlipaySignedString(wapParams), privateKey);
+    const wapUrl = `${gateway}?${new URLSearchParams(wapParams).toString()}`;
+
+    // 4. Request native Face-to-Face Pay QR code (alipay.trade.precreate)
     const qrParams: Record<string, string> = {
       app_id: appId,
       method: 'alipay.trade.precreate',
@@ -433,7 +489,9 @@ export async function createPayment(
         out_trade_no: order.id,
         total_amount: totalAmount,
         subject,
-        ...(env.ALIPAY_PID?.trim() ? { seller_id: env.ALIPAY_PID.trim() } : {}),
+        product_code: 'FACE_TO_FACE_PAYMENT',
+        timeout_express: '30m',
+        ...sellerPart,
       }),
     };
     if (notifyUrl) qrParams.notify_url = notifyUrl;
@@ -448,21 +506,36 @@ export async function createPayment(
         }),
         'Alipay',
       );
-      const data = j.alipay_trade_precreate_response;
+      const data = j.alipay_trade_precreate_response || j.error_response;
       if (data?.code === '10000' && data.qr_code) {
-        return { qrCode: data.qr_code, redirectUrl, providerOrderId: order.id };
+        return {
+          qrCode: data.qr_code,
+          qrMode: 'precreate',
+          redirectUrl,
+          wapUrl,
+          qrEmbedUrl,
+          providerOrderId: order.id,
+        };
       }
-      // If merchant hasn't enabled 当面付 precreate yet, keep signed Web Cashier URL working
+      const detail = data ? `${data.code || ''}${data.sub_code ? ` / ${data.sub_code}` : ''}: ${safeMessage(data)}` : '未返回当面付二维码';
       return {
+        qrCode: wapUrl,
+        qrMode: 'wap_fallback',
         redirectUrl,
+        wapUrl,
+        qrEmbedUrl,
         providerOrderId: order.id,
-        warning: `当面付二维码暂不可用（${safeMessage(data)}），已为您生成支付宝网页收银台跳转链接。`,
+        warning: `支付宝当面付未返回原生码（${detail}），已自动生成手机收银台扫码二维码与网页收银台链接（需在支付宝商家中心签约「手机网站支付」或「电脑网站支付」）。`,
       };
     } catch (qrErr: any) {
       return {
+        qrCode: wapUrl,
+        qrMode: 'wap_fallback',
         redirectUrl,
+        wapUrl,
+        qrEmbedUrl,
         providerOrderId: order.id,
-        warning: `扫码二维码生成失败（${String(qrErr?.message || qrErr).slice(0, 120)}），请点击下方按钮前往支付宝网页收银台付款。`,
+        warning: `当面付接口调用异常（${String(qrErr?.message || qrErr).slice(0, 120)}），已自动切换为手机/网页收银台二维码与直达跳转。`,
       };
     }
   }

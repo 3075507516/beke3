@@ -12,6 +12,8 @@ import {
   ExternalLink,
   Layers,
   Key,
+  Mail,
+  QrCode,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { translateInline } from '../../utils/i18n';
@@ -39,6 +41,64 @@ export const GuideSection: React.FC = () => {
           <p className="text-xs leading-relaxed text-amber-700 dark:text-amber-300">Policies/法律页面内容为政策草稿，不是自动代写的有效法律意见；发布前请按主体、真实服务及适用法律审查。</p>
         </div>
       </div>
+
+      {/* Storage Free Tiers & Paid Pricing Reference */}
+      <section className="rounded-3xl border border-sky-200/80 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+            <Database className="w-5 h-5 text-sky-500" />
+            <span>各存储器免费额度与收费标准参考（D1 / R2 / KV / COS / OSS）</span>
+          </h3>
+          <span className="text-[11px] text-slate-400">以各云厂商控制台最新公布费率为准</span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr className="border-b border-slate-200 dark:border-slate-700 text-slate-500">
+                <th className="py-2 pr-3 font-semibold">存储服务</th>
+                <th className="py-2 pr-3 font-semibold">免费额度（Free Tier）</th>
+                <th className="py-2 pr-3 font-semibold">付费与超额参考</th>
+                <th className="py-2 font-semibold">在本项目中的推荐用途</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800 text-slate-700 dark:text-slate-300">
+              <tr>
+                <td className="py-2.5 pr-3 font-bold text-slate-900 dark:text-slate-100 whitespace-nowrap">Cloudflare D1</td>
+                <td className="py-2.5 pr-3">总容量 <b>5 GB</b>；每日 <b>500 万次</b>行读（Rows Read）、<b>10 万次</b>行写（Rows Written）</td>
+                <td className="py-2.5 pr-3">Workers Paid $5/月起；超额约 $0.75/GB-月、$0.001/百万行读、$1.00/百万行写</td>
+                <td className="py-2.5">账号、订单、对话、来信、站点文章等结构化数据（绑定名 <code className="font-mono">DB</code>）</td>
+              </tr>
+              <tr>
+                <td className="py-2.5 pr-3 font-bold text-emerald-700 dark:text-emerald-300 whitespace-nowrap">Cloudflare R2</td>
+                <td className="py-2.5 pr-3">每月 <b>10 GB</b> 存储；每月 <b>100 万次</b> Class A 写入、<b>1,000 万次</b> Class B 读取；<b>出站流量永久 $0 免费</b></td>
+                <td className="py-2.5 pr-3">$0.015/GB-月；Class A $4.50/百万次、Class B $0.36/百万次；公网下载回源不收流量费</td>
+                <td className="py-2.5">图片、音视频、电子书、字体与大文件分块（绑定名 <code className="font-mono">R2_BUCKET</code>）</td>
+              </tr>
+              <tr>
+                <td className="py-2.5 pr-3 font-bold text-slate-900 dark:text-slate-100 whitespace-nowrap">Cloudflare KV</td>
+                <td className="py-2.5 pr-3">总容量 <b>1 GB</b>；每日 <b>10 万次</b>读取；<b>每日仅 1,000 次写入/删除/列举</b></td>
+                <td className="py-2.5 pr-3">Workers Paid $5/月含更高配额；超额约 $0.50/GB-月、$0.50/百万次读、$5.00/百万次写</td>
+                <td className="py-2.5">仅短期验证码/限流等缓存回退（绑定名 <code className="font-mono">KV</code>），切勿作主库</td>
+              </tr>
+              <tr>
+                <td className="py-2.5 pr-3 font-bold text-blue-600 dark:text-blue-400 whitespace-nowrap">腾讯云 COS</td>
+                <td className="py-2.5 pr-3">通常仅面向新用户提供半年期/限额试用包（如 50 GB 试用），无永久大额免费</td>
+                <td className="py-2.5 pr-3">标准存储约 ¥0.099–¥0.118/GB-月；公网下行流量约 ¥0.50/GB（另计请求次数）</td>
+                <td className="py-2.5">作为 R2 不可用时的服务端 S3 兼容外部对象桶后备（<code className="font-mono">OBJECT_STORAGE_PROVIDER=cos</code>）</td>
+              </tr>
+              <tr>
+                <td className="py-2.5 pr-3 font-bold text-orange-600 dark:text-orange-400 whitespace-nowrap">阿里云 OSS</td>
+                <td className="py-2.5 pr-3">新用户一般提供 3 个月试用资源包，到期后按量或资源包续费，无永久大额免费</td>
+                <td className="py-2.5 pr-3">本地冗余标准存储约 ¥0.12/GB-月；外网流出流量约 ¥0.25–¥0.50/GB（分时段/区域）</td>
+                <td className="py-2.5">作为 R2 不可用时的服务端 OSS SigV4 后备（<code className="font-mono">OBJECT_STORAGE_PROVIDER=oss</code>）</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+          省钱提示：个人站点优先绑定 Cloudflare <b>D1 + R2</b>——R2 免出站流量费且含 10 GB 免费空间；相册区已支持“列表与预览优先加载超轻量 WebP 缩略图，按需点击再看原图”，可大幅降低 R2 Class B 请求与访客流量消耗。
+        </p>
+      </section>
 
       {/* Platform Switcher Tabs */}
       <div className="flex items-center gap-2 overflow-x-auto pb-1">
@@ -461,37 +521,31 @@ export const GuideSection: React.FC = () => {
         </div>
       )}
 
-      {/* Commercial (Shop) & Mail Usage Guides */}
+      {/* Commercial (Shop) & Mail General Guides (Separated from Alipay & Resend specifics) */}
       <section className="rounded-3xl border border-rose-200 bg-rose-50/70 p-5 shadow-sm dark:border-rose-900/60 dark:bg-rose-950/20">
-        <h3 className="mb-3 font-bold text-rose-800 dark:text-rose-200">{tx('支付接入：商户注册、服务端变量与回调验证（正式接入清单）')}</h3>
+        <h3 className="mb-3 font-bold text-rose-800 dark:text-rose-200">{tx('支付接入通用总览：商户资质、D1 迁移与回调验签（各渠道通用原则）')}</h3>
         <div className="space-y-2 text-xs leading-relaxed text-slate-700 dark:text-slate-300">
           <p>{tx('开始前准备：企业/个体户营业执照、法人身份证和结算账户。网站必须启用 HTTPS；中国大陆服务器需完成 ICP 备案，微信 PC 网站支付要求使用已备案域名。')}</p>
-          <p>{tx('支付宝：在支付宝开放平台/商家中心完成主体认证，开通电脑网站支付和手机网站支付，取得 APPID、设置应用私钥与支付宝公钥，并配置异步通知地址。')}</p>
-          <p>{tx('微信支付：在微信支付商户平台申请商户号，申请 Native（PC 扫码）或 H5 支付，准备 APIv3 密钥、商户 API 证书私钥、平台证书及 HTTPS 回调 URL。')}</p>
+          <p>{tx('微信支付：在微信支付商户平台申请商户号，申请 Native（PC 扫码）或 H5 支付，准备 APIv3 密钥（32 字节）、商户 API 证书私钥、平台证书及 HTTPS 回调 URL。')}</p>
           <p>{tx('Stripe：注册账户并取得 Secret Key；在 Stripe Dashboard 创建 Webhook，保存 signing secret，并订阅成功、异步失败/过期及退款事件。')}</p>
-          <p>{tx('PayPal：注册企业账户并创建 REST 应用，取得 Client ID、Secret 和 Webhook ID；先完整测试 Sandbox，再切换正式 API。')}</p>
+          <p>{tx('PayPal：注册企业账户并创建 REST 应用，取得 Client ID、Secret 和 Webhook ID；先完整测试 Sandbox，再切换正式 API（支付宝专项配置请查看下方独立板块）。')}</p>
           <p>{tx('在 Cloudflare Pages → Settings → Variables and Secrets 中配置网关 Secrets，并绑定 D1（DB）；按顺序执行 migrations/0002_commerce.sql 和 migrations/0003_order_trash.sql 后重新部署。状态灯只表示服务端读到了变量，不代表密钥正确或商户已通过收款实测。')}</p>
           <p>{tx('安全回调流程：用户付款 → 支付平台向 notify_url POST 订单号、金额、状态和签名 → 后端验签 → 核对订单与金额 → 更新 D1 并返回成功。验签失败必须返回错误且不更新订单；重复通知必须幂等，不能依据前端跳转判断到账。')}</p>
-          <p className="font-medium">{tx('本项目已实现支付宝、微信支付、Stripe 与 PayPal 的服务端支付/回调适配。万里汇（WorldFirst）目前没有接入本项目订单创建、回调验签和退款流程，不能只配置变量后启用。')}</p>
         </div>
       </section>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4">
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
         {/* Shop Guide */}
         <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl p-6 space-y-4 shadow-sm">
           <div className="flex items-center gap-2 text-rose-500 font-bold text-sm">
             <Layers className="w-5 h-5" />
-            <span>商业区 (商品与全渠道支付网关) 使用说明</span>
+            <span>商业区 (商品展台与全渠道订单管理) 使用说明</span>
           </div>
           <div className="space-y-2 text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-            <p><b>1. 展台与商品管理：</b>管理员可创建商品展台、管理商品图片与自定义分类；订单由后端数据库创建并持久化。支付生产部署必须使用 Cloudflare Pages + Pages Functions + D1（binding 名称 <code>DB</code>），按顺序执行 <code>migrations/0002_commerce.sql</code>、<code>migrations/0003_order_trash.sql</code>。已有 0002 的数据库只需在部署新版前运行 0003。D1 持久保存订单、站内会话、消息、通知和可编辑法律页面；订单删除进入回收站，付款记录不会物理删除；网站内容 D1 与 WebDAV 备份严格分离。</p>
-            <p><b>2. 商户开户与资质：</b>准备企业/个体户营业执照、法人身份证、结算账户。支付宝申请电脑网站支付、手机网站支付；微信支付商户平台申请 PC 网站支付（Native/H5），PC 接入要求备案域名；Stripe 注册账户取得 Publishable/Secret Key（本项目仅由服务器使用 Secret，Publishable key 目前不参与结账）；PayPal 企业账户创建应用取得 Client ID/Secret。国内服务器须完成 ICP 备案；全程必须 HTTPS。商户资格、币种及结算以账户审核和实测为准，本代码不提供 FX，也不承诺审批或平台实际收款。</p>
-            <p>{tx('支付宝应用私钥支持 PEM 编码的 PKCS#8（BEGIN PRIVATE KEY，Java 常见）和 PKCS#1（BEGIN RSA PRIVATE KEY，非 Java 常见）；请勿粘贴 Java 源代码、引号或公钥。私钥需含完整 BEGIN/END 行；若平台 Secret 保存为字面量 \\n，代码会转换成真实换行。请同时核对 APPID 对应的应用公钥已上传、支付宝公钥来自当前应用，以及 RSA2 签名类型。')}</p>
-            <p><b>3. Pages Secrets（仅服务端）：</b>Alipay：<code>ALIPAY_APP_ID</code>、<code>ALIPAY_PRIVATE_KEY</code>（PEM PKCS#8 / PKCS#1，支持 BEGIN PRIVATE KEY 或 BEGIN RSA PRIVATE KEY）、<code>ALIPAY_PUBLIC_KEY</code>，可选 <code>ALIPAY_PID</code>（商户 PID，会传入 biz_content.seller_id）、<code>ALIPAY_NOTIFY_URL</code>、<code>ALIPAY_GATEWAY</code>；WeChat：<code>WECHAT_MCHID</code>、<code>WECHAT_APPID</code>、<code>WECHAT_SERIAL_NO</code>、<code>WECHAT_PRIVATE_KEY</code>（PKCS#8）、<code>WECHAT_API_V3_KEY</code>（32 ASCII bytes）、<code>WECHAT_PLATFORM_CERT</code>、<code>WECHAT_NOTIFY_URL=https://你的域名/api/payments/webhook/wechat</code>；Stripe：<code>STRIPE_SECRET_KEY</code>、<code>STRIPE_WEBHOOK_SECRET</code>；PayPal：<code>PAYPAL_CLIENT_ID</code>、<code>PAYPAL_CLIENT_SECRET</code>、<code>PAYPAL_WEBHOOK_ID</code>、<code>PAYPAL_API_BASE</code>（默认 Sandbox，正式为 <code>https://api-m.paypal.com</code>）。付款密钥绝不写入前端、localStorage、D1 或仓库。</p>
-            <p><b>4. Webhook 配置：</b>服务端 endpoints：<code>/api/payments/webhook/alipay</code>、<code>/api/payments/webhook/wechat</code>、<code>/api/payments/webhook/stripe</code>、<code>/api/payments/webhook/paypal</code>。支付宝配置异步通知，微信配置回调。Stripe Dashboard 监听 <code>checkout.session.completed</code>、<code>checkout.session.async_payment_succeeded</code>、<code>checkout.session.async_payment_failed</code>、<code>checkout.session.expired</code>、<code>charge.refunded</code>、<code>refund.updated</code>；PayPal 至少订阅 <code>PAYMENT.CAPTURE.COMPLETED</code>、<code>PAYMENT.CAPTURE.DENIED</code>、<code>PAYMENT.CAPTURE.REFUNDED</code>。</p>
-            <p><b>5. Webhook 六步：</b>①用户付款；②平台 POST 到 notify_url，提供订单号/金额/状态/签名；③后端验签；④验签通过后核订单与金额，更新订单/会员并持久化，再返回成功；⑤验签失败返回错误且不更新订单；⑥重复回调幂等。最终支付以验签的服务端异步回调为准，不依据前端跳转。</p>
-            <p><b>6. 订单生命周期：</b>正常、失败、取消、重复回调、退款均由后端状态处理。订单先写入 D1；即使支付渠道创建失败，也会保留为未支付/失败状态。每笔订单创建时管理员都会收到明确标注未支付的站内通知和邮件，异步回调验签成功后再收到已支付通知和邮件；默认邮件收件人为验证码邮件通道的 <code>MAIL_SENDER</code>，也可设置独立接收地址。用户可删除自己的订单，管理员可管理所有订单；删除进入回收站，可恢复，不删除支付审计记录。用户取消只取消未支付订单；PayPal 回跳后服务端执行 capture，但 paid 仍等待 Webhook；Stripe/PayPal 支持异步结果。订单区的管理员确认发货按钮始终可见，但只有验签已支付订单才可发货；确认后用户看到已发货。管理员可原路退款并通过订单对话按钮快速联系客户。</p>
-            <p><b>7. 测试与上线：</b>先用各渠道沙箱/测试密钥验证成功、失败、取消、重复回调、退款及 D1 状态，再检查回调可达、验签和幂等后切换正式密钥。本指南不表示已做商户生产实测。政策页包含主页/价格（商城）/退款/隐私/服务条款/联系方式，站长可在网站法律与联系页编辑并保存至 D1；当前为政策草稿，发布前按主体、真实服务与适用法律审查，不构成法律意见。</p>
-            <p><b>8. 展台咨询：</b>用户可向站长发起售前与售后咨询，管理员可在后台沟通。</p>
+            <p><b>1. 展台与商品管理：</b>管理员可创建商品、管理多图轮播与自定义分类；商品目录与分类随 D1（<code>DB</code>）跨设备同步。订单数据必须写入 D1（按顺序执行 <code>migrations/0002_commerce.sql</code> 与 <code>migrations/0003_order_trash.sql</code>）。</p>
+            <p><b>2. 环境变量清单（仅服务端 Secrets）：</b>微信：<code>WECHAT_MCHID</code>、<code>WECHAT_APPID</code>、<code>WECHAT_SERIAL_NO</code>、<code>WECHAT_PRIVATE_KEY</code>、<code>WECHAT_API_V3_KEY</code>、<code>WECHAT_PLATFORM_CERT</code>、<code>WECHAT_NOTIFY_URL</code>；Stripe：<code>STRIPE_SECRET_KEY</code>、<code>STRIPE_WEBHOOK_SECRET</code>；PayPal：<code>PAYPAL_CLIENT_ID</code>、<code>PAYPAL_CLIENT_SECRET</code>、<code>PAYPAL_WEBHOOK_ID</code>、<code>PAYPAL_API_BASE</code>（支付宝专题见下方独立指南）。</p>
+            <p><b>3. 订单生命周期：</b>订单创建即落库 D1 并向管理员发站内提醒与未支付通知邮件；完成付款且验签通过后转为“已支付”方可发货；支持取消、移入回收站恢复、管理员原路退款与站内订单客服对话。</p>
+            <p><b>4. 政策草稿说明：</b>商店内置法律/退款/隐私/服务条款可在后台编辑并保存至 D1，默认文本为参考草稿，正式上线前请按主体与适用法律核对。</p>
           </div>
         </div>
 
@@ -499,21 +553,106 @@ export const GuideSection: React.FC = () => {
         <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl p-6 space-y-4 shadow-sm">
           <div className="flex items-center gap-2 text-indigo-500 font-bold text-sm">
             <Key className="w-5 h-5" />
-            <span>邮箱区 (邮件中枢与 Resend Receiving) 使用说明</span>
+            <span>邮箱区 (站内邮件中枢与 SMTP / 阿里 / 腾讯免费邮) 使用说明</span>
           </div>
           <div className="space-y-2 text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-            <p>{tx('1. 发信通道：推荐 Resend API（HTTPS），也支持通用 SMTP、Brevo API、SendGrid API 和 SendCloud API。阿里云 DirectMail、腾讯云 SES 可在服务商已开通 SMTP、提供有效参数且部署网络可连通时，选择通用 SMTP 使用；本仓库没有为它们单独适配 HTTP API。SendCloud API 需要单独配置 SENDCLOUD_API_USER、SENDCLOUD_API_KEY，并将 MAIL_PROVIDER 设为 sendcloud；免费额度与发送权限以服务商实际账号状态为准。')}</p>
-            <p>{tx('2. 前台与后台配置：前台发信设置只保存在当前浏览器，不会配置全站服务器。注册验证码和后台自动邮件必须在 Cloudflare Pages 后台 Variables/Secrets 配置通道凭据及 MAIL_SENDER，并重新部署；前台配置与后台配置应分开测试。')}</p>
-            <p>{tx('3. 注册验证码：验证码由服务端生成并校验；Cloudflare 部署需绑定 D1，并配置可用的后台发信通道。可选设置 VERIFY_CODE_LENGTH、VERIFY_EMAIL_SUBJECT、VERIFY_EMAIL_TEMPLATE；模板变量为 {{code}}、{{username}}、{{email}}。')}</p>
-            <p>{tx('4. 获取 RESEND_API_KEY：登录 resend.com，进入左侧 API Keys，点击 Create API Key，选择所需权限和域名后创建并立即复制。不要将密钥放在前端代码或公开仓库。')}</p>
-            <p>{tx('5. 获取 RESEND_WEBHOOK_SECRET 并配置 Webhook：在 Resend Webhooks 创建 Webhook；Endpoint / URL 填写你自己的 Pages Functions 地址，例如 https://你的项目名.pages.dev/api/webhook，监听 email.received。创建后复制 signing secret，保存为 RESEND_WEBHOOK_SECRET；接口也兼容旧路径 /api/mail/webhook。')}</p>
-            <p>{tx('6. 配置收件域名和 MX：在 Domains 添加域名；如需接收邮件，在域名详情启用 Receiving，并按 Resend 指示在域名 DNS 后台配置 MX 记录。')}</p>
-            <p>{tx('重要：Webhook URL 是你自己的 Pages Functions 接口，不是 Resend 提供的地址。RESEND_API_KEY 与 RESEND_WEBHOOK_SECRET 通常只在创建时完整显示一次，丢失后需重新生成。Webhook 验签通过后，服务端用 RESEND_API_KEY 调 Receiving API 取回正文并存入绑定名为 DB 的 D1；普通转发到个人邮箱不会把来信导入本站。')}</p>
-            <p>{tx('7. 站内邮件：管理员可在邮件中枢查看服务器收件箱、撰写和回复；发送及收件箱 API 需有效管理员会话。回复注册邮箱时优先从 D1 用户记录解析地址；前台/本机发件历史保存在浏览器，Resend 来信正文保存在 D1。')}</p>
-            <p>{tx('Resend API 域名连接检查只读域名信息，不会发送邮件；本页不显示独立的 Resend 检查按钮。要验证真实投递，请使用单独的测试邮件按钮。')}</p>
+            <p><b>1. 邮箱区双区布局：</b>邮件中枢将“发信通道配置”与“收信配置”明确分离，分别管理外发邮件与收件同步，界面清晰互不混杂。</p>
+            <p><b>2. 阿里云邮箱与腾讯企业邮箱免费版：</b>已在发信/收信配置区内置一键预设（阿里云免费企业邮 SMTP 465 SSL / IMAP 993 SSL；腾讯企业邮 <code>smtp.exmail.qq.com:465</code> / <code>imap.exmail.qq.com:993</code>）。注意需使用账号对应的<b>客户端专用密码 / 授权码</b>（而非网页登录密码）；在非纯静态的 Cloudflare Workers/Node 运行时上，IMAP 同步与 SMTP 发送均可配合服务端中继生效。</p>
+            <p><b>3. 注册验证码与通用通道：</b>亦支持 SendGrid、Brevo、SendCloud 等标准发信渠道；后台自动通知与注册验证码需在 Cloudflare Pages Variables/Secrets 配置好服务商凭据与 <code>MAIL_SENDER</code>。</p>
+            <p><b>4. 站内写信与回复：</b>管理员可在收件箱/发件箱/写信台查看来信并回复注册用户（Resend API 发信与收信完整步骤请阅读下方独立专题卡片）。</p>
           </div>
         </div>
       </div>
+
+      {/* Standalone Section 9: Resend API Send & Receive Guide */}
+      <section className="rounded-3xl border border-indigo-200/80 bg-white p-6 shadow-sm dark:border-indigo-900/50 dark:bg-slate-900 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
+          <h3 className="text-sm font-bold text-indigo-700 dark:text-indigo-300 flex items-center gap-2">
+            <Mail className="w-5 h-5 text-indigo-500" />
+            <span>Resend API 发信与收信（Receiving）独立配置指南</span>
+          </h3>
+          <span className="rounded-full bg-indigo-50 px-2.5 py-0.5 text-[10px] font-semibold text-indigo-600 dark:bg-indigo-950/50 dark:text-indigo-300">
+            独立专项指南 · 与邮箱区说明分离
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs leading-relaxed text-slate-600 dark:text-slate-300">
+          <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/70 dark:border-slate-700 space-y-2">
+            <h4 className="font-bold text-slate-900 dark:text-slate-100">一、Resend API 发信配置流程</h4>
+            <ol className="list-decimal list-inside space-y-1.5">
+              <li>登录 Resend 控制台 → <b>Domains</b> 添加您的发信域名，按提示在 DNS 解析后台添加 TXT (SPF) 与 CNAME (DKIM) 记录，等待状态变为 Verified。</li>
+              <li>进入左侧 <b>API Keys</b> → 点击 <b>Create API Key</b>，选择对应域名并开启 Sending access，立即复制生成的 <code>re_xxx</code> 密钥。</li>
+              <li>在 <b>Cloudflare Pages → Settings → Variables and Secrets</b> 添加：
+                <div className="mt-1 rounded-xl bg-slate-950 p-2.5 font-mono text-[11px] text-emerald-200 space-y-0.5">
+                  <div>MAIL_PROVIDER=resend</div>
+                  <div>RESEND_API_KEY=re_xxxxxxxxx</div>
+                  <div>MAIL_SENDER=service@你的已验证域名</div>
+                </div>
+              </li>
+              <li>保存并触发一次重新部署；即可用于注册验证码、订单邮件提醒及站长写信外发（测试投递请点击发信区测试按钮）。</li>
+            </ol>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/70 dark:border-slate-700 space-y-2">
+            <h4 className="font-bold text-slate-900 dark:text-slate-100">二、Resend API 收信（Receiving + Webhook）配置流程</h4>
+            <ol className="list-decimal list-inside space-y-1.5">
+              <li>在 Resend 控制台打开目标域名详情，开启 <b>Receiving（邮件接收）</b> 开关，并按界面提示在 DNS 后台增加对应的 <b>MX 记录</b>（建议用单独子域或专用收件域）。</li>
+              <li>进入 Resend <b>Webhooks</b> → <b>Add Webhook</b>：
+                <ul className="list-disc list-inside pl-4 mt-1 space-y-1 text-slate-500 dark:text-slate-400">
+                  <li>Endpoint URL 填写本站服务端回调：<code>https://你的站点域名/api/webhook</code>（也兼容 <code>/api/mail/webhook</code>）。</li>
+                  <li>勾选监听事件：<code>email.received</code>。</li>
+                </ul>
+              </li>
+              <li>创建后复制 Signing Secret（<code>whsec_xxx</code>），在 Cloudflare Pages Secrets 新增 <code>RESEND_WEBHOOK_SECRET</code> 并重新部署。</li>
+              <li>来信流程：外部邮件到达 MX → Resend 推送 <code>email.received</code> 至 <code>/api/webhook</code> → 服务端验签通过后调用 Resend Receiving API 拉取完整正文 → 存入 D1（<code>DB</code>）收件箱（仅转发到个人邮箱不会写入本站 D1）。</li>
+            </ol>
+          </div>
+        </div>
+      </section>
+
+      {/* Standalone Section 10: Alipay Config & Usage Guide */}
+      <section className="rounded-3xl border border-sky-200/80 bg-white p-6 shadow-sm dark:border-sky-900/50 dark:bg-slate-900 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
+          <h3 className="text-sm font-bold text-sky-700 dark:text-sky-300 flex items-center gap-2">
+            <QrCode className="w-5 h-5 text-sky-500" />
+            <span>支付宝（Alipay）接入配置、密钥与扫码/网页收银使用说明</span>
+          </h3>
+          <span className="rounded-full bg-sky-50 px-2.5 py-0.5 text-[10px] font-semibold text-sky-600 dark:bg-sky-950/50 dark:text-sky-300">
+            独立专项指南 · 与商业区说明分离
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs leading-relaxed text-slate-600 dark:text-slate-300">
+          <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/70 dark:border-slate-700 space-y-2">
+            <h4 className="font-bold text-slate-900 dark:text-slate-100">一、支付宝开放平台产品签约与密钥准备</h4>
+            <ol className="list-decimal list-inside space-y-1.5">
+              <li>登录支付宝开放平台创建网页&移动应用并完成上线审核；在「产品绑定/能力列表」按需签约：
+                <ul className="list-disc list-inside pl-4 mt-1 text-slate-500 dark:text-slate-400">
+                  <li><b>当面付</b>：支持服务端直出支付宝官方扫码收款码（<code>alipay.trade.precreate</code>）。</li>
+                  <li><b>电脑网站支付 & 手机网站支付</b>：用于 PC 网页收银台跳转及内嵌扫码（即使未开通当面付，系统也可自动生成手机收银台扫码二维码 + 官方网页收银台）。</li>
+                </ul>
+              </li>
+              <li>进入「开发设置 → 接口加签方式（RSA2 / 密钥）」，使用支付宝密钥工具生成 PKCS#8（推荐）或 PKCS#1 RSA2048 密钥对；将<b>应用公钥</b>上传到支付宝控制台后，复制控制台提供的<b>支付宝公钥</b>。</li>
+              <li>填写应用网关与授权回调/异步通知地址：<code>https://你的站点域名/api/payments/webhook/alipay</code>。</li>
+            </ol>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/70 dark:border-slate-700 space-y-2">
+            <h4 className="font-bold text-slate-900 dark:text-slate-100">二、Cloudflare Secrets 变量与使用排查</h4>
+            <div className="rounded-xl bg-slate-950 p-3 font-mono text-[11px] text-sky-200 space-y-1">
+              <div>ALIPAY_APP_ID=你的应用APPID</div>
+              <div>ALIPAY_PRIVATE_KEY=-----BEGIN PRIVATE KEY-----...</div>
+              <div>ALIPAY_PUBLIC_KEY=-----BEGIN PUBLIC KEY-----...（注意是支付宝公钥，非应用公钥）</div>
+              <div>ALIPAY_PID=2088...（可选，商户PID）</div>
+              <div>ALIPAY_NOTIFY_URL=https://你的域名/api/payments/webhook/alipay（可选，默认自动拼接当前域名）</div>
+              <div>ALIPAY_GATEWAY=https://openapi.alipay.com/gateway.do（沙箱测试改用沙箱网关）</div>
+            </div>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+              <b>使用流程与常见排查：</b>用户以普通账号下单后，系统立即弹出收款二维码并附带「前往支付宝网页收银台付款」及「官方内嵌扫码收银台」切换。若二维码未出或提示私钥错误，请检查：① 私钥切勿混入引号或公钥内容（支持 PKCS#8 / PKCS#1 及字面量 <code>\n</code>）；② <code>ALIPAY_PUBLIC_KEY</code> 必须填平台换取的“支付宝公钥”；③ 沙箱与正式网关的 APPID 及密钥不能混用。付款后系统会通过异步回调验签及「我已完成支付，立即核验到账状态」自动更新订单。
+            </p>
+          </div>
+        </div>
+      </section>
     </div>
   );
 };

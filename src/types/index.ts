@@ -65,6 +65,7 @@ export interface Photo {
   folderName?: string;
   width?: number;
   height?: number;
+  fileSize?: number;
   description?: string;
   createdAt: number;
   updatedAt: number;
@@ -256,6 +257,7 @@ export interface SystemSettings {
   emailRegistrationOnly: boolean;
   allowRegistration: boolean;
   allowUserMediaManagement?: boolean;
+  allowPublicSitesAccess?: boolean;
   totalCapacityBytes: number;
   usedCapacityBytes: number;
   storageConfig: StorageConfig;
@@ -264,7 +266,9 @@ export interface SystemSettings {
   globalTheme: GlobalThemeMode; // 'modern' or 'retro'
   deviceView: DeviceViewMode; // 'responsive' or 'mobile'
   timezone?: string; // Timezone setting, e.g. 'Asia/Shanghai', 'UTC', 'America/New_York'
-  siteLayout?: 'airy' | 'compact' | 'editorial' | 'sidebar' | 'mobile-first';
+  fontFamily?: 'default' | 'kaiti' | 'youyuan' | 'qinzhuanshu' | 'custom';
+  customFontName?: string;
+  customFontUrl?: string;
   uploadedThemeName?: string;
 }
 

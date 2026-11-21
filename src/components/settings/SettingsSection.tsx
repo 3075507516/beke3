@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
 import { SafeImage } from '../common/SafeImage';
-import { loadLocalStorage, saveLocalStorage } from '../../utils/storage';
+import { loadLocalStorage, saveLocalStorage, saveFileToIndexedDB } from '../../utils/storage';
 import {
   Settings,
   Palette,
@@ -28,6 +28,8 @@ import {
   Calendar as CalendarIcon,
   Languages,
   Clock,
+  Type,
+  Upload,
 } from 'lucide-react';
 import { GlobalThemeMode } from '../../types';
 import { translateInline } from '../../utils/i18n';
@@ -803,6 +805,18 @@ export const SettingsSection: React.FC = () => {
               </div>
               <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/70 dark:border-slate-700 flex items-start justify-between gap-4">
                 <div>
+                  <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100">向非管理员开放「网站与图床中心」浏览权限</h4>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">默认关闭仅管理员可见；打开后非管理员（注册用户及未开启隐私锁时的访客）均可进入网站与图床中心浏览与导出书签（新增/删除与导入仍仅限管理员）。</p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={Boolean(systemSettings.allowPublicSitesAccess)}
+                  onChange={e => updateSystemSettings({ allowPublicSitesAccess: e.target.checked })}
+                  className="w-5 h-5 text-sky-500 rounded focus:ring-sky-500 shrink-0 cursor-pointer"
+                />
+              </div>
+              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/70 dark:border-slate-700 flex items-start justify-between gap-4">
+                <div>
                   <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100">
                     仅限邮箱注册 (强制邮箱身份验证)
                   </h4>
@@ -1397,19 +1411,132 @@ export const SettingsSection: React.FC = () => {
         </div>
       </div>
 
-      {/* SECTION 7: 底部时尚布局切换与上传并应用主题 JSON */}
-      <section className={`rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900 p-5 space-y-4`}>
-        <div className="flex items-center justify-between gap-3"><h3 className="text-sm font-bold">{tx('时尚布局切换')}</h3><span className="text-[10px] text-slate-500">{tx('五种布局会同步保存，并自动适配手机宽度')}</span></div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">{[
-          ['airy','轻盈留白'],['compact','紧凑效率'],['editorial','杂志编辑'],['sidebar','宽屏工作台'],['mobile-first','手机优先']
-        ].map(([id,label])=><button key={id} type="button" onClick={()=>updateSystemSettings({siteLayout:id as any})} className={`rounded-xl border px-3 py-3 text-xs font-semibold transition ${ (systemSettings.siteLayout||'airy')===id ? 'border-sky-500 bg-sky-50 text-sky-700 dark:bg-sky-950/30 dark:text-sky-300':'border-slate-200 dark:border-slate-700'}`}>{tx(label)}</button>)}</div>
-      </section>
-
+      {/* SECTION 7: 上传并应用主题 JSON */}
       <section className={`rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900 p-5 space-y-3`}>
         <h3 className="text-sm font-bold">{tx('上传并应用主题 JSON')}</h3><p className="text-xs text-slate-500">{tx('导入主题文件后会应用颜色、背景与卡片透明度，并随设置同步。')}</p>
         <input aria-label={tx('选择主题 JSON 文件')} type="file" accept="application/json,.json" className="block w-full text-xs" onChange={async e=>{const file=e.target.files?.[0];if(!file)return;try{if(file.size>128*1024)throw new Error('主题文件不能超过 128 KiB');const theme=JSON.parse(await file.text());if(!/^#[0-9a-f]{6}$/i.test(theme.themeColor||'')||!/^#[0-9a-f]{6}$/i.test(theme.background||''))throw new Error('主题 JSON 必须包含 themeColor 和 background 两个 #RRGGBB 颜色');updateSystemSettings({themeColor:theme.themeColor,customPaletteBg:theme.background,transparentCards:Boolean(theme.transparentCards),uploadedThemeName:String(theme.name||file.name).slice(0,80)});showToast(tx('主题已导入并保存'),'success');}catch(error:any){showToast(error.message||tx('主题导入失败'),'error');}e.currentTarget.value='';}}/>
         <button type="button" onClick={()=>toggleSection('themeHelp')} aria-expanded={!collapsedSections.themeHelp} className="flex w-full items-center justify-between rounded-xl bg-slate-50 p-3 text-left text-xs font-semibold dark:bg-slate-800">{tx('主题制作与使用说明')} {collapsedSections.themeHelp?<ChevronDown className="h-4 w-4"/>:<ChevronUp className="h-4 w-4"/>}</button>
         {!collapsedSections.themeHelp&&<div className="rounded-xl border border-slate-200 p-4 text-xs leading-relaxed dark:border-slate-700"><p>{tx('制作 UTF-8 JSON 文件，顶层填写 name、themeColor、background、transparentCards。颜色使用六位十六进制，例如 #2563EB。')}</p><pre className="mt-2 overflow-x-auto rounded-lg bg-slate-950 p-3 text-emerald-200">{`{\n  "name": "我的主题",\n  "themeColor": "#2563EB",\n  "background": "#F1F5F9",\n  "transparentCards": true\n}`}</pre><p className="mt-2">{tx('选择 JSON 后立即应用；保存的主题设置会与站点内容一起写入 D1。此导入器不会执行 CSS 或脚本，主题安全地使用颜色与透明度选项。')}</p></div>}
+      </section>
+
+      {/* SECTION 8: 全站字体切换与本地字体上传 */}
+      <section className={`rounded-3xl border shadow-sm p-5 space-y-4 ${
+        systemSettings.transparentCards
+          ? 'bg-white/70 dark:bg-slate-900/70 backdrop-blur-md border-white/20'
+          : 'bg-white dark:bg-slate-900 border-slate-200/80 dark:border-slate-800'
+      }`}>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Type className="w-5 h-5 text-sky-500" />
+            <h3 className="text-sm font-bold">{tx('全站字体切换与本地字体上传')}</h3>
+          </div>
+          <span className="text-[11px] text-slate-500">
+            {tx('支持楷书、幼圆、秦篆及本地字体文件 (.ttf / .otf / .woff / .woff2) 立即生效')}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5">
+          {[
+            { id: 'default', label: '系统默认', desc: '现代无衬线标准体' },
+            { id: 'kaiti', label: '楷书', desc: 'KaiTi / 标楷手写韵味' },
+            { id: 'youyuan', label: '幼圆', desc: 'YouYuan / 圆润亲和' },
+            { id: 'qinzhuanshu', label: '秦篆', desc: '古拙小篆书风（可配本地字体）' },
+            ...(systemSettings.customFontName
+              ? [{ id: 'custom', label: '已上传字体', desc: systemSettings.customFontName }]
+              : []),
+          ].map(opt => {
+            const active = (systemSettings.fontFamily || 'default') === opt.id;
+            return (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => updateSystemSettings({ fontFamily: opt.id as any })}
+                className={`rounded-2xl border p-3 text-left transition ${
+                  active
+                    ? 'border-sky-500 bg-sky-50 text-sky-700 dark:bg-sky-950/40 dark:text-sky-300 shadow-xs'
+                    : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800'
+                }`}
+              >
+                <div className="text-xs font-bold">{tx(opt.label)}</div>
+                <div className="text-[10px] text-slate-400 mt-0.5 truncate">{opt.desc}</div>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200/70 dark:border-slate-700 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h4 className="text-xs font-bold text-slate-800 dark:text-slate-100">
+                本地字体文件上传切换
+              </h4>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                上传您喜欢的楷书、幼圆、秦篆（如方正小篆体 .ttf / .otf / .woff2）文件，将保存于本机并尝试同步至云端文件库。
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-sky-500 hover:bg-sky-600 text-white text-xs font-semibold cursor-pointer shadow-xs transition">
+                <Upload className="w-3.5 h-3.5" />
+                <span>选择本地字体上传</span>
+                <input
+                  type="file"
+                  accept=".ttf,.otf,.woff,.woff2,.ttc,font/ttf,font/otf,font/woff,font/woff2"
+                  className="hidden"
+                  onChange={async e => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    try {
+                      if (file.size > 25 * 1024 * 1024) {
+                        throw new Error('字体文件不能超过 25 MB');
+                      }
+                      await saveFileToIndexedDB('idb_file_fox3_custom_font', file);
+                      let remoteUrl = '';
+                      try {
+                        const res = await uploadFile(file);
+                        if (res?.url && !res.url.startsWith('idb_file_')) {
+                          remoteUrl = res.url;
+                        }
+                      } catch {}
+                      updateSystemSettings({
+                        fontFamily: 'custom',
+                        customFontName: file.name,
+                        customFontUrl: remoteUrl,
+                      });
+                      showToast(`已切换为本地上传字体：${file.name}`, 'success');
+                    } catch (err: any) {
+                      showToast(err?.message || '字体加载失败', 'error');
+                    }
+                    e.currentTarget.value = '';
+                  }}
+                />
+              </label>
+              {systemSettings.customFontName && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await saveFileToIndexedDB('idb_file_fox3_custom_font', '');
+                    updateSystemSettings({
+                      fontFamily: 'default',
+                      customFontName: '',
+                      customFontUrl: '',
+                    });
+                    showToast('已恢复默认字体设置', 'info');
+                  }}
+                  className="px-3 py-2 rounded-xl border border-rose-200 text-rose-600 hover:bg-rose-50 text-xs font-medium dark:border-rose-900 dark:hover:bg-rose-950/30"
+                >
+                  清除自定义字体
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 p-4 space-y-1">
+            <div className="text-[10px] text-slate-400">当前全站字体即时预览效果：</div>
+            <p className="text-base sm:text-lg font-medium text-slate-800 dark:text-slate-100 leading-relaxed">
+              天地玄黄，宇宙洪荒。楷书端正，幼圆清秀，秦篆古朴。fox3 Blog Typography 123456
+            </p>
+          </div>
+        </div>
       </section>
     </div>
   );

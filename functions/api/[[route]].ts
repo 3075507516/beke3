@@ -1413,7 +1413,7 @@ export const onRequest = async (context: any) => {
         updatedAt INTEGER NOT NULL
       )`).run();
       const publicFields = ['posts', 'books', 'photos', 'photoFolders', 'media', 'products', 'websites', 'systemSettings', 'themeMode'];
-      const publicSettings = ['siteName', 'headerTagline', 'shopCategories', 'themeColor', 'customPaletteBg', 'fullBackgroundUrl', 'avatarUrl', 'heroIntroImage', 'heroBadge', 'heroTitle', 'heroSubtitle', 'transparentCards', 'bottomButtonsEnabled', 'hideNonBlogForGuests', 'allowUserMediaManagement', 'globalTheme', 'deviceView', 'timezone'];
+      const publicSettings = ['siteName', 'headerTagline', 'shopCategories', 'themeColor', 'customPaletteBg', 'fullBackgroundUrl', 'avatarUrl', 'heroIntroImage', 'heroBadge', 'heroTitle', 'heroSubtitle', 'transparentCards', 'bottomButtonsEnabled', 'hideNonBlogForGuests', 'allowUserMediaManagement', 'allowPublicSitesAccess', 'globalTheme', 'deviceView', 'timezone', 'fontFamily', 'customFontName', 'customFontUrl', 'uploadedThemeName'];
       const cleanRecords = (value: unknown, kind: string): any[] => {
         if (!Array.isArray(value)) return [];
         const adminUsername = String(env.ADMIN_USERNAME || 'fox').trim().toLowerCase();
@@ -1430,7 +1430,7 @@ export const onRequest = async (context: any) => {
           const allowed: Record<string, string[]> = {
             posts: ['id','title','summary','content','category','tags','cover','author','views','likes','createdAt','updatedAt'],
             books: ['id','title','author','format','cover','description','fileSize','fileUrl','displayFilename','createdAt','updatedAt'],
-            photos: ['id','title','url','originalFilename','thumbnail','category','folderId','folderName','width','height','description','createdAt','updatedAt'],
+            photos: ['id','title','url','originalFilename','thumbnail','category','folderId','folderName','width','height','fileSize','description','createdAt','updatedAt'],
             photoFolders: ['id','name','createdAt'],
             media: ['id','type','title','artist','src','cover','duration','fileSize','uploadedAt','createdAt','updatedAt'],
             products: ['id','name','description','price','images','category','stock','tags','showcaseId','createdAt','updatedAt'],
@@ -1580,7 +1580,7 @@ export const onRequest = async (context: any) => {
       if (data && typeof data === 'object') {
         for (const key of ['posts', 'books', 'photos', 'photoFolders', 'media', 'products', 'websites', 'themeMode', 'webDavBackups', 'webDavMeta', 'webDavConfig']) delete data[key];
         if (data.systemSettings && typeof data.systemSettings === 'object') {
-          for (const key of ['siteName','headerTagline','shopCategories','themeColor','customPaletteBg','fullBackgroundUrl','avatarUrl','heroIntroImage','heroBadge','heroTitle','heroSubtitle','transparentCards','bottomButtonsEnabled','hideNonBlogForGuests','globalTheme','deviceView','timezone']) delete data.systemSettings[key];
+          for (const key of ['siteName','headerTagline','shopCategories','themeColor','customPaletteBg','fullBackgroundUrl','avatarUrl','heroIntroImage','heroBadge','heroTitle','heroSubtitle','transparentCards','bottomButtonsEnabled','hideNonBlogForGuests','allowPublicSitesAccess','globalTheme','deviceView','timezone','fontFamily','customFontName','customFontUrl']) delete data.systemSettings[key];
         }
       }
       return new Response(JSON.stringify({
@@ -1599,7 +1599,7 @@ export const onRequest = async (context: any) => {
         // Keep the legacy authenticated/private channel separate from canonical public site content and WebDAV.
         for (const key of ['posts', 'books', 'photos', 'photoFolders', 'media', 'products', 'websites', 'themeMode', 'webDavBackups', 'webDavMeta', 'webDavConfig']) delete payload[key];
         if (payload.systemSettings && typeof payload.systemSettings === 'object') {
-          for (const key of ['siteName','headerTagline','shopCategories','themeColor','customPaletteBg','fullBackgroundUrl','avatarUrl','heroIntroImage','heroBadge','heroTitle','heroSubtitle','transparentCards','bottomButtonsEnabled','hideNonBlogForGuests','globalTheme','deviceView','timezone']) delete payload.systemSettings[key];
+          for (const key of ['siteName','headerTagline','shopCategories','themeColor','customPaletteBg','fullBackgroundUrl','avatarUrl','heroIntroImage','heroBadge','heroTitle','heroSubtitle','transparentCards','bottomButtonsEnabled','hideNonBlogForGuests','allowPublicSitesAccess','globalTheme','deviceView','timezone','fontFamily','customFontName','customFontUrl']) delete payload.systemSettings[key];
         }
         const stringified = JSON.stringify(payload);
         let syncedToCloud = false;

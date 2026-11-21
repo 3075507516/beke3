@@ -21,6 +21,8 @@ import {
   MoveRight,
   FolderOpen,
   Maximize2,
+  Eye,
+  Loader2,
 } from 'lucide-react';
 import JSZip from 'jszip';
 import { ZoomableImage } from './ZoomableImage';
@@ -48,6 +50,8 @@ export const GallerySection: React.FC = () => {
 
   const [selectedPhoto, setSelectedPhoto] = useState<Photo | null>(null);
   const [previewDimensions, setPreviewDimensions] = useState<{ id: string; width: number; height: number } | null>(null);
+  const [viewingOriginal, setViewingOriginal] = useState(false);
+  const [loadingOriginal, setLoadingOriginal] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [activeFolderId, setActiveFolderId] = useState<string>('all');
   const [newFolderName, setNewFolderName] = useState<string>('');
@@ -59,20 +63,40 @@ export const GallerySection: React.FC = () => {
   const canManagePhoto = (photo: Photo) => currentUser?.role === 'admin' || (Boolean(systemSettings.allowUserMediaManagement) && Boolean(currentUser) && ((Boolean(photo.ownerId) && photo.ownerId === currentUser?.id) || (!photo.ownerId && Boolean(photo.ownerUsername) && photo.ownerUsername === currentUser?.username)));
   const canUploadPhotos = currentUser?.role === 'admin' || (Boolean(currentUser) && Boolean(systemSettings.allowUserMediaManagement));
 
+  const getDataSaverSrc = (photo: Photo): string => {
+    if (photo.thumbnail && photo.thumbnail !== photo.url) return photo.thumbnail;
+    if (/images\.unsplash\.com/i.test(photo.url)) {
+      try {
+        const parsed = new URL(photo.url);
+        parsed.searchParams.set('w', '480');
+        parsed.searchParams.set('q', '55');
+        parsed.searchParams.set('auto', 'format');
+        return parsed.toString();
+      } catch {}
+    }
+    return photo.url;
+  };
+
+  const openPhotoModal = (photo: Photo) => {
+    setViewingOriginal(false);
+    setLoadingOriginal(false);
+    setSelectedPhoto(photo);
+  };
+
   const currentPhotoIndex = selectedPhoto ? photos.findIndex(p => p.id === selectedPhoto.id) : -1;
 
   const handlePrevPhoto = (e?: React.MouseEvent) => {
     e?.stopPropagation();
     if (photos.length === 0 || currentPhotoIndex === -1) return;
     const prevIdx = (currentPhotoIndex - 1 + photos.length) % photos.length;
-    setSelectedPhoto(photos[prevIdx]);
+    openPhotoModal(photos[prevIdx]);
   };
 
   const handleNextPhoto = (e?: React.MouseEvent) => {
     e?.stopPropagation();
     if (photos.length === 0 || currentPhotoIndex === -1) return;
     const nextIdx = (currentPhotoIndex + 1) % photos.length;
-    setSelectedPhoto(photos[nextIdx]);
+    openPhotoModal(photos[nextIdx]);
   };
 
   const filteredPhotos = photos.filter(p => {
@@ -126,18 +150,20 @@ export const GallerySection: React.FC = () => {
         const bitmap = await createImageBitmap(file);
         width = bitmap.width;
         height = bitmap.height;
-        const ratio = Math.min(1, 480 / Math.max(bitmap.width, bitmap.height));
+        const ratio = Math.min(1, 360 / Math.max(bitmap.width, bitmap.height));
         const canvas = document.createElement('canvas');
         canvas.width = Math.max(1, Math.round(bitmap.width * ratio));
         canvas.height = Math.max(1, Math.round(bitmap.height * ratio));
         const context = canvas.getContext('2d');
         context?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
         bitmap.close();
-        const thumbBlob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/webp', 0.68));
+        const thumbBlob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/webp', 0.55))
+          || await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.58));
         if (thumbBlob && thumbBlob.size < file.size) {
-          const thumbnailFile = new File([thumbBlob], `${file.name.replace(/\.[^/.]+$/, '')}-thumb.webp`, { type: thumbBlob.type || 'image/webp' });
+          const ext = thumbBlob.type.includes('webp') ? 'webp' : 'jpg';
+          const thumbnailFile = new File([thumbBlob], `${file.name.replace(/\.[^/.]+$/, '')}-thumb.${ext}`, { type: thumbBlob.type || 'image/webp' });
           const uploadedThumbnail = await uploadFile(thumbnailFile);
-          if (!uploaded.url.startsWith('idb_file_') && !uploadedThumbnail.url.startsWith('idb_file_')) thumbnail = uploadedThumbnail.url;
+          thumbnail = uploadedThumbnail.url;
         }
       } catch (error) {
         console.warn('Photo thumbnail/dimension processing unavailable; retaining original only:', error);
@@ -150,6 +176,7 @@ export const GallerySection: React.FC = () => {
         thumbnail,
         width,
         height,
+        fileSize: file.size,
         ownerId: currentUser?.id,
         ownerUsername: currentUser?.username,
         category: currentFolder ? currentFolder.name : '相册精选',
@@ -480,13 +507,14 @@ export const GallerySection: React.FC = () => {
       <div className={getLayoutClass()}>
         {filteredPhotos.map(photo => {
           const isSelected = selectedIds.includes(photo.id);
+          const listThumbSrc = getDataSaverSrc(photo);
 
           // Small list view
           if (currentViewMode === 'small') {
             return (
               <div
                 key={photo.id}
-                onClick={() => setSelectedPhoto(photo)}
+                onClick={() => openPhotoModal(photo)}
                 className={`p-3 rounded-2xl border shadow-sm flex items-center justify-between gap-4 cursor-pointer transition hover:shadow-md ${
                   isSelected ? 'ring-2 ring-rose-500' : ''
                 } ${
@@ -507,7 +535,7 @@ export const GallerySection: React.FC = () => {
                     )}
                   </button>
                   <div className="w-16 h-12 rounded-lg overflow-hidden shrink-0 bg-slate-100 dark:bg-slate-800">
-                    <SafeImage src={photo.thumbnail || photo.url} alt={photo.title} className="w-full h-full" imageClassName={listImageFitContain ? 'object-contain' : 'object-cover'} />
+                    <SafeImage src={listThumbSrc} alt={photo.title} className="w-full h-full" imageClassName={listImageFitContain ? 'object-contain' : 'object-cover'} />
                   </div>
                   <div className="min-w-0">
                     <h4 className="text-xs font-bold text-slate-800 dark:text-slate-100 truncate">
@@ -545,13 +573,13 @@ export const GallerySection: React.FC = () => {
           return (
             <div
               key={photo.id}
-              onClick={() => setSelectedPhoto(photo)}
+              onClick={() => openPhotoModal(photo)}
               className={`group relative cursor-pointer overflow-hidden rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-sm hover:shadow-xl transition-all duration-300 aspect-[4/3] ${
                 isSelected ? 'ring-4 ring-rose-500' : ''
               }`}
             >
               <SafeImage
-                src={photo.thumbnail || photo.url}
+                src={listThumbSrc}
                 alt={photo.title}
                 className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
               />
@@ -598,80 +626,134 @@ export const GallerySection: React.FC = () => {
         })}
       </div>
 
-      {/* Lightbox Modal with Next / Prev */}
-      {selectedPhoto && (
-        <div
-          onClick={() => setSelectedPhoto(null)}
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-md animate-in fade-in select-none"
-        >
-          {/* Top Controls */}
-          <div className="absolute top-6 right-6 flex items-center gap-3 z-50">
-            <span className="text-xs text-white/70 font-mono">
-              {currentPhotoIndex + 1} / {photos.length}
-            </span>
-            <button
-              onClick={e => handleDownloadSingle(selectedPhoto, e)}
-              className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition"
-              title="下载"
-            >
-              <Download className="w-5 h-5" />
-            </button>
-            <button
-              onClick={() => setSelectedPhoto(null)}
-              className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition"
-            >
-              <X className="w-6 h-6" />
-            </button>
-          </div>
-
-          {/* Left / Prev Arrow */}
-          {photos.length > 1 && (
-            <button
-              onClick={handlePrevPhoto}
-              className="absolute left-4 sm:left-8 top-1/2 -translate-y-1/2 z-50 p-3 rounded-full bg-black/50 hover:bg-black/80 text-white border border-white/20 backdrop-blur-md transition hover:scale-110"
-              title="上一张 (Left Arrow)"
-            >
-              <ChevronLeft className="w-6 h-6" />
-            </button>
-          )}
-
-          {/* Center Image Container */}
+      {/* Lightbox Modal with Data-Saver Preview + View Original Toggle */}
+      {selectedPhoto && (() => {
+        const dataSaverSrc = getDataSaverSrc(selectedPhoto);
+        const hasDistinctOriginal = Boolean(dataSaverSrc && selectedPhoto.url && dataSaverSrc !== selectedPhoto.url);
+        const activePreviewSrc = viewingOriginal || !hasDistinctOriginal ? selectedPhoto.url : dataSaverSrc;
+        const sizeBadge = selectedPhoto.fileSize ? ` (${(selectedPhoto.fileSize / (1024 * 1024)).toFixed(2)} MB)` : '';
+        return (
           <div
-            onClick={e => e.stopPropagation()}
-            className="max-w-5xl max-h-[85vh] overflow-hidden rounded-2xl flex flex-col items-center justify-center cursor-default"
+            onClick={() => setSelectedPhoto(null)}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-md animate-in fade-in select-none"
           >
-            <ZoomableImage
-              key={selectedPhoto.id}
-              src={selectedPhoto.url}
-              alt={selectedPhoto.title}
-              locale={locale}
-              onNaturalSize={(width, height) => {
-                setPreviewDimensions({ id: selectedPhoto.id, width, height });
-                if ((!selectedPhoto.width || !selectedPhoto.height) && width > 0 && height > 0) {
-                  setPhotos(previous => previous.map(photo => photo.id === selectedPhoto.id ? { ...photo, width, height } : photo));
-                }
-              }}
-            />
-            <div className="mt-4 text-center text-white space-y-1">
-              <h3 className="text-base font-bold font-serif-sc">{selectedPhoto.title}</h3>
-              <p className="text-xs text-white/70">
-                {selectedPhoto.category}{(selectedPhoto.width && selectedPhoto.height) || previewDimensions?.id === selectedPhoto.id ? ` · ${(selectedPhoto.width || previewDimensions?.width)?.toLocaleString()} × ${(selectedPhoto.height || previewDimensions?.height)?.toLocaleString()} px` : ''} • {new Date(selectedPhoto.createdAt).toLocaleDateString()}
-              </p>
+            {/* Top Controls */}
+            <div className="absolute top-4 sm:top-6 right-4 sm:right-6 left-4 sm:left-auto flex flex-wrap items-center justify-end gap-2 sm:gap-3 z-50">
+              {hasDistinctOriginal && (
+                <button
+                  type="button"
+                  onClick={e => {
+                    e.stopPropagation();
+                    if (!viewingOriginal) {
+                      setLoadingOriginal(true);
+                      setViewingOriginal(true);
+                    } else {
+                      setLoadingOriginal(false);
+                      setViewingOriginal(false);
+                    }
+                  }}
+                  className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-semibold transition shadow-sm ${
+                    viewingOriginal
+                      ? 'bg-emerald-500/90 hover:bg-emerald-600 text-white'
+                      : 'bg-sky-500 hover:bg-sky-600 text-white'
+                  }`}
+                >
+                  {loadingOriginal ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Eye className="w-3.5 h-3.5" />
+                  )}
+                  <span>
+                    {loadingOriginal
+                      ? '正在加载原图…'
+                      : viewingOriginal
+                        ? '原图已加载 · 切换省流预览'
+                        : `查看原图${sizeBadge}`}
+                  </span>
+                </button>
+              )}
+              <span className="text-xs text-white/70 font-mono">
+                {currentPhotoIndex + 1} / {photos.length}
+              </span>
+              <button
+                onClick={e => handleDownloadSingle(selectedPhoto, e)}
+                className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition"
+                title={tx('下载原图')}
+              >
+                <Download className="w-5 h-5" />
+              </button>
+              <button
+                onClick={() => setSelectedPhoto(null)}
+                className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition"
+              >
+                <X className="w-6 h-6" />
+              </button>
             </div>
-          </div>
 
-          {/* Right / Next Arrow */}
-          {photos.length > 1 && (
-            <button
-              onClick={handleNextPhoto}
-              className="absolute right-4 sm:right-8 top-1/2 -translate-y-1/2 z-50 p-3 rounded-full bg-black/50 hover:bg-black/80 text-white border border-white/20 backdrop-blur-md transition hover:scale-110"
-              title="下一张 (Right Arrow)"
+            {/* Left / Prev Arrow */}
+            {photos.length > 1 && (
+              <button
+                onClick={handlePrevPhoto}
+                className="absolute left-4 sm:left-8 top-1/2 -translate-y-1/2 z-50 p-3 rounded-full bg-black/50 hover:bg-black/80 text-white border border-white/20 backdrop-blur-md transition hover:scale-110"
+                title="上一张 (Left Arrow)"
+              >
+                <ChevronLeft className="w-6 h-6" />
+              </button>
+            )}
+
+            {/* Center Image Container */}
+            <div
+              onClick={e => e.stopPropagation()}
+              className="max-w-5xl max-h-[85vh] overflow-hidden rounded-2xl flex flex-col items-center justify-center cursor-default"
             >
-              <ChevronRight className="w-6 h-6" />
-            </button>
-          )}
-        </div>
-      )}
+              <ZoomableImage
+                key={selectedPhoto.id}
+                src={activePreviewSrc}
+                alt={selectedPhoto.title}
+                locale={locale}
+                onNaturalSize={(width, height) => {
+                  setLoadingOriginal(false);
+                  if (viewingOriginal || !hasDistinctOriginal) {
+                    setPreviewDimensions({ id: selectedPhoto.id, width, height });
+                    if ((!selectedPhoto.width || !selectedPhoto.height) && width > 0 && height > 0) {
+                      setPhotos(previous => previous.map(photo => photo.id === selectedPhoto.id ? { ...photo, width, height } : photo));
+                    }
+                  }
+                }}
+              />
+              <div className="mt-3 text-center text-white space-y-1">
+                <div className="flex flex-wrap items-center justify-center gap-2">
+                  <h3 className="text-base font-bold font-serif-sc">{selectedPhoto.title}</h3>
+                  {hasDistinctOriginal && !viewingOriginal && (
+                    <span className="rounded-full bg-white/15 px-2 py-0.5 text-[10px] text-sky-200">
+                      省流极速预览中
+                    </span>
+                  )}
+                  {hasDistinctOriginal && viewingOriginal && !loadingOriginal && (
+                    <span className="rounded-full bg-emerald-500/25 px-2 py-0.5 text-[10px] text-emerald-200">
+                      已显示 100% 原图
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-white/70">
+                  {selectedPhoto.category}{(selectedPhoto.width && selectedPhoto.height) || previewDimensions?.id === selectedPhoto.id ? ` · ${(selectedPhoto.width || previewDimensions?.width)?.toLocaleString()} × ${(selectedPhoto.height || previewDimensions?.height)?.toLocaleString()} px` : ''} • {new Date(selectedPhoto.createdAt).toLocaleDateString()}
+                </p>
+              </div>
+            </div>
+
+            {/* Right / Next Arrow */}
+            {photos.length > 1 && (
+              <button
+                onClick={handleNextPhoto}
+                className="absolute right-4 sm:right-8 top-1/2 -translate-y-1/2 z-50 p-3 rounded-full bg-black/50 hover:bg-black/80 text-white border border-white/20 backdrop-blur-md transition hover:scale-110"
+                title="下一张 (Right Arrow)"
+              >
+                <ChevronRight className="w-6 h-6" />
+              </button>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 };

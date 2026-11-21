@@ -7,17 +7,38 @@
     --primary-light: #ffe4e6;
     --bg-surface: #ffffff;
     --bg-page: #f8fafc;
+    --fox3-font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   }
 }
 
+html, body {
+  touch-action: pan-x pan-y pinch-zoom;
+}
+
 body {
-  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-family: var(--fox3-font-family);
   margin: 0;
   padding: 0;
 }
 
 .font-serif-sc {
   font-family: 'Noto Serif SC', serif;
+}
+
+html[data-fox3-font="custom-active"] body,
+html[data-fox3-font="custom-active"] button,
+html[data-fox3-font="custom-active"] input,
+html[data-fox3-font="custom-active"] textarea,
+html[data-fox3-font="custom-active"] select,
+html[data-fox3-font="custom-active"] .font-serif-sc,
+html[data-fox3-font="custom-active"] [class*="theme-"] {
+  font-family: var(--fox3-font-family) !important;
+}
+
+html[data-fox3-font="custom-active"] code,
+html[data-fox3-font="custom-active"] pre,
+html[data-fox3-font="custom-active"] .font-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace !important;
 }
 
 /* Custom scrollbar */
